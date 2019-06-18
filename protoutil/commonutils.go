@@ -294,7 +294,10 @@ func IsConfigBlock(block *cb.Block) bool {
 	if err != nil {
 		return false
 	}
+	return IsConfigTransaction(envelope)
+}
 
+func IsConfigTransaction(envelope *cb.Envelope) bool {
 	payload, err := GetPayload(envelope)
 	if err != nil {
 		return false
