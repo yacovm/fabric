@@ -7,13 +7,19 @@ SPDX-License-Identifier: Apache-2.0
 package smartbft
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/pem"
 
+	"github.com/SmartBFT-Go/consensus/pkg/types"
+	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
 	"github.com/hyperledger/fabric/orderer/consensus"
 	"github.com/hyperledger/fabric/protos/common"
+	"github.com/hyperledger/fabric/protos/msp"
+	"github.com/hyperledger/fabric/protoutil"
 	"github.com/pkg/errors"
 )
 
@@ -92,4 +98,71 @@ func lastConfigBlockFromSupport(support consensus.ConsenterSupport) (*common.Blo
 		return nil, err
 	}
 	return lastConfigBlock, nil
+}
+
+type RequestInspector struct {
+	ValidateIdentityStructure func(identity *msp.SerializedIdentity) error
+}
+
+func (ri *RequestInspector) RequestID(rawReq []byte) types.RequestInfo {
+	req, err := ri.unwrapReq(rawReq)
+	if err != nil {
+		return types.RequestInfo{}
+	}
+	reqInfo, err := ri.requestIDFromSigHeader(req.sigHdr)
+	if err != nil {
+		return types.RequestInfo{}
+	}
+	return reqInfo
+}
+
+type request struct {
+	sigHdr   *common.SignatureHeader
+	envelope *common.Envelope
+}
+
+func (ri *RequestInspector) requestIDFromSigHeader(sigHdr *common.SignatureHeader) (types.RequestInfo, error) {
+	sID := &msp.SerializedIdentity{}
+	if err := proto.Unmarshal(sigHdr.Creator, sigHdr); err != nil {
+		return types.RequestInfo{}, errors.Wrap(err, "identity isn't an MSP Identity")
+	}
+
+	if err := ri.ValidateIdentityStructure(sID); err != nil {
+		return types.RequestInfo{}, err
+	}
+
+	var preimage []byte
+	preimage = append(preimage, sigHdr.Nonce...)
+	preimage = append(preimage, sigHdr.Creator...)
+	txID := sha256.Sum256(preimage)
+	clientID := sha256.Sum256(sigHdr.Creator)
+	return types.RequestInfo{
+		ID:       hex.EncodeToString(txID[:]),
+		ClientID: hex.EncodeToString(clientID[:]),
+	}, nil
+}
+
+func (ri *RequestInspector) unwrapReq(req []byte) (*request, error) {
+	envelope, err := protoutil.UnmarshalEnvelope(req)
+	if err != nil {
+		return nil, err
+	}
+	payload := &common.Payload{}
+	if err := proto.Unmarshal(envelope.Payload, payload); err != nil {
+		return nil, errors.Wrap(err, "failed unmarshaling payload")
+	}
+
+	if payload.Header == nil {
+		return nil, errors.Errorf("no header in payload")
+	}
+
+	sigHdr := &common.SignatureHeader{}
+	if err := proto.Unmarshal(payload.Header.SignatureHeader, sigHdr); err != nil {
+		return nil, err
+	}
+
+	return &request{
+		sigHdr:   sigHdr,
+		envelope: envelope,
+	}, nil
 }
