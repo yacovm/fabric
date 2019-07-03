@@ -45,6 +45,7 @@ import (
 	"github.com/hyperledger/fabric/orderer/consensus"
 	"github.com/hyperledger/fabric/orderer/consensus/etcdraft"
 	"github.com/hyperledger/fabric/orderer/consensus/kafka"
+	"github.com/hyperledger/fabric/orderer/consensus/smartbft"
 	"github.com/hyperledger/fabric/orderer/consensus/solo"
 	cb "github.com/hyperledger/fabric/protos/common"
 	ab "github.com/hyperledger/fabric/protos/orderer"
@@ -56,7 +57,7 @@ import (
 
 var logger = flogging.MustGetLogger("orderer.common.server")
 
-//command line flags
+// command line flags
 var (
 	app = kingpin.New("orderer", "Hyperledger Fabric orderer node")
 
@@ -64,7 +65,10 @@ var (
 	_       = app.Command("benchmark", "Run orderer in benchmark mode")
 	version = app.Command("version", "Show version information")
 
-	clusterTypes = map[string]struct{}{"etcdraft": {}}
+	clusterTypes = map[string]struct{}{
+		"etcdraft": {},
+		"smartbft": {},
+	}
 )
 
 // Main is the entry point of orderer process
@@ -662,8 +666,22 @@ func initializeMultichannelRegistrar(
 	// Note, we pass a 'nil' channel here, we could pass a channel that
 	// closes if we wished to cleanup this routine on exit.
 	go kafkaMetrics.PollGoMetricsUntilStop(time.Minute, nil)
-	if isClusterType(bootstrapBlock) {
-		initializeEtcdraftConsenter(consenters, conf, lf, clusterDialer, bootstrapBlock, ri, srvConf, srv, registrar, metricsProvider)
+	consenterType := consensusType(genesisBlock)
+	if _, exists := clusterTypes[consenterType]; exists {
+		switch consenterType {
+		case "etcdraft":
+			{
+				initializeEtcdraftConsenter(consenters, conf, lf, clusterDialer, bootstrapBlock, ri, srvConf, srv, registrar, metricsProvider)
+			}
+		case "smartbft":
+			{
+				// TODO: Add full initialization with required parameters. Consider to abstract out common pieces of Etcd Raft and
+				// BFT Smart to reuse them.
+				consenters["smartbft"] = smartbft.New()
+			}
+		default:
+			logger.Panicf("Unknown cluster type consenter")
+		}
 	}
 	registrar.Initialize(consenters)
 	return registrar
@@ -767,14 +785,14 @@ func (mgr *caManager) updateTrustedRoots(
 	ordOrgMSPs := make(map[string]struct{})
 
 	if ac, ok := cm.ApplicationConfig(); ok {
-		//loop through app orgs and build map of MSPIDs
+		// loop through app orgs and build map of MSPIDs
 		for _, appOrg := range ac.Organizations() {
 			appOrgMSPs[appOrg.MSPID()] = struct{}{}
 		}
 	}
 
 	if ac, ok := cm.OrdererConfig(); ok {
-		//loop through orderer orgs and build map of MSPIDs
+		// loop through orderer orgs and build map of MSPIDs
 		for _, ordOrg := range ac.Organizations() {
 			ordOrgMSPs[ordOrg.MSPID()] = struct{}{}
 		}
@@ -782,7 +800,7 @@ func (mgr *caManager) updateTrustedRoots(
 
 	if cc, ok := cm.ConsortiumsConfig(); ok {
 		for _, consortium := range cc.Consortiums() {
-			//loop through consortium orgs and build map of MSPIDs
+			// loop through consortium orgs and build map of MSPIDs
 			for _, consortiumOrg := range consortium.Organizations() {
 				appOrgMSPs[consortiumOrg.MSPID()] = struct{}{}
 			}
