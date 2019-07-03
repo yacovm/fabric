@@ -118,6 +118,21 @@ func MinimalRaft() *Config {
 	return config
 }
 
+func BasicSmartBFT() *Config {
+	config := BasicSolo()
+	config.Consensus.Type = "smartbft"
+	config.Profiles = []*Profile{{
+		Name:     "SampleDevModeEtcdRaft",
+		Orderers: []string{"orderer"},
+	}, {
+		Name:          "TwoOrgsChannel",
+		Consortium:    "SampleConsortium",
+		Organizations: []string{"Org1", "Org2"},
+	}}
+	config.SystemChannel.Profile = "SampleDevModeEtcdRaft"
+	return config
+}
+
 func MultiChannelEtcdRaft() *Config {
 	config := BasicSolo()
 	config.Consensus.Type = "etcdraft"
