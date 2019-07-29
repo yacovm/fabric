@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"time"
 
-	consensus2 "github.com/SmartBFT-Go/consensus/pkg/consensus"
+	smartbft "github.com/SmartBFT-Go/consensus/pkg/consensus"
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/pkg/wal"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
@@ -43,7 +43,7 @@ type BlockPuller interface {
 type BFTChain struct {
 	SelfID           uint64
 	Logger           *flogging.FabricLogger
-	Consensus        *consensus2.Consensus
+	Consensus        *smartbft.Consensus
 	BlockPuller      BlockPuller
 	Comm             cluster.Communicator
 	SignerSerializer identity.SignerSerializer
@@ -184,7 +184,13 @@ func (c *BFTChain) Start() {
 		c.verifier.LastCommittedBlockHash = hex.EncodeToString(protoutil.BlockHeaderHash(lastBlock.Header))
 	}
 
-	c.Consensus = &consensus2.Consensus{
+	block := c.support.Block(c.support.Height() - 1)
+	latestMetadata, err := getViewMetadataFromBlock(block)
+	if err != nil {
+		c.Logger.Panicf("Failed extracting view metadata from ledger: %v", err)
+	}
+
+	c.Consensus = &smartbft.Consensus{
 		SelfID:       c.SelfID,
 		N:            clusterSize,
 		BatchSize:    1,
@@ -196,6 +202,7 @@ func (c *BFTChain) Start() {
 			Logger:           flogging.MustGetLogger("orderer.consensus.smartbft.signer"),
 			SignerSerializer: c.SignerSerializer,
 		},
+		Metadata: latestMetadata,
 		// TODO: Change WAL into regular one
 		WAL:         &wal.EphemeralWAL{},
 		Application: c,
