@@ -229,11 +229,14 @@ func makeBlockWithMetadata(sqnNum, lastConfigIndex uint64, viewMetadata *smartbf
 			Value: protoutil.MarshalOrPanic(&common.LastConfig{Index: lastConfigIndex}),
 		},
 	)
-	block.Metadata.Metadata[common.BlockMetadataIndex_ORDERER] = protoutil.MarshalOrPanic(
-		&common.Metadata{
-			Value: protoutil.MarshalOrPanic(viewMetadata),
-		},
-	)
+	block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = protoutil.MarshalOrPanic(&common.Metadata{
+		Value: protoutil.MarshalOrPanic(&common.OrdererBlockMetadata{
+			ConsenterMetadata: protoutil.MarshalOrPanic(viewMetadata),
+			LastConfig: &common.LastConfig{
+				Index: sqnNum,
+			},
+		}),
+	})
 	return block
 }
 
@@ -246,10 +249,13 @@ func makeConfigBlockWithMetadata(configBlock *common.Block, sqnNum uint64, viewM
 			Value: protoutil.MarshalOrPanic(&common.LastConfig{Index: sqnNum}),
 		},
 	)
-	block.Metadata.Metadata[common.BlockMetadataIndex_ORDERER] = protoutil.MarshalOrPanic(
-		&common.Metadata{
-			Value: protoutil.MarshalOrPanic(viewMetadata),
-		},
-	)
+	block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = protoutil.MarshalOrPanic(&common.Metadata{
+		Value: protoutil.MarshalOrPanic(&common.OrdererBlockMetadata{
+			ConsenterMetadata: protoutil.MarshalOrPanic(viewMetadata),
+			LastConfig: &common.LastConfig{
+				Index: sqnNum,
+			},
+		}),
+	})
 	return block
 }
