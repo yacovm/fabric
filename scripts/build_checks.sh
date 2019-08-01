@@ -23,9 +23,25 @@ else
 fi
 
 
+echo "Running unit tests"
 go test -race ./orderer/consensus/smartbft/...
 if [[ $? -ne 0 ]];then
     echo "unit tests failed"
     exit 1
 fi
 
+echo "Pulling docker pull hyperledger/fabric-ccenv:latest"
+docker pull hyperledger/fabric-ccenv:latest
+
+echo "Installing Ginkgo :( "
+go get github.com/onsi/ginkgo/ginkgo
+go get github.com/onsi/gomega/...
+
+echo "Running integration tests"
+cd integration/smartbft
+ginkgo --focus "smartbft multiple nodes"
+
+if [[ $? -ne 0 ]];then
+    echo "integration tests failed"
+    exit 1
+fi
