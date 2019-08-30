@@ -19,6 +19,7 @@ import (
 	"github.com/hyperledger/fabric/protos/common"
 	protosorderer "github.com/hyperledger/fabric/protos/orderer"
 	ectdraft_protos "github.com/hyperledger/fabric/protos/orderer/etcdraft"
+	"github.com/hyperledger/fabric/protos/orderer/smartbft"
 	"github.com/hyperledger/fabric/protoutil"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gbytes"
@@ -331,6 +332,21 @@ func UpdateConsensusMetadata(network *Network, peer *Peer, orderer *Orderer, cha
 func UpdateEtcdRaftMetadata(network *Network, peer *Peer, orderer *Orderer, channel string, f func(md *ectdraft_protos.ConfigMetadata)) {
 	UpdateConsensusMetadata(network, peer, orderer, channel, func(originalMetadata []byte) []byte {
 		metadata := &ectdraft_protos.ConfigMetadata{}
+		err := proto.Unmarshal(originalMetadata, metadata)
+		Expect(err).NotTo(HaveOccurred())
+
+		f(metadata)
+
+		newMetadata, err := proto.Marshal(metadata)
+		Expect(err).NotTo(HaveOccurred())
+		return newMetadata
+	})
+}
+
+// UpdateSmartBFTMetadata executes a config update that updates the snartBFT metadata according to the given function f
+func UpdateSmartBFTMetadata(network *Network, peer *Peer, orderer *Orderer, channel string, f func(md *smartbft.ConfigMetadata)) {
+	UpdateConsensusMetadata(network, peer, orderer, channel, func(originalMetadata []byte) []byte {
+		metadata := &smartbft.ConfigMetadata{}
 		err := proto.Unmarshal(originalMetadata, metadata)
 		Expect(err).NotTo(HaveOccurred())
 
