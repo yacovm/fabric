@@ -7,13 +7,11 @@ SPDX-License-Identifier: Apache-2.0
 package nwo
 
 import (
-	"fmt"
+	"bytes"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"bytes"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/tools/configtxlator/update"
@@ -21,6 +19,7 @@ import (
 	"github.com/hyperledger/fabric/protos/common"
 	protosorderer "github.com/hyperledger/fabric/protos/orderer"
 	ectdraft_protos "github.com/hyperledger/fabric/protos/orderer/etcdraft"
+	"github.com/hyperledger/fabric/protos/orderer/smartbft"
 	"github.com/hyperledger/fabric/protos/utils"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gbytes"
@@ -72,7 +71,7 @@ func GetConfig(n *Network, peer *Peer, orderer *Orderer, channel string) *common
 
 // UpdateConfig computes, signs, and submits a configuration update and waits
 // for the update to complete.
-func UpdateConfig(n *Network, orderer *Orderer, channel string, current, updated *common.Config, submitter *Peer, additionalSigners ...*Peer) {
+func UpdateConfig(n *Network, orderer *Orderer, channel string, current, updated *common.Config, getConfigBlockFromOrderer bool, submitter *Peer, additionalSigners ...*Peer) {
 	tempDir, err := ioutil.TempDir("", "updateConfig")
 	Expect(err).NotTo(HaveOccurred())
 	defer os.RemoveAll(tempDir)
@@ -103,8 +102,13 @@ func UpdateConfig(n *Network, orderer *Orderer, channel string, current, updated
 		Eventually(sess, n.EventuallyTimeout).Should(gexec.Exit(0))
 	}
 
+	var currentBlockNumber uint64
 	// get current configuration block number
-	currentBlockNumber := CurrentConfigBlockNumber(n, submitter, orderer, channel)
+	if getConfigBlockFromOrderer {
+		currentBlockNumber = CurrentConfigBlockNumber(n, submitter, orderer, channel)
+	} else {
+		currentBlockNumber = CurrentConfigBlockNumber(n, submitter, nil, channel)
+	}
 
 	sess, err := n.PeerAdminSession(submitter, commands.ChannelUpdate{
 		ChannelID: channel,
@@ -115,48 +119,17 @@ func UpdateConfig(n *Network, orderer *Orderer, channel string, current, updated
 	Eventually(sess, n.EventuallyTimeout).Should(gexec.Exit(0))
 	Expect(sess.Err).To(gbytes.Say("Successfully submitted channel update"))
 
+	if getConfigBlockFromOrderer {
+		ccb := func() uint64 { return CurrentConfigBlockNumber(n, submitter, orderer, channel) }
+		Eventually(ccb, n.EventuallyTimeout).Should(BeNumerically(">", currentBlockNumber))
+		return
+	}
 	// wait for the block to be committed to all peers that
 	// have joined the channel
 	for _, peer := range n.PeersWithChannel(channel) {
-		ccb := func() uint64 { return CurrentConfigBlockNumber(n, peer, orderer, channel) }
+		ccb := func() uint64 { return CurrentConfigBlockNumber(n, peer, nil, channel) }
 		Eventually(ccb, n.EventuallyTimeout).Should(BeNumerically(">", currentBlockNumber))
 	}
-}
-
-// UpdateOrdererConfig computes, signs, and submits a configuration update which requires orderers signature and waits
-// for the update to complete.
-func UpdateOrdererConfig(n *Network, orderer *Orderer, channel string, current, updated *common.Config, submitter *Peer, additionalSigners ...*Orderer) {
-	tempDir, err := ioutil.TempDir("", "updateConfig")
-	Expect(err).NotTo(HaveOccurred())
-	updateFile := filepath.Join(tempDir, "update.pb")
-	defer os.RemoveAll(tempDir)
-
-	ComputeUpdateOrdererConfig(updateFile, n, channel, current, updated, submitter, additionalSigners...)
-
-	currentBlockNumber := CurrentConfigBlockNumber(n, submitter, orderer, channel)
-
-	Eventually(func() string {
-		sess, err := n.OrdererAdminSession(orderer, submitter, commands.ChannelUpdate{
-			ChannelID: channel,
-			Orderer:   n.OrdererAddress(orderer, ListenPort),
-			File:      updateFile,
-		})
-		if err != nil {
-			return err.Error()
-		}
-		sess.Wait(n.EventuallyTimeout)
-		if sess.ExitCode() != 0 {
-			return fmt.Sprintf("exit code is %d", sess.ExitCode())
-		}
-		if strings.Contains(string(sess.Err.Contents()), "Successfully submitted channel update") {
-			return ""
-		}
-		return fmt.Sprintf("channel update output: %s", string(sess.Err.Contents()))
-	}, n.EventuallyTimeout).Should(BeEmpty())
-
-	// wait for the block to be committed
-	ccb := func() uint64 { return CurrentConfigBlockNumber(n, submitter, orderer, channel) }
-	Eventually(ccb, n.EventuallyTimeout).Should(BeNumerically(">", currentBlockNumber))
 }
 
 // CurrentConfigBlockNumber retrieves the block number from the header of the
@@ -218,15 +191,48 @@ func FetchConfigBlock(n *Network, peer *Peer, orderer *Orderer, channel string, 
 	Eventually(fetch, n.EventuallyTimeout).Should(Equal(0))
 }
 
-// UpdateOrdererConfigFail computes, signs, and submits a configuration update which requires orderers signature
-// and waits for the update to FAIL.
-func UpdateOrdererConfigFail(n *Network, orderer *Orderer, channel string, current, updated *common.Config, submitter *Peer, additionalSigners ...*Orderer) {
+// UpdateOrdererConfig computes, signs, and submits a configuration update which requires orderers signature and waits
+// for the update to complete.
+func UpdateOrdererConfig(n *Network, orderer *Orderer, channel string, current, updated *common.Config, submitter *Peer, additionalSigners ...*Orderer) {
 	tempDir, err := ioutil.TempDir("", "updateConfig")
 	Expect(err).NotTo(HaveOccurred())
 	updateFile := filepath.Join(tempDir, "update.pb")
 	defer os.RemoveAll(tempDir)
 
-	ComputeUpdateOrdererConfig(updateFile, n, channel, current, updated, submitter, additionalSigners...)
+	currentBlockNumber := CurrentConfigBlockNumber(n, submitter, orderer, channel)
+	computeUpdateOrdererConfig(updateFile, n, channel, current, updated, submitter, additionalSigners...)
+
+	Eventually(func() bool {
+		sess, err := n.OrdererAdminSession(orderer, submitter, commands.ChannelUpdate{
+			ChannelID: channel,
+			Orderer:   n.OrdererAddress(orderer, ListenPort),
+			File:      updateFile,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		sess.Wait(n.EventuallyTimeout)
+		if sess.ExitCode() != 0 {
+			return false
+		}
+
+		return strings.Contains(string(sess.Err.Contents()), "Successfully submitted channel update")
+	}, n.EventuallyTimeout).Should(BeTrue())
+
+	// wait for the block to be committed
+	ccb := func() uint64 { return CurrentConfigBlockNumber(n, submitter, orderer, channel) }
+	Eventually(ccb, n.EventuallyTimeout).Should(BeNumerically(">", currentBlockNumber))
+}
+
+// UpdateOrdererConfigSession computes, signs, and submits a configuration update which requires orderers signature
+// and waits for the update to complete. The command session is returned to the caller to enable ExitCode and command
+// output assertions.
+func UpdateOrdererConfigSession(n *Network, orderer *Orderer, channel string, current, updated *common.Config, submitter *Peer, additionalSigners ...*Orderer) *gexec.Session {
+	tempDir, err := ioutil.TempDir("", "updateConfig")
+	Expect(err).NotTo(HaveOccurred())
+	updateFile := filepath.Join(tempDir, "update.pb")
+	defer os.RemoveAll(tempDir)
+
+	computeUpdateOrdererConfig(updateFile, n, channel, current, updated, submitter, additionalSigners...)
 
 	//session should not return with a zero exit code nor with a success response
 	sess, err := n.OrdererAdminSession(orderer, submitter, commands.ChannelUpdate{
@@ -235,11 +241,11 @@ func UpdateOrdererConfigFail(n *Network, orderer *Orderer, channel string, curre
 		File:      updateFile,
 	})
 	Expect(err).NotTo(HaveOccurred())
-	Eventually(sess, n.EventuallyTimeout).ShouldNot(gexec.Exit(0))
-	Expect(sess.Err).NotTo(gbytes.Say("Successfully submitted channel update"))
+	Eventually(sess, n.EventuallyTimeout).Should(gexec.Exit())
+	return sess
 }
 
-func ComputeUpdateOrdererConfig(updateFile string, n *Network, channel string, current, updated *common.Config, submitter *Peer, additionalSigners ...*Orderer) {
+func computeUpdateOrdererConfig(updateFile string, n *Network, channel string, current, updated *common.Config, submitter *Peer, additionalSigners ...*Orderer) {
 	// compute update
 	configUpdate, err := update.Compute(current, updated)
 	Expect(err).NotTo(HaveOccurred())
@@ -326,6 +332,21 @@ func UpdateConsensusMetadata(network *Network, peer *Peer, orderer *Orderer, cha
 func UpdateEtcdRaftMetadata(network *Network, peer *Peer, orderer *Orderer, channel string, f func(md *ectdraft_protos.ConfigMetadata)) {
 	UpdateConsensusMetadata(network, peer, orderer, channel, func(originalMetadata []byte) []byte {
 		metadata := &ectdraft_protos.ConfigMetadata{}
+		err := proto.Unmarshal(originalMetadata, metadata)
+		Expect(err).NotTo(HaveOccurred())
+
+		f(metadata)
+
+		newMetadata, err := proto.Marshal(metadata)
+		Expect(err).NotTo(HaveOccurred())
+		return newMetadata
+	})
+}
+
+// UpdateSmartBFTMetadata executes a config update that updates the snartBFT metadata according to the given function f
+func UpdateSmartBFTMetadata(network *Network, peer *Peer, orderer *Orderer, channel string, f func(md *smartbft.ConfigMetadata)) {
+	UpdateConsensusMetadata(network, peer, orderer, channel, func(originalMetadata []byte) []byte {
+		metadata := &smartbft.ConfigMetadata{}
 		err := proto.Unmarshal(originalMetadata, metadata)
 		Expect(err).NotTo(HaveOccurred())
 

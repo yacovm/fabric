@@ -182,9 +182,10 @@ func (bw *BlockWriter) commitBlock(encodedMetadataValue []byte) {
 	if encodedMetadataValue != nil {
 		bw.lastBlock.Metadata.Metadata[cb.BlockMetadataIndex_ORDERER] = utils.MarshalOrPanic(&cb.Metadata{Value: encodedMetadataValue})
 	}
-
 	bw.addLastConfigSignature(bw.lastBlock)
-	bw.addBlockSignature(bw.lastBlock)
+	if bw.lastBlock.Metadata.Metadata[cb.BlockMetadataIndex_SIGNATURES] == nil {
+		bw.addBlockSignature(bw.lastBlock)
+	}
 
 	err := bw.support.Append(bw.lastBlock)
 	if err != nil {

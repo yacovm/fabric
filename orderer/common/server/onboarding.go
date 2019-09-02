@@ -19,6 +19,7 @@ import (
 	"github.com/hyperledger/fabric/orderer/common/cluster"
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
 	"github.com/hyperledger/fabric/orderer/consensus/etcdraft"
+	"github.com/hyperledger/fabric/orderer/consensus/smartbft"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/pkg/errors"
@@ -49,7 +50,10 @@ func (ri *replicationInitiator) replicateIfNeeded(bootstrapBlock *common.Block) 
 }
 
 func (ri *replicationInitiator) createReplicator(bootstrapBlock *common.Block, filter func(string) bool) *cluster.Replicator {
-	consenterCert := etcdraft.ConsenterCertificate(ri.secOpts.Certificate)
+	membershipPred := etcdraft.ConsenterCertificate(ri.secOpts.Certificate).IsConsenterOfChannel
+	if consensusType(bootstrapBlock) == "smartbft" {
+		membershipPred = smartbft.ConsenterCertificate(ri.secOpts.Certificate).IsConsenterOfChannel
+	}
 	systemChannelName, err := utils.GetChainIDFromBlock(bootstrapBlock)
 	if err != nil {
 		ri.logger.Panicf("Failed extracting system channel name from bootstrap block: %v", err)
@@ -68,7 +72,7 @@ func (ri *replicationInitiator) createReplicator(bootstrapBlock *common.Block, f
 		SystemChannel:    systemChannelName,
 		BootBlock:        bootstrapBlock,
 		Logger:           ri.logger,
-		AmIPartOfChannel: consenterCert.IsConsenterOfChannel,
+		AmIPartOfChannel: membershipPred,
 		Puller:           puller,
 		ChannelLister: &cluster.ChainInspector{
 			Logger:          ri.logger,

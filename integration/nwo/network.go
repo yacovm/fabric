@@ -89,12 +89,8 @@ func (o Orderer) ID() string {
 	return fmt.Sprintf("%s.%s", o.Organization, o.Name)
 }
 
-type OrdererCapabilities struct {
-	V2_0 bool `yaml:"v20,omitempty"`
-}
-
 // Peer defines a peer instance, it's owning organization, and the list of
-// channels that the peer shoudl be joined to.
+// channels that the peer should be joined to.
 type Peer struct {
 	Name         string         `yaml:"name,omitempty"`
 	Organization string         `yaml:"organization,omitempty"`
@@ -125,10 +121,11 @@ func (p *Peer) Anchor() bool {
 
 // A profile encapsulates basic information for a configtxgen profile.
 type Profile struct {
-	Name          string   `yaml:"name,omitempty"`
-	Orderers      []string `yaml:"orderers,omitempty"`
-	Consortium    string   `yaml:"consortium,omitempty"`
-	Organizations []string `yaml:"organizations,omitempty"`
+	Name            string   `yaml:"name,omitempty"`
+	Orderers        []string `yaml:"orderers,omitempty"`
+	Consortium      string   `yaml:"consortium,omitempty"`
+	Organizations   []string `yaml:"organizations,omitempty"`
+	AppCapabilities []string `yaml:"appcapabilities,omitempty"`
 }
 
 // Network holds information about a fabric network.
@@ -149,7 +146,6 @@ type Network struct {
 	SystemChannel    *SystemChannel
 	Channels         []*Channel
 	Consensus        *Consensus
-	OrdererCap       *OrdererCapabilities
 	Orderers         []*Orderer
 	Peers            []*Peer
 	Profiles         []*Profile
@@ -469,6 +465,26 @@ func (n *Network) PeerCert(p *Peer) string {
 	)
 }
 
+// OrdererCert returns the path to the orderer's certificate.
+func (n *Network) OrdererCert(o *Orderer) string {
+	org := n.Organization(o.Organization)
+	Expect(org).NotTo(BeNil())
+
+	return filepath.Join(
+		n.OrdererLocalMSPDir(o),
+		"signcerts",
+		fmt.Sprintf("%s.%s-cert.pem", o.Name, org.Domain),
+	)
+}
+
+// OrdererMSPID returns orderer's MSPID
+func (n *Network) OrdererMSPID(o *Orderer) string {
+	org := n.Organization(o.Organization)
+	Expect(org).NotTo(BeNil())
+
+	return org.MSPID
+}
+
 // PeerOrgMSPDir returns the path to the MSP directory of the Peer organization.
 func (n *Network) PeerOrgMSPDir(org *Organization) string {
 	return filepath.Join(
@@ -751,6 +767,18 @@ func (n *Network) UpdateChannelAnchors(o *Orderer, channelName string) {
 	}
 }
 
+// VerifyMembership checks that each peer has discovered the expected
+// peers in the network
+func (n *Network) VerifyMembership(expectedPeers []*Peer, channel string, chaincodes ...string) {
+	expectedDiscoveredPeers := make([]DiscoveredPeer, len(expectedPeers))
+	for i, peer := range expectedPeers {
+		expectedDiscoveredPeers[i] = n.DiscoveredPeer(peer, chaincodes...)
+	}
+	for _, peer := range expectedPeers {
+		Eventually(DiscoverPeers(n, peer, "User1", channel), n.EventuallyTimeout).Should(ConsistOf(expectedDiscoveredPeers))
+	}
+}
+
 // CreateChannel will submit an existing create channel transaction to the
 // specified orderer. The channel transaction must exist at the location
 // returned by CreateChannelTxPath.  Optionally, additional signers may be
@@ -760,25 +788,7 @@ func (n *Network) UpdateChannelAnchors(o *Orderer, channelName string) {
 // The orderer must be running when this is called.
 func (n *Network) CreateChannel(channelName string, o *Orderer, p *Peer, additionalSigners ...interface{}) {
 	channelCreateTxPath := n.CreateChannelTxPath(channelName)
-
-	for _, signer := range additionalSigners {
-		switch t := signer.(type) {
-		case *Peer:
-			sess, err := n.PeerAdminSession(t, commands.SignConfigTx{
-				File: channelCreateTxPath,
-			})
-			Expect(err).NotTo(HaveOccurred())
-			Eventually(sess, n.EventuallyTimeout).Should(gexec.Exit(0))
-		case *Orderer:
-			sess, err := n.OrdererAdminSession(t, p, commands.SignConfigTx{
-				File: channelCreateTxPath,
-			})
-			Expect(err).NotTo(HaveOccurred())
-			Eventually(sess, n.EventuallyTimeout).Should(gexec.Exit(0))
-		default:
-			panic("unknown signer type, expect Peer or Orderer")
-		}
-	}
+	n.signConfigTransaction(channelCreateTxPath, p, additionalSigners...)
 
 	createChannel := func() int {
 		sess, err := n.PeerAdminSession(p, commands.ChannelCreate{
@@ -793,45 +803,47 @@ func (n *Network) CreateChannel(channelName string, o *Orderer, p *Peer, additio
 	Eventually(createChannel, n.EventuallyTimeout).Should(Equal(0))
 }
 
-// CreateChannelFail will submit an existing create channel transaction to the
-// specified orderer, but expect to FAIL. The channel transaction must exist
-// at the location returned by CreateChannelTxPath.
+// CreateChannelExitCode will submit an existing create channel transaction to
+// the specified orderer, wait for the operation to complete, and return the
+// exit status of the "peer channel create" command.
 //
-// The orderer must be running when this is called.
-func (n *Network) CreateChannelFail(channelName string, o *Orderer, p *Peer, additionalSigners ...interface{}) {
+// The channel transaction must exist at the location returned by
+// CreateChannelTxPath and the orderer must be running when this is called.
+func (n *Network) CreateChannelExitCode(channelName string, o *Orderer, p *Peer, additionalSigners ...interface{}) int {
 	channelCreateTxPath := n.CreateChannelTxPath(channelName)
+	n.signConfigTransaction(channelCreateTxPath, p, additionalSigners...)
 
-	for _, signer := range additionalSigners {
-		switch t := signer.(type) {
+	sess, err := n.PeerAdminSession(p, commands.ChannelCreate{
+		ChannelID:   channelName,
+		Orderer:     n.OrdererAddress(o, ListenPort),
+		File:        channelCreateTxPath,
+		OutputBlock: "/dev/null",
+	})
+	Expect(err).NotTo(HaveOccurred())
+	return sess.Wait(n.EventuallyTimeout).ExitCode()
+}
+
+func (n *Network) signConfigTransaction(channelTxPath string, submittingPeer *Peer, signers ...interface{}) {
+	for _, signer := range signers {
+		switch signer := signer.(type) {
 		case *Peer:
-			sess, err := n.PeerAdminSession(t, commands.SignConfigTx{
-				File: channelCreateTxPath,
+			sess, err := n.PeerAdminSession(signer, commands.SignConfigTx{
+				File: channelTxPath,
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(sess, n.EventuallyTimeout).Should(gexec.Exit(0))
+
 		case *Orderer:
-			sess, err := n.OrdererAdminSession(t, p, commands.SignConfigTx{
-				File: channelCreateTxPath,
+			sess, err := n.OrdererAdminSession(signer, submittingPeer, commands.SignConfigTx{
+				File: channelTxPath,
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(sess, n.EventuallyTimeout).Should(gexec.Exit(0))
+
 		default:
-			panic("unknown signer type, expect Peer or Orderer")
+			panic(fmt.Sprintf("unknown signer type %T, expect Peer or Orderer", signer))
 		}
 	}
-
-	createChannelFail := func() int {
-		sess, err := n.PeerAdminSession(p, commands.ChannelCreate{
-			ChannelID:   channelName,
-			Orderer:     n.OrdererAddress(o, ListenPort),
-			File:        channelCreateTxPath,
-			OutputBlock: "/dev/null",
-		})
-		Expect(err).NotTo(HaveOccurred())
-		return sess.Wait(n.EventuallyTimeout).ExitCode()
-	}
-
-	Eventually(createChannelFail, n.EventuallyTimeout).ShouldNot(Equal(0))
 }
 
 // JoinChannel will join peers to the specified channel. The orderer is used to
@@ -882,6 +894,12 @@ func (n *Network) ConfigTxGen(command Command) (*gexec.Session, error) {
 func (n *Network) Discover(command Command) (*gexec.Session, error) {
 	cmd := NewCommand(n.Components.Discover(), command)
 	cmd.Args = append(cmd.Args, "--peerTLSCA", n.CACertsBundlePath())
+	return n.StartSession(cmd, command.SessionName())
+}
+
+// Token starts a gexec.Session for the provided token command.
+func (n *Network) Token(command Command) (*gexec.Session, error) {
+	cmd := NewCommand(n.Components.Token(), command)
 	return n.StartSession(cmd, command.SessionName())
 }
 
@@ -972,6 +990,7 @@ func (n *Network) OrdererRunner(o *Orderer) *ginkgomon.Runner {
 	cmd := exec.Command(n.Components.Orderer())
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, fmt.Sprintf("FABRIC_CFG_PATH=%s", n.OrdererDir(o)))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("FABRIC_LOGGING_SPEC=orderer.consensus.smartbft=debug"))
 
 	config := ginkgomon.Config{
 		AnsiColorCode:     n.nextColor(),
@@ -981,7 +1000,7 @@ func (n *Network) OrdererRunner(o *Orderer) *ginkgomon.Runner {
 		StartCheckTimeout: 15 * time.Second,
 	}
 
-	//After consensus-type migration, the #brokers is >0, but the type is etcdraft
+	// After consensus-type migration, the #brokers is >0, but the type is etcdraft
 	if n.Consensus.Type == "kafka" && n.Consensus.Brokers != 0 {
 		config.StartCheck = "Start phase completed successfully"
 		config.StartCheckTimeout = 30 * time.Second
@@ -1002,11 +1021,13 @@ func (n *Network) OrdererGroupRunner() ifrit.Runner {
 
 // PeerRunner returns an ifrit.Runner for the specified peer. The runner can be
 // used to start and manage a peer process.
-func (n *Network) PeerRunner(p *Peer) *ginkgomon.Runner {
+func (n *Network) PeerRunner(p *Peer, env ...string) *ginkgomon.Runner {
+
 	cmd := n.peerCommand(
 		commands.NodeStart{PeerID: p.ID()},
 		fmt.Sprintf("FABRIC_CFG_PATH=%s", n.PeerDir(p)),
 	)
+	cmd.Env = append(cmd.Env, env...)
 
 	return ginkgomon.New(ginkgomon.Config{
 		AnsiColorCode:     n.nextColor(),
@@ -1088,12 +1109,12 @@ func (n *Network) PeerUserSession(p *Peer, user string, command Command) (*gexec
 	return n.StartSession(cmd, command.SessionName())
 }
 
-// OrdererAdminSession execute a gexec.Session as an orderer node admin user. This is used primarily
-// to generate orderer configuration updates
+// OrdererAdminSession starts a gexec.Session as an orderer admin user. This
+// is used primarily to generate orderer configuration updates.
 func (n *Network) OrdererAdminSession(o *Orderer, p *Peer, command Command) (*gexec.Session, error) {
 	cmd := n.peerCommand(
 		command,
-		"CORE_PEER_LOCALMSPID=OrdererMSP",
+		fmt.Sprintf("CORE_PEER_LOCALMSPID=%s", n.Organization(o.Organization).MSPID),
 		fmt.Sprintf("FABRIC_CFG_PATH=%s", n.PeerDir(p)),
 		fmt.Sprintf("CORE_PEER_MSPCONFIGPATH=%s", n.OrdererUserMSPDir(o, "Admin")),
 	)
@@ -1271,6 +1292,16 @@ func (n *Network) PeersInOrg(orgName string) []*Peer {
 func (n *Network) ReservePort() uint16 {
 	n.StartPort++
 	return n.StartPort - 1
+}
+
+// OrdererIndex returns next int value
+func (n *Network) OrdererIndex(orderer *Orderer) int {
+	for i, o := range n.Orderers {
+		if orderer == o {
+			return i
+		}
+	}
+	return -1
 }
 
 type PortName string

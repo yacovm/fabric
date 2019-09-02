@@ -231,7 +231,7 @@ func NewSignatureHeaderOrPanic(signer crypto.LocalSigner) *cb.SignatureHeader {
 }
 
 // SignOrPanic signs a message and panics on error.
-func SignOrPanic(signer crypto.LocalSigner, msg []byte) []byte {
+func SignOrPanic(signer crypto.Signer, msg []byte) []byte {
 	if signer == nil {
 		panic(errors.New("invalid signer. cannot be nil"))
 	}
@@ -296,7 +296,10 @@ func IsConfigBlock(block *cb.Block) bool {
 	if err != nil {
 		return false
 	}
+	return IsConfigTransaction(envelope)
+}
 
+func IsConfigTransaction(envelope *cb.Envelope) bool {
 	payload, err := GetPayload(envelope)
 	if err != nil {
 		return false
