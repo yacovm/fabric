@@ -59,6 +59,7 @@ type View struct {
 	ProposalSequence uint64
 	State            State
 	Phase            Phase
+	InMsgQSize       int
 	// Runtime
 	lastVotedProposalByID map[uint64]protos.Commit
 	incMsgs               chan *incMsg
@@ -91,7 +92,7 @@ type View struct {
 
 func (v *View) Start() {
 	v.stopOnce = sync.Once{}
-	v.incMsgs = make(chan *incMsg, 10*v.N) // TODO channel size should be configured
+	v.incMsgs = make(chan *incMsg, v.InMsgQSize)
 	v.abortChan = make(chan struct{})
 	v.lastVotedProposalByID = make(map[uint64]protos.Commit)
 	v.viewEnded.Add(1)
@@ -170,7 +171,7 @@ func (v *View) processMsg(sender uint64, m *protos.Message) {
 			v.discoverIfSyncNeeded(sender, m)
 			return
 		}
-		v.FailureDetector.Complain(false)
+		v.FailureDetector.Complain(v.Number, false)
 		// Else, we got a message with a wrong view from the leader.
 		if msgViewNum > v.Number {
 			v.Sync.Sync()
@@ -336,7 +337,7 @@ func (v *View) processProposal() Phase {
 	requests, err := v.verifyProposal(proposal)
 	if err != nil {
 		v.Logger.Warnf("%d received bad proposal from %d: %v", v.SelfID, v.LeaderID, err)
-		v.FailureDetector.Complain(false)
+		v.FailureDetector.Complain(v.Number, false)
 		v.Sync.Sync()
 		v.stop()
 		return ABORT
