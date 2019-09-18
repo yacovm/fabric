@@ -75,11 +75,13 @@ func (c *Consensus) Start() {
 		Application: c,
 		Checkpoint:  &cpt,
 		InFlight:    &inFlight,
+		State:       c.state,
 		// Controller later
 		// RequestsTimer later
 		Ticker:            c.ViewChangerTicker,
 		ResendTimeout:     c.Config.ViewChangeResendInterval,
 		TimeoutViewChange: c.Config.ViewChangeTimeout,
+		InMsqQSize:        c.Config.IncomingMessageBufferSize,
 	}
 
 	c.controller = &algorithm.Controller{
@@ -111,7 +113,7 @@ func (c *Consensus) Start() {
 		AutoRemoveTimeout: c.Config.RequestAutoRemoveTimeout,
 	}
 	pool := algorithm.NewPool(c.Logger, c.RequestInspector, c.controller, opts)
-	batchBuilder := algorithm.NewBatchBuilder(pool, c.Config.RequestBatchMaxSize, c.Config.RequestBatchMaxInterval)
+	batchBuilder := algorithm.NewBatchBuilder(pool, c.Config.RequestBatchMaxCount, c.Config.RequestBatchMaxBytes, c.Config.RequestBatchMaxInterval)
 	leaderMonitor := algorithm.NewHeartbeatMonitor(
 		c.Scheduler,
 		c.Logger,
@@ -126,11 +128,30 @@ func (c *Consensus) Start() {
 
 	c.viewChanger.Controller = c.controller
 	c.viewChanger.RequestsTimer = pool
+	c.viewChanger.ViewSequences = c.controller.ViewSequences
+
+	view := c.Metadata.ViewId
+	seq := c.Metadata.LatestSequence
+
+	viewSeq, err := c.state.LoadNewViewIfApplicable()
+	if err != nil {
+		c.Logger.Panicf("Failed loading new view, error: %v", err)
+	}
+	if viewSeq == nil {
+		c.Logger.Debugf("No new view to restore")
+	} else {
+		// Check if metadata should be taken from the restored new view or from the application
+		if viewSeq.Seq >= c.Metadata.LatestSequence {
+			c.Logger.Debugf("Restoring from new view with view %d and seq %d, while application has view %d and seq %d", viewSeq.View, viewSeq.Seq, c.Metadata.ViewId, c.Metadata.LatestSequence)
+			view = viewSeq.View
+			seq = viewSeq.Seq
+		}
+	}
 
 	// If we delivered to the application proposal with sequence i,
 	// then we are expecting to be proposed a proposal with sequence i+1.
-	c.viewChanger.Start(c.Metadata.ViewId)
-	c.controller.Start(c.Metadata.ViewId, c.Metadata.LatestSequence+1)
+	c.viewChanger.Start(view)
+	c.controller.Start(view, seq+1)
 }
 
 func (c *Consensus) Stop() {

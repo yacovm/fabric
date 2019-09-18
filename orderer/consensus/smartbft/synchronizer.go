@@ -9,6 +9,7 @@ package smartbft
 import (
 	"sort"
 
+	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/orderer/consensus"
@@ -18,26 +19,27 @@ import (
 )
 
 type Synchronizer struct {
-	UpdateLastHash func(block *common.Block)
-	Support        consensus.ConsenterSupport
-	BlockPuller    BlockPuller
-	ClusterSize    uint64
-	Logger         *flogging.FabricLogger
+	BlockToDecision func(block *common.Block) *types.Decision
+	UpdateLastHash  func(block *common.Block)
+	Support         consensus.ConsenterSupport
+	BlockPuller     BlockPuller
+	ClusterSize     uint64
+	Logger          *flogging.FabricLogger
 }
 
 func (s *Synchronizer) Close() {
 	s.BlockPuller.Close()
 }
 
-func (s *Synchronizer) Sync() (smartbftprotos.ViewMetadata, uint64) {
-	metadata, sqn, err := s.synchronize()
+func (s *Synchronizer) Sync() types.Decision {
+	decision, err := s.synchronize()
 	if err != nil {
 		s.Logger.Warnf("Could not synchronize with remote peers due to %s, returning state from local ledger", err)
 		block := s.Support.Block(s.Support.Height() - 1)
-		return s.getViewMetadataLastConfigSqnFromBlock(block)
+		return *s.BlockToDecision(block)
 	}
 
-	return metadata, sqn
+	return *decision
 }
 
 func (s *Synchronizer) getViewMetadataLastConfigSqnFromBlock(block *common.Block) (smartbftprotos.ViewMetadata, uint64) {
@@ -51,17 +53,17 @@ func (s *Synchronizer) getViewMetadataLastConfigSqnFromBlock(block *common.Block
 	return viewMetadata, lastConfigSqn
 }
 
-func (s *Synchronizer) synchronize() (smartbftprotos.ViewMetadata, uint64, error) {
+func (s *Synchronizer) synchronize() (*types.Decision, error) {
 	defer s.BlockPuller.Close()
 	heightByEndpoint, err := s.BlockPuller.HeightsByEndpoints()
 	if err != nil {
-		return smartbftprotos.ViewMetadata{}, 0, errors.Wrap(err, "cannot get HeightsByEndpoints")
+		return nil, errors.Wrap(err, "cannot get HeightsByEndpoints")
 	}
 
 	s.Logger.Infof("HeightsByEndpoints: %v", heightByEndpoint)
 
 	if len(heightByEndpoint) == 0 {
-		return smartbftprotos.ViewMetadata{}, 0, errors.New("no cluster members to synchronize with")
+		return nil, errors.New("no cluster members to synchronize with")
 	}
 
 	var heights []uint64
@@ -72,7 +74,7 @@ func (s *Synchronizer) synchronize() (smartbftprotos.ViewMetadata, uint64, error
 	targetHeight := s.computeTargetHeight(heights)
 	startHeight := s.Support.Height()
 	if startHeight >= targetHeight {
-		return smartbftprotos.ViewMetadata{}, 0, errors.Errorf("already at height of %d", targetHeight)
+		return nil, errors.Errorf("already at height of %d", targetHeight)
 	}
 
 	targetSeq := targetHeight - 1
@@ -94,14 +96,13 @@ func (s *Synchronizer) synchronize() (smartbftprotos.ViewMetadata, uint64, error
 		}
 		s.Logger.Debugf("Fetched and committed block [%d] from cluster", seq)
 		lastPulledBlock = block
+		s.UpdateLastHash(lastPulledBlock)
 		seq++
 	}
 
 	if lastPulledBlock == nil {
-		return smartbftprotos.ViewMetadata{}, 0, errors.Errorf("failed pulling block %d", seq)
+		return nil, errors.Errorf("failed pulling block %d", seq)
 	}
-
-	s.UpdateLastHash(lastPulledBlock)
 
 	startSeq := startHeight
 	s.Logger.Infof("Finished synchronizing with cluster, fetched %d blocks, starting from block [%d], up until and including block [%d]",
@@ -110,7 +111,7 @@ func (s *Synchronizer) synchronize() (smartbftprotos.ViewMetadata, uint64, error
 	viewMetadata, lastConfigSqn := s.getViewMetadataLastConfigSqnFromBlock(lastPulledBlock)
 
 	s.Logger.Infof("Returning view metadata of %v, lastConfigSeq %d", viewMetadata, lastConfigSqn)
-	return viewMetadata, lastConfigSqn, nil
+	return s.BlockToDecision(lastPulledBlock), nil
 }
 
 // computeTargetHeight compute the target height to synchronize to.
