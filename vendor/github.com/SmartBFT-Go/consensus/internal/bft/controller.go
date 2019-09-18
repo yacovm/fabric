@@ -12,6 +12,7 @@ import (
 	"github.com/SmartBFT-Go/consensus/pkg/api"
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	protos "github.com/SmartBFT-Go/consensus/smartbftprotos"
+	"github.com/golang/protobuf/proto"
 )
 
 //go:generate mockery -dir . -name Decider -case underscore -output ./mocks/
@@ -27,8 +28,6 @@ type FailureDetector interface {
 //go:generate mockery -dir . -name Batcher -case underscore -output ./mocks/
 type Batcher interface {
 	NextBatch() [][]byte
-	BatchRemainder(remainder [][]byte)
-	PopRemainder() [][]byte
 	Close()
 	Closed() bool
 	Reset()
@@ -40,7 +39,7 @@ type RequestPool interface {
 	Prune(predicate func([]byte) error)
 	Submit(request []byte) error
 	Size() int
-	NextRequests(n int) [][]byte
+	NextRequests(maxCount int, maxSizeBytes uint64) (batch [][]byte, full bool)
 	RemoveRequest(request types.RequestInfo) error
 	StopTimers()
 	RestartTimers()
@@ -238,6 +237,7 @@ func (c *Controller) ProcessMessages(sender uint64, m *protos.Message) {
 		view := c.currView
 		c.currViewLock.RUnlock()
 		view.HandleMessage(sender, m)
+		c.ViewChanger.HandleViewMessage(sender, m)
 	case *protos.Message_ViewChange, *protos.Message_ViewData, *protos.Message_NewView:
 		c.ViewChanger.HandleMessage(sender, m)
 	case *protos.Message_HeartBeat:
@@ -252,7 +252,6 @@ func (c *Controller) ProcessMessages(sender uint64, m *protos.Message) {
 }
 
 func (c *Controller) startView(proposalSequence uint64) {
-	// TODO view builder according to metadata returned by sync
 	view := c.ProposerBuilder.NewProposer(c.leaderID(), proposalSequence, c.currViewNumber, c.quorum)
 
 	c.currViewLock.Lock()
@@ -354,7 +353,8 @@ func (c *Controller) propose() {
 	metadata := c.currView.GetMetadata()
 	proposal, remainder := c.Assembler.AssembleProposal(metadata, nextBatch)
 	if len(remainder) != 0 {
-		c.Batcher.BatchRemainder(remainder)
+		c.Logger.Debugf("Assembler packed only some of the batch TX's into the proposal, length of: batch=%d, remainder=%d, in-proposal=%d",
+			len(nextBatch), len(remainder), len(nextBatch)-len(remainder))
 	}
 	c.Logger.Debugf("Leader proposing proposal: %v", proposal)
 	c.currView.Propose(proposal)
@@ -406,10 +406,23 @@ func (c *Controller) sync() {
 	// we were syncing.
 	defer c.relinquishSyncToken()
 
-	md, vSeq := c.Synchronizer.Sync()
-	c.verificationSequence = vSeq
-	c.Logger.Infof("Synchronized to view %d with sequence %d", md.ViewId, md.LatestSequence)
-	c.ViewChanger.InformNewView(md.ViewId)
+	decision := c.Synchronizer.Sync()
+	if decision.Proposal.Metadata == nil {
+		c.Logger.Infof("Synchronizer returned with proposal metadata nil")
+		return
+	}
+	md := &protos.ViewMetadata{}
+	if err := proto.Unmarshal(decision.Proposal.Metadata, md); err != nil {
+		c.Logger.Panicf("Controller was unable to unmarshal the proposal metadata returned by the Synchronizer")
+	}
+	if md.ViewId < c.currViewNumber {
+		c.Logger.Infof("Synchronizer returned with view number %d but the controller is at view number %d", md.ViewId, c.currViewNumber)
+		return
+	}
+	c.Logger.Infof("Synchronized to view %d and sequence %d with verification sequence %d", md.ViewId, md.LatestSequence, decision.Proposal.VerificationSequence)
+	c.Checkpoint.Set(decision.Proposal, decision.Signatures)
+	c.verificationSequence = uint64(decision.Proposal.VerificationSequence)
+	c.ViewChanger.InformNewView(md.ViewId, md.LatestSequence)
 	c.viewChange <- viewInfo{viewNumber: md.ViewId, proposalSeq: md.LatestSequence + 1}
 }
 
@@ -440,17 +453,6 @@ func (c *Controller) maybePruneRevokedRequests() {
 		_, err := c.Verifier.VerifyRequest(req)
 		return err
 	})
-
-	var newRemainder [][]byte
-	for _, req := range c.Batcher.PopRemainder() {
-		reqInf, err := c.Verifier.VerifyRequest(req)
-		if err != nil {
-			c.Logger.Warnf("Revoking request %v due to %v", reqInf, err)
-			continue
-		}
-		newRemainder = append(newRemainder, req)
-	}
-	c.Batcher.BatchRemainder(newRemainder)
 }
 
 func (c *Controller) acquireLeaderToken() {
