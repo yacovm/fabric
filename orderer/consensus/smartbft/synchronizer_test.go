@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"testing"
 
+	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
@@ -54,7 +55,14 @@ func TestSynchronizerSync(t *testing.T) {
 
 		l := flogging.NewFabricLogger(zap.NewExample())
 
+		decision := &types.Decision{}
 		syn := &smartbft.Synchronizer{
+			BlockToDecision: func(block *common.Block) *types.Decision {
+				if block == b99 {
+					return decision
+				}
+				return nil
+			},
 			Logger:         l,
 			BlockPuller:    bp,
 			ClusterSize:    4,
@@ -62,10 +70,8 @@ func TestSynchronizerSync(t *testing.T) {
 			UpdateLastHash: noopUpdateLastHash,
 		}
 
-		metadata, sqn := syn.Sync()
-		assert.Equal(t, uint64(1), metadata.ViewId)
-		assert.Equal(t, uint64(12), metadata.LatestSequence)
-		assert.Equal(t, blockNum2configSqn[99], sqn)
+		d := syn.Sync()
+		assert.Equal(t, *decision, d)
 	})
 
 	t.Run("all nodes present", func(t *testing.T) {
@@ -102,7 +108,14 @@ func TestSynchronizerSync(t *testing.T) {
 			return ledger[sqn]
 		})
 
+		decision := &types.Decision{}
 		syn := &smartbft.Synchronizer{
+			BlockToDecision: func(block *common.Block) *types.Decision {
+				if block == b102 {
+					return decision
+				}
+				return nil
+			},
 			Logger:         flogging.NewFabricLogger(zap.NewExample()),
 			BlockPuller:    bp,
 			ClusterSize:    4,
@@ -110,10 +123,8 @@ func TestSynchronizerSync(t *testing.T) {
 			UpdateLastHash: noopUpdateLastHash,
 		}
 
-		metadata, sqn := syn.Sync()
-		assert.Equal(t, uint64(2), metadata.ViewId)
-		assert.Equal(t, uint64(3), metadata.LatestSequence)
-		assert.Equal(t, blockNum2configSqn[101], sqn)
+		d := syn.Sync()
+		assert.Equal(t, *decision, d)
 	})
 
 	t.Run("3/4 nodes present", func(t *testing.T) {
@@ -149,7 +160,14 @@ func TestSynchronizerSync(t *testing.T) {
 			return ledger[sqn]
 		})
 
+		decision := &types.Decision{}
 		syn := &smartbft.Synchronizer{
+			BlockToDecision: func(block *common.Block) *types.Decision {
+				if block == b101 {
+					return decision
+				}
+				return nil
+			},
 			Logger:         flogging.NewFabricLogger(zap.NewExample()),
 			BlockPuller:    bp,
 			ClusterSize:    4,
@@ -157,10 +175,8 @@ func TestSynchronizerSync(t *testing.T) {
 			UpdateLastHash: noopUpdateLastHash,
 		}
 
-		metadata, sqn := syn.Sync()
-		assert.Equal(t, uint64(2), metadata.ViewId)
-		assert.Equal(t, uint64(1), metadata.LatestSequence)
-		assert.Equal(t, blockNum2configSqn[101], sqn)
+		d := syn.Sync()
+		assert.Equal(t, *decision, d)
 	})
 
 	t.Run("2/4 nodes present", func(t *testing.T) {
@@ -195,7 +211,14 @@ func TestSynchronizerSync(t *testing.T) {
 			return ledger[sqn]
 		})
 
+		decision := &types.Decision{}
 		syn := &smartbft.Synchronizer{
+			BlockToDecision: func(block *common.Block) *types.Decision {
+				if block == b100 {
+					return decision
+				}
+				return nil
+			},
 			Logger:         flogging.NewFabricLogger(zap.NewExample()),
 			BlockPuller:    bp,
 			ClusterSize:    4,
@@ -203,10 +226,8 @@ func TestSynchronizerSync(t *testing.T) {
 			UpdateLastHash: noopUpdateLastHash,
 		}
 
-		metadata, sqn := syn.Sync()
-		assert.Equal(t, uint64(1), metadata.ViewId)
-		assert.Equal(t, uint64(13), metadata.LatestSequence)
-		assert.Equal(t, blockNum2configSqn[99], sqn)
+		d := syn.Sync()
+		assert.Equal(t, *decision, d)
 	})
 
 	t.Run("1/4 nodes present", func(t *testing.T) {
@@ -240,7 +261,14 @@ func TestSynchronizerSync(t *testing.T) {
 			return ledger[sqn]
 		})
 
+		decision := &types.Decision{}
 		syn := &smartbft.Synchronizer{
+			BlockToDecision: func(block *common.Block) *types.Decision {
+				if block == b99 {
+					return decision
+				}
+				return nil
+			},
 			Logger:         flogging.NewFabricLogger(zap.NewExample()),
 			BlockPuller:    bp,
 			ClusterSize:    4,
@@ -248,10 +276,8 @@ func TestSynchronizerSync(t *testing.T) {
 			UpdateLastHash: noopUpdateLastHash,
 		}
 
-		metadata, sqn := syn.Sync()
-		assert.Equal(t, uint64(1), metadata.ViewId)
-		assert.Equal(t, uint64(12), metadata.LatestSequence)
-		assert.Equal(t, blockNum2configSqn[99], sqn)
+		d := syn.Sync()
+		assert.Equal(t, *decision, d)
 	})
 }
 

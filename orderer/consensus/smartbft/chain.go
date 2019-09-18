@@ -148,11 +148,12 @@ func bftSmartConsensusBuild(
 	clusterSize := uint64(len(nodes))
 
 	sync := &Synchronizer{
-		UpdateLastHash: c.updateLastCommittedHash,
-		Support:        c.support,
-		BlockPuller:    c.BlockPuller,
-		ClusterSize:    clusterSize,
-		Logger:         c.Logger,
+		BlockToDecision: c.blockToDecision,
+		UpdateLastHash:  c.updateLastCommittedHash,
+		Support:         c.support,
+		BlockPuller:     c.BlockPuller,
+		ClusterSize:     clusterSize,
+		Logger:          c.Logger,
 	}
 
 	channelDecorator := zap.String("channel", c.support.ChainID())
@@ -340,21 +341,27 @@ func (c *BFTChain) Halt() {
 
 func (c *BFTChain) lastPersistedProposalAndSignatures() (*types.Proposal, []types.Signature) {
 	lastBlock := lastBlockFromLedgerOrPanic(c.support, c.Logger)
+	decision := c.blockToDecision(lastBlock)
+	return &decision.Proposal, decision.Signatures
+}
 
-	proposal := &types.Proposal{
-		Header: lastBlock.Header.Hash(),
+func (c *BFTChain) blockToDecision(block *common.Block) *types.Decision {
+	proposal := types.Proposal{
+		Header: protoutil.BlockHeaderBytes(block.Header),
 		Payload: (&ByteBufferTuple{
-			A: utils.MarshalOrPanic(lastBlock.Data),
-			B: utils.MarshalOrPanic(lastBlock.Metadata),
+			A: protoutil.MarshalOrPanic(block.Data),
+			B: protoutil.MarshalOrPanic(block.Metadata),
 		}).ToBytes(),
 	}
 
-	if lastBlock.Header.Number == 0 {
-		return proposal, nil
+	if block.Header.Number == 0 {
+		return &types.Decision{
+			Proposal: proposal,
+		}
 	}
 
 	signatureMetadata := &common.Metadata{}
-	if err := proto.Unmarshal(lastBlock.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], signatureMetadata); err != nil {
+	if err := proto.Unmarshal(block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], signatureMetadata); err != nil {
 		c.Logger.Panicf("Failed unmarshaling signatures from block metadata: %v", err)
 	}
 
@@ -377,7 +384,7 @@ func (c *BFTChain) lastPersistedProposalAndSignatures() (*types.Proposal, []type
 		}
 		sig := &Signature{
 			SignatureHeader:      sigMD.SignatureHeader,
-			BlockHeader:          lastBlock.Header.Hash(),
+			BlockHeader:          protoutil.BlockHeaderBytes(block.Header),
 			OrdererBlockMetadata: signatureMetadata.Value,
 		}
 		signatures = append(signatures, types.Signature{
@@ -386,7 +393,11 @@ func (c *BFTChain) lastPersistedProposalAndSignatures() (*types.Proposal, []type
 			Id:    id,
 		})
 	}
-	return proposal, signatures
+
+	return &types.Decision{
+		Signatures: signatures,
+		Proposal:   proposal,
+	}
 }
 
 type chainACL struct {
