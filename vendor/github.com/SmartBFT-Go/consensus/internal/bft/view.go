@@ -166,7 +166,6 @@ func (v *View) processMsg(sender uint64, m *protos.Message) {
 
 	if msgViewNum != v.Number {
 		v.Logger.Warnf("%d got message %v from %d of view %d, expected view %d", v.SelfID, m, sender, msgViewNum, v.Number)
-		// TODO  when do we send the error message?
 		if sender != v.LeaderID {
 			v.discoverIfSyncNeeded(sender, m)
 			return
@@ -357,7 +356,9 @@ func (v *View) processProposal() Phase {
 			},
 		},
 	}
-	v.State.Save(savedMsg)
+	if err := v.State.Save(savedMsg); err != nil {
+		v.Logger.Panicf("Failed to save message to state, error: %v", err)
+	}
 	v.lastBroadcastSent = prepareMessage
 	v.currPrepareSent = proto.Clone(prepareMessage).(*protos.Message)
 	v.currPrepareSent.GetPrepare().Assist = true
@@ -441,7 +442,9 @@ func (v *View) processPrepares() Phase {
 
 	// We received enough prepares to send a commit.
 	// Save the commit message we are about to send.
-	v.State.Save(preparedProof)
+	if err := v.State.Save(preparedProof); err != nil {
+		v.Logger.Panicf("Failed to save message to state, error: %v", err)
+	}
 	v.currCommitSent = proto.Clone(commitMsg).(*protos.Message)
 	v.currCommitSent.GetCommit().Assist = true
 	v.lastBroadcastSent = commitMsg
