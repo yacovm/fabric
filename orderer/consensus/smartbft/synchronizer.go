@@ -38,7 +38,6 @@ func (s *Synchronizer) Sync() types.Decision {
 		block := s.Support.Block(s.Support.Height() - 1)
 		return *s.BlockToDecision(block)
 	}
-
 	return *decision
 }
 
