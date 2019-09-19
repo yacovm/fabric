@@ -18,9 +18,9 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	proto2 "github.com/golang/protobuf/proto"
-	"github.com/hyperledger/fabric/common/channelconfig"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/common/metrics"
+	"github.com/hyperledger/fabric/common/policies"
 	"github.com/hyperledger/fabric/core/comm"
 	"github.com/hyperledger/fabric/internal/pkg/identity"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
@@ -31,7 +31,6 @@ import (
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/orderer"
 	"github.com/hyperledger/fabric/protos/orderer/smartbft"
-	"github.com/hyperledger/fabric/protoutil"
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
 )
@@ -44,14 +43,16 @@ type ChainGetter interface {
 	GetChain(chainID string) *multichannel.ChainSupport
 }
 
+type PolicyManagerRetriever func(channel string) policies.Manager
+
 // Consenter implementation of the BFT smart based consenter
 type Consenter struct {
+	GetPolicyManager PolicyManagerRetriever
 	Logger           *flogging.FabricLogger
 	Cert             []byte
 	Comm             *cluster.Comm
 	Chains           ChainGetter
 	SignerSerializer identity.SignerSerializer
-	Registrar        *multichannel.Registrar
 	WALBaseDir       string
 	ClusterDialer    *cluster.PredicateDialer
 	Conf             *localconfig.TopLevel
@@ -59,6 +60,7 @@ type Consenter struct {
 
 // New creates Consenter of type smart bft
 func New(
+	pmr PolicyManagerRetriever,
 	signerSerializer identity.SignerSerializer,
 	clusterDialer *cluster.PredicateDialer,
 	conf *localconfig.TopLevel,
@@ -80,13 +82,13 @@ func New(
 	logger.Infof("XXX WAL Directory is %s", cfg.WALDir)
 
 	consenter := &Consenter{
+		GetPolicyManager: pmr,
 		Conf:             conf,
 		ClusterDialer:    clusterDialer,
 		Logger:           logger,
 		Cert:             srvConf.SecOpts.Certificate,
 		Chains:           r,
 		SignerSerializer: signerSerializer,
-		Registrar:        r,
 		WALBaseDir:       cfg.WALDir,
 	}
 
@@ -180,23 +182,6 @@ func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *co
 		})
 	}
 
-	// build configuration bundle to get policy manager
-	block, err := lastConfigBlockFromLedger(support)
-	if err != nil {
-		return nil, errors.Errorf("failed to obtain last config block cause of: %s", err)
-	}
-	if block == nil {
-		return nil, errors.New("nil block")
-	}
-	envelopeConfig, err := protoutil.ExtractEnvelope(block, 0)
-	if err != nil {
-		return nil, err
-	}
-	bundle, err := channelconfig.NewBundleFromEnvelope(envelopeConfig)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed extracting bundle from envelope")
-	}
-
 	puller, err := newBlockPuller(support, c.ClusterDialer, c.Conf.General.Cluster)
 	if err != nil {
 		c.Logger.Panicf("Failed initializing block puller")
@@ -207,7 +192,7 @@ func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *co
 		puller,
 		c.Comm,
 		c.SignerSerializer,
-		bundle.PolicyManager(),
+		c.GetPolicyManager(support.ChainID()),
 		nodes,
 		id2Identies,
 		support,
