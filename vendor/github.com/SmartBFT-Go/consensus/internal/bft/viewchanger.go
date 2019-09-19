@@ -21,7 +21,7 @@ import (
 //go:generate mockery -dir . -name ViewController -case underscore -output ./mocks/
 type ViewController interface {
 	ViewChanged(newViewNumber uint64, newProposalSequence uint64)
-	AbortView()
+	AbortView(view uint64)
 }
 
 //go:generate mockery -dir . -name RequestsTimer -case underscore -output ./mocks/
@@ -69,11 +69,13 @@ type ViewChanger struct {
 	lastTick            time.Time
 	ResendTimeout       time.Duration
 	lastResend          time.Time
-	TimeoutViewChange   time.Duration
+	ViewChangeTimeout   time.Duration
 	startViewChangeTime time.Time
 	checkTimeout        bool
+	backOffFactor       uint64
 
 	// Runtime
+	Restore         chan struct{}
 	InMsqQSize      int
 	incMsgs         chan *incMsg
 	viewChangeMsgs  *voteSet
@@ -112,6 +114,8 @@ func (v *ViewChanger) Start(startViewNumber uint64) {
 
 	v.lastTick = time.Now()
 	v.lastResend = v.lastTick
+
+	v.backOffFactor = 1
 
 	v.inFlightDecideChan = make(chan struct{})
 	v.inFlightSyncChan = make(chan struct{})
@@ -187,6 +191,8 @@ func (v *ViewChanger) run() {
 			v.checkIfTimeout(now)
 		case info := <-v.informChan:
 			v.informNewView(info)
+		case <-v.Restore:
+			v.processViewChangeMsg(true)
 		}
 	}
 }
@@ -214,12 +220,13 @@ func (v *ViewChanger) checkIfTimeout(now time.Time) {
 	if !v.checkTimeout {
 		return
 	}
-	nextTimeout := v.startViewChangeTime.Add(v.TimeoutViewChange)
+	nextTimeout := v.startViewChangeTime.Add(v.ViewChangeTimeout * time.Duration(v.backOffFactor))
 	if nextTimeout.After(now) { // check if timeout has passed
 		return
 	}
 	v.Logger.Debugf("Node %d got a view change timeout, the current view is %d", v.SelfID, v.currView)
 	v.checkTimeout = false // stop timeout for now, a new one will start when a new view change begins
+	v.backOffFactor++      // next timeout will be longer
 	// the timeout has passed, something went wrong, try sync and complain
 	v.Logger.Debugf("Node %d is calling sync because it got a view change timeout", v.SelfID)
 	v.Synchronizer.Sync()
@@ -236,7 +243,7 @@ func (v *ViewChanger) processMsg(sender uint64, m *protos.Message) {
 			return
 		}
 		v.viewChangeMsgs.registerVote(sender, m)
-		v.processViewChangeMsg()
+		v.processViewChangeMsg(false)
 		return
 	}
 
@@ -287,6 +294,7 @@ func (v *ViewChanger) informNewView(info *types.ViewAndSeq) {
 	v.viewChangeMsgs.clear(v.N)
 	v.viewDataMsgs.clear(v.N)
 	v.checkTimeout = false
+	v.backOffFactor = 1 //reset
 	v.RequestsTimer.RestartTimers()
 }
 
@@ -316,18 +324,30 @@ func (v *ViewChanger) startViewChange(change *change) {
 	v.Comm.BroadcastConsensus(msg)
 	v.Logger.Debugf("Node %d started view change, last view is %d", v.SelfID, v.currView)
 	if change.stopView {
-		v.Controller.AbortView() // abort the current view when joining view change
+		v.Controller.AbortView(v.currView) // abort the current view when joining view change
 	}
 	v.startViewChangeTime = v.lastTick
 	v.checkTimeout = true
 }
 
-func (v *ViewChanger) processViewChangeMsg() {
-	if uint64(len(v.viewChangeMsgs.voted)) == uint64(v.f+1) { // join view change
+func (v *ViewChanger) processViewChangeMsg(restore bool) {
+	if (uint64(len(v.viewChangeMsgs.voted)) == uint64(v.f+1)) || restore { // join view change
 		v.Logger.Debugf("Node %d is joining view change, last view is %d", v.SelfID, v.currView)
 		v.startViewChange(&change{v.currView, true})
 	}
-	if len(v.viewChangeMsgs.voted) >= v.quorum-1 && v.nextView > v.currView { // send view data
+	if (len(v.viewChangeMsgs.voted) >= v.quorum-1 && v.nextView > v.currView) || restore { // send view data
+		if !restore {
+			msgToSave := &protos.SavedMessage{
+				Content: &protos.SavedMessage_ViewChange{
+					ViewChange: &protos.ViewChange{
+						NextView: v.currView,
+					},
+				},
+			}
+			if err := v.State.Save(msgToSave); err != nil {
+				v.Logger.Panicf("Failed to save message to state, error: %v", err)
+			}
+		}
 		v.currView = v.nextView
 		v.leader = getLeaderID(v.currView, v.N, v.nodes)
 		v.viewChangeMsgs.clear(v.N)
@@ -770,6 +790,7 @@ func (v *ViewChanger) processNewViewMsg(msg *protos.NewView) {
 		}
 		v.RequestsTimer.RestartTimers()
 		v.checkTimeout = false
+		v.backOffFactor = 1 // reset
 	}
 }
 
