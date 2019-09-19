@@ -45,7 +45,7 @@ type NodeIdentitiesByID map[uint64][]byte
 func (nibd NodeIdentitiesByID) IdentityToID(identity []byte) (uint64, bool) {
 	sID := &msp.SerializedIdentity{}
 	if err := proto.Unmarshal(identity, sID); err != nil {
-		panic(err)
+		return 0, false
 	}
 	for id, currIdentity := range nibd {
 		currentID := &msp.SerializedIdentity{}
