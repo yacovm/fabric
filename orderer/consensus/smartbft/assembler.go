@@ -9,6 +9,8 @@ package smartbft
 import (
 	"encoding/asn1"
 
+	"sync"
+
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
@@ -29,30 +31,35 @@ type Ledger interface {
 }
 
 type Assembler struct {
-	Ledger Ledger
-	Logger *flogging.FabricLogger
+	Logger          *flogging.FabricLogger
+	VerificationSeq func() uint64
+	sync.RWMutex
+	LastConfigBlockNum uint64
+	LastBlock          *common.Block
 }
 
 func (a *Assembler) AssembleProposal(metadata []byte, requests [][]byte) (nextProp types.Proposal, remainder [][]byte) {
+	a.RLock()
+	lastConfigBlockNum := a.LastConfigBlockNum
+	lastBlock := a.LastBlock
+	a.RUnlock()
+
 	if len(requests) == 0 {
 		a.Logger.Panicf("Programming error, no requests in proposal")
 	}
 	batchedRequests := singleConfigTxOrSeveralNonConfigTx(requests, a.Logger)
 
-	lastConfigBlock := lastConfigBlockFromLedgerOrPanic(a.Ledger, a.Logger)
-	lastBlock := lastBlockFromLedgerOrPanic(a.Ledger, a.Logger)
-
 	block := protoutil.NewBlock(lastBlock.Header.Number+1, protoutil.BlockHeaderHash(lastBlock.Header))
 	block.Data = &common.BlockData{Data: batchedRequests}
 	block.Header.DataHash = protoutil.BlockDataHash(block.Data)
 	block.Metadata.Metadata[common.BlockMetadataIndex_LAST_CONFIG] = protoutil.MarshalOrPanic(&common.Metadata{
-		Value: protoutil.MarshalOrPanic(&common.LastConfig{Index: lastConfigBlock.Header.Number}),
+		Value: protoutil.MarshalOrPanic(&common.LastConfig{Index: lastConfigBlockNum}),
 	})
 	block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = protoutil.MarshalOrPanic(&common.Metadata{
 		Value: protoutil.MarshalOrPanic(&common.OrdererBlockMetadata{
 			ConsenterMetadata: metadata,
 			LastConfig: &common.LastConfig{
-				Index: lastConfigBlock.Header.Number,
+				Index: lastConfigBlockNum,
 			},
 		}),
 	})
@@ -62,16 +69,11 @@ func (a *Assembler) AssembleProposal(metadata []byte, requests [][]byte) (nextPr
 		B: protoutil.MarshalOrPanic(block.Metadata),
 	}
 
-	configEnvelope, err := ConfigurationEnvelop(lastConfigBlock)
-	if err != nil {
-		a.Logger.Panicf("Failed to extract configuration envelope of last config block,err %s", err)
-	}
-
 	prop := types.Proposal{
 		Header:               protoutil.BlockHeaderBytes(block.Header),
 		Payload:              tuple.ToBytes(),
 		Metadata:             metadata,
-		VerificationSequence: int64(configEnvelope.Config.Sequence),
+		VerificationSequence: int64(a.VerificationSeq()),
 	}
 
 	return prop, requests[len(batchedRequests):]
@@ -109,7 +111,7 @@ func singleConfigTxOrSeveralNonConfigTx(requests [][]byte, logger PanicLogger) [
 	return batchedRequests
 }
 
-func lastConfigBlockFromLedgerOrPanic(ledger Ledger, logger PanicLogger) *common.Block {
+func LastConfigBlockFromLedgerOrPanic(ledger Ledger, logger PanicLogger) *common.Block {
 	block, err := lastConfigBlockFromLedger(ledger)
 	if err != nil {
 		logger.Panicf("Failed retrieving last config block: %v", err)
@@ -130,7 +132,7 @@ func lastConfigBlockFromLedger(ledger Ledger) (*common.Block, error) {
 	return lastConfigBlock, nil
 }
 
-func lastBlockFromLedgerOrPanic(ledger Ledger, logger PanicLogger) *common.Block {
+func LastBlockFromLedgerOrPanic(ledger Ledger, logger PanicLogger) *common.Block {
 	lastBlockSeq := ledger.Height() - 1
 	lastBlock := ledger.Block(lastBlockSeq)
 	if lastBlock == nil {

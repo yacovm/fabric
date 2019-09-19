@@ -74,8 +74,12 @@ func TestAssembler(t *testing.T) {
 			logger := flogging.MustGetLogger("test")
 
 			assembler := &smartbft.Assembler{
-				Logger: logger,
-				Ledger: ledger,
+				VerificationSeq: func() uint64 {
+					return 10
+				},
+				Logger:             logger,
+				LastBlock:          smartbft.LastBlockFromLedgerOrPanic(ledger, logger),
+				LastConfigBlockNum: smartbft.LastConfigBlockFromLedgerOrPanic(ledger, logger).Header.Number,
 			}
 
 			if testCase.panicVal != "" {
