@@ -62,6 +62,10 @@ type BFTChain struct {
 	consensus *smartbft.Consensus
 	support   consensus.ConsenterSupport
 	verifier  *Verifier
+	assembler *Assembler
+
+	lastBlock       *common.Block
+	lastConfigBlock *common.Block
 }
 
 // NewChain creates new BFT Smart chain
@@ -105,11 +109,13 @@ func NewChain(
 		Logger:           logger,
 	}
 
-	c.verifier = verifierBuild(support, requestInspector, id2Identities, policyManager)
+	c.lastBlock = LastBlockFromLedgerOrPanic(support, c.Logger)
+	c.lastConfigBlock = LastConfigBlockFromLedgerOrPanic(support, c.Logger)
+
+	c.verifier = buildVerifier(c.lastConfigBlock, support, requestInspector, id2Identities, policyManager)
 
 	if c.verifier.LastCommittedBlockHash == "" {
-		lastBlock := lastBlockFromLedgerOrPanic(support, c.Logger)
-		c.verifier.LastCommittedBlockHash = hex.EncodeToString(lastBlock.Header.Hash())
+		c.verifier.LastCommittedBlockHash = hex.EncodeToString(protoutil.BlockHeaderHash(c.lastBlock.Header))
 	}
 
 	c.consensus = bftSmartConsensusBuild(c, requestInspector, nodes)
@@ -127,11 +133,7 @@ func bftSmartConsensusBuild(
 ) *smartbft.Consensus {
 
 	var err error
-	// TODO: this could be optimized as we already read block to build
-	// policy manager configuration, block we read could be re-used here
-	// instead going to the ledger once again.
-	block := c.support.Block(c.support.Height() - 1)
-	latestMetadata, err := getViewMetadataFromBlock(block)
+	latestMetadata, err := getViewMetadataFromBlock(c.lastBlock)
 	if err != nil {
 		c.Logger.Panicf("Failed extracting view metadata from ledger: %v", err)
 	}
@@ -163,6 +165,13 @@ func bftSmartConsensusBuild(
 	config.LeaderHeartbeatTimeout = time.Second * 10
 	config.SelfID = c.SelfID
 
+	c.assembler = &Assembler{
+		LastBlock:          c.lastBlock,
+		LastConfigBlockNum: c.lastConfigBlock.Header.Number,
+		VerificationSeq:    c.verifier.VerificationSequence,
+		Logger:             flogging.MustGetLogger("orderer.consensus.smartbft.assembler").With(channelDecorator),
+	}
+
 	consensus := &smartbft.Consensus{
 		Config:   config,
 		Logger:   logger,
@@ -176,12 +185,9 @@ func bftSmartConsensusBuild(
 		WAL:               consensusWAL,
 		WALInitialContent: walInitState, // Read from WAL entries
 		Application:       c,
-		Assembler: &Assembler{
-			Logger: flogging.MustGetLogger("orderer.consensus.smartbft.assembler").With(channelDecorator),
-			Ledger: c.support,
-		},
-		RequestInspector: requestInspector,
-		Synchronizer:     sync,
+		Assembler:         c.assembler,
+		RequestInspector:  requestInspector,
+		Synchronizer:      sync,
 		Comm: &Egress{
 			nodes:   nodes,
 			Channel: c.support.ChainID(),
@@ -207,26 +213,29 @@ func bftSmartConsensusBuild(
 	return consensus
 }
 
-func verifierBuild(
+func buildVerifier(
+	lastConfigBlock *common.Block,
 	support consensus.ConsenterSupport,
 	requestInspector *RequestInspector,
 	id2Identities NodeIdentitiesByID,
 	policyManager policies.Manager,
 ) *Verifier {
 	channelDecorator := zap.String("channel", support.ChainID())
+	logger := flogging.MustGetLogger("orderer.consensus.smartbft.verifier").With(channelDecorator)
 	return &Verifier{
+		LastConfigBlockNum:    lastConfigBlock.Header.Number,
 		VerificationSequencer: support,
 		ReqInspector:          requestInspector,
-		Logger:                flogging.MustGetLogger("orderer.consensus.smartbft.verifier").With(channelDecorator),
+		Logger:                logger,
 		Id2Identity:           id2Identities,
 		BlockVerifier: &cluster.BlockValidationPolicyVerifier{
-			Logger:    flogging.MustGetLogger("orderer.consensus.smartbft.verifier.block").With(channelDecorator),
+			Logger:    logger,
 			Channel:   support.ChainID(),
 			PolicyMgr: policyManager,
 		},
 		AccessController: &chainACL{
 			policyManager: policyManager,
-			Logger:        flogging.MustGetLogger("orderer.consensus.smartbft.accesscontroller").With(channelDecorator),
+			Logger:        logger,
 		},
 		Ledger: support,
 	}
@@ -270,8 +279,19 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 	})
 
 	defer c.updateLastCommittedHash(block)
+	defer func() {
+		c.assembler.Lock()
+		defer c.assembler.Unlock()
+		c.assembler.LastBlock = block
+	}()
 	c.Logger.Debugf("Delivering proposal, writing block %d to the ledger, node id %d", block.Header.Number, c.SelfID)
-	if utils.IsConfigBlock(block) {
+	if protoutil.IsConfigBlock(block) {
+		defer c.updateLastConfigBlockNum(block.Header.Number)
+		defer func() {
+			c.assembler.Lock()
+			defer c.assembler.Unlock()
+			c.assembler.LastConfigBlockNum = block.Header.Number
+		}()
 		c.support.WriteConfigBlock(block, nil)
 		return
 	}
@@ -282,6 +302,13 @@ func (c *BFTChain) updateLastCommittedHash(block *common.Block) {
 	c.verifier.lock.Lock()
 	defer c.verifier.lock.Unlock()
 	c.verifier.LastCommittedBlockHash = hex.EncodeToString(block.Header.Hash())
+}
+
+func (c *BFTChain) updateLastConfigBlockNum(n uint64) {
+	c.verifier.lock.Lock()
+	defer c.verifier.lock.Unlock()
+
+	c.verifier.LastConfigBlockNum = n
 }
 
 func (c *BFTChain) Order(env *common.Envelope, configSeq uint64) error {
@@ -340,7 +367,7 @@ func (c *BFTChain) Halt() {
 }
 
 func (c *BFTChain) lastPersistedProposalAndSignatures() (*types.Proposal, []types.Signature) {
-	lastBlock := lastBlockFromLedgerOrPanic(c.support, c.Logger)
+	lastBlock := LastBlockFromLedgerOrPanic(c.support, c.Logger)
 	decision := c.blockToDecision(lastBlock)
 	return &decision.Proposal, decision.Signatures
 }

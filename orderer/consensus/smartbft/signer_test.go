@@ -62,9 +62,14 @@ func TestSignProposal(t *testing.T) {
 	ledger.On("Block", uint64(19)).Return(lastBlock)
 	ledger.On("Block", uint64(10)).Return(lastConfigBlock)
 
+	logger := flogging.MustGetLogger("test")
 	assembler := &smartbft.Assembler{
-		Logger: flogging.MustGetLogger("test"),
-		Ledger: ledger,
+		VerificationSeq: func() uint64 {
+			return 0
+		},
+		Logger:             logger,
+		LastBlock:          smartbft.LastBlockFromLedgerOrPanic(ledger, logger),
+		LastConfigBlockNum: smartbft.LastConfigBlockFromLedgerOrPanic(ledger, logger).Header.Number,
 	}
 
 	env := utils.MarshalOrPanic(&common.Envelope{Payload: []byte{1, 2, 3, 4, 5}})
