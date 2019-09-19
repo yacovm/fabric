@@ -647,10 +647,12 @@ func initializeMultichannelRegistrar(
 		logger.Info("Not bootstrapping because of existing channels")
 	}
 
-	consenters := make(map[string]consensus.Consenter)
+	dpmr := &DynamicPolicyManagerRegistry{}
+	callbacks = append(callbacks, dpmr.Update)
 
 	registrar := multichannel.NewRegistrar(*conf, lf, signer, metricsProvider, callbacks...)
 
+	consenters := make(map[string]consensus.Consenter)
 	consenters["solo"] = solo.New()
 	var kafkaMetrics *kafka.Metrics
 	consenters["kafka"], kafkaMetrics = kafka.New(conf.Kafka, metricsProvider, healthChecker)
@@ -668,7 +670,7 @@ func initializeMultichannelRegistrar(
 			{
 				// TODO: Add full initialization with required parameters. Consider to abstract out common pieces of Etcd Raft and
 				// BFT Smart to reuse them.
-				consenters["smartbft"] = smartbft.New(signer, clusterDialer, conf, srvConf, srv, registrar, metricsProvider)
+				consenters["smartbft"] = smartbft.New(dpmr.Registry(), signer, clusterDialer, conf, srvConf, srv, registrar, metricsProvider)
 			}
 		default:
 			logger.Panicf("Unknown cluster type consenter")
