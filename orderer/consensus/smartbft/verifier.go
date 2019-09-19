@@ -65,6 +65,7 @@ type Verifier struct {
 	VerificationSequencer  Sequencer
 	Ledger                 Ledger
 	LastCommittedBlockHash string
+	LastConfigBlockNum     uint64
 	Logger                 *flogging.FabricLogger
 	lock                   sync.RWMutex
 }
@@ -147,6 +148,12 @@ func (v *Verifier) lastCommittedHash() string {
 	return v.LastCommittedBlockHash
 }
 
+func (v *Verifier) lastConfigBlockNum() uint64 {
+	v.lock.RLock()
+	defer v.lock.RUnlock()
+	return v.LastConfigBlockNum
+}
+
 func verifyHashChain(block *common.Block, prevHeaderHash string) error {
 	thisHdrHashOfPrevHdr := hex.EncodeToString(block.Header.PreviousHash)
 	if prevHeaderHash != thisHdrHashOfPrevHdr {
@@ -168,21 +175,6 @@ func (v *Verifier) verifyBlockDataAndMetadata(block *common.Block, metadata []by
 
 	if block.Metadata == nil || len(block.Metadata.Metadata) < len(common.BlockMetadataIndex_name) {
 		return nil, errors.New("block metadata is either missing or contains too few entries")
-	}
-
-	lastConfig, err := protoutil.GetLastConfigIndexFromBlock(block)
-	if err != nil {
-		return nil, errors.Wrap(err, "could not fetch last config from block")
-	}
-
-	configBlock := v.Ledger.Block(lastConfig)
-	configEnvelope, err := ConfigurationEnvelop(configBlock)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal configuration payload")
-	}
-
-	if v.VerificationSequence() != configEnvelope.Config.Sequence {
-		return nil, errors.Errorf("last config in proposal is %d, expecting %d", configEnvelope.Config.Sequence, v.VerificationSequence())
 	}
 
 	signatureMetadata, err := protoutil.GetMetadataFromBlock(block, common.BlockMetadataIndex_SIGNATURES)
@@ -211,7 +203,7 @@ func (v *Verifier) verifyBlockDataAndMetadata(block *common.Block, metadata []by
 	}
 
 	// Verify last config
-
+	lastConfig := v.lastConfigBlockNum()
 	if ordererMetadataFromSignature.LastConfig == nil {
 		return nil, errors.Errorf("last config is nil")
 	}
