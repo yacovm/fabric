@@ -22,6 +22,7 @@ import (
 	"github.com/hyperledger/fabric/common/crypto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/common/metrics"
+	"github.com/hyperledger/fabric/common/policies"
 	"github.com/hyperledger/fabric/core/comm"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
@@ -44,8 +45,11 @@ type ChainGetter interface {
 	GetChain(chainID string) *multichannel.ChainSupport
 }
 
+type PolicyManagerRetriever func(channel string) policies.Manager
+
 // Consenter implementation of the BFT smart based consenter
 type Consenter struct {
+	GetPolicyManager PolicyManagerRetriever
 	Logger           *flogging.FabricLogger
 	Cert             []byte
 	Comm             *cluster.Comm
@@ -80,13 +84,13 @@ func New(
 	logger.Infof("XXX WAL Directory is %s", cfg.WALDir)
 
 	consenter := &Consenter{
+		GetPolicyManager: pmr,
 		Conf:             conf,
 		ClusterDialer:    clusterDialer,
 		Logger:           logger,
 		Cert:             srvConf.SecOpts.Certificate,
 		Chains:           r,
 		SignerSerializer: signerSerializer,
-		Registrar:        r,
 		WALBaseDir:       cfg.WALDir,
 	}
 
@@ -207,7 +211,7 @@ func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *co
 		puller,
 		c.Comm,
 		c.SignerSerializer,
-		bundle.PolicyManager(),
+		c.GetPolicyManager(support.ChainID()),
 		nodes,
 		id2Identies,
 		support,
