@@ -164,8 +164,8 @@ func (rp *Pool) NextRequests(maxCount int, maxSizeBytes uint64) (batch [][]byte,
 		req := element.Value.(*requestItem).request
 		reqLen := uint64(len(req))
 		if totalSize+reqLen > maxSizeBytes {
-			rp.logger.Debugf("Returning batch of %d requests totalling %dB as it exceeds threshold of %dB",
-				len(batch), totalSize, maxSizeBytes)
+			rp.logger.Debugf("Batch: full=true because of size; msg-count/max-count=%d/%d, total-size/max-size=%d/%d bytes",
+				len(batch), maxCount, totalSize, maxSizeBytes)
 			return batch, true
 		}
 		batch = append(batch, req)
@@ -176,10 +176,8 @@ func (rp *Pool) NextRequests(maxCount int, maxSizeBytes uint64) (batch [][]byte,
 	fullS := totalSize >= maxSizeBytes
 	fullC := len(batch) == maxCount
 	full = fullS || fullC
-	if len(batch) > 0 {
-		rp.logger.Debugf("Returning batch of %d requests totalling %dB",
-			len(batch), totalSize)
-	}
+	rp.logger.Debugf("Batch: full=%t because of count=%v size=%v; msg-count/max-count=%d/%d, total-size/max-size=%d/%d bytes",
+		full, fullC, fullS, len(batch), maxCount, totalSize, maxSizeBytes)
 	return batch, full
 }
 
@@ -195,7 +193,7 @@ func (rp *Pool) Prune(predicate func([]byte) error) {
 		}
 
 		if remErr := rp.RemoveRequest(infoVec[i]); remErr != nil {
-			rp.logger.Debugf("Failed to prune request: %s; predicate error: %s; remove error: %s", infoVec[i], err, remErr)
+			rp.logger.Warnf("Failed to prune request: %s; predicate error: %s; remove error: %s", infoVec[i], err, remErr)
 		} else {
 			rp.logger.Debugf("Pruned request: %s; predicate error: %s", infoVec[i], err)
 			numPruned++
@@ -230,7 +228,7 @@ func (rp *Pool) RemoveRequest(requestInfo types.RequestInfo) error {
 	element, exist := rp.existMap[requestInfo]
 	if !exist {
 		errStr := fmt.Sprintf("request %s is not in the pool at remove time", requestInfo)
-		rp.logger.Debugf(errStr)
+		rp.logger.Warnf(errStr)
 		return fmt.Errorf(errStr)
 	}
 
