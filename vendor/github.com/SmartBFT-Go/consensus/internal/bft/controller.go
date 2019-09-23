@@ -87,6 +87,8 @@ type Controller struct {
 	ProposerBuilder  ProposerBuilder
 	Checkpoint       *types.Checkpoint
 	ViewChanger      *ViewChanger
+	Collector        *StateCollector
+	State            State
 
 	quorum int
 	nodes  []uint64
@@ -162,7 +164,7 @@ func (c *Controller) SubmitRequest(request []byte) error {
 func (c *Controller) addRequest(info types.RequestInfo, request []byte) error {
 	err := c.RequestPool.Submit(request)
 	if err != nil {
-		c.Logger.Warnf("Request %s was not submitted, error: %s", info, err)
+		c.Logger.Infof("Request %s was not submitted, error: %s", info, err)
 		return err
 	}
 
@@ -176,11 +178,11 @@ func (c *Controller) addRequest(info types.RequestInfo, request []byte) error {
 func (c *Controller) OnRequestTimeout(request []byte, info types.RequestInfo) {
 	iAm, leaderID := c.iAmTheLeader()
 	if iAm {
-		c.Logger.Warnf("Request %s timeout expired, this node is the leader, nothing to do", info)
+		c.Logger.Infof("Request %s timeout expired, this node is the leader, nothing to do", info)
 		return
 	}
 
-	c.Logger.Warnf("Request %s timeout expired, forwarding request to leader: %d", info, leaderID)
+	c.Logger.Infof("Request %s timeout expired, forwarding request to leader: %d", info, leaderID)
 	c.Comm.SendTransaction(leaderID, request)
 
 	return
@@ -191,7 +193,7 @@ func (c *Controller) OnRequestTimeout(request []byte, info types.RequestInfo) {
 func (c *Controller) OnLeaderFwdRequestTimeout(request []byte, info types.RequestInfo) {
 	iAm, leaderID := c.iAmTheLeader()
 	if iAm {
-		c.Logger.Warnf("Request %s leader-forwarding timeout expired, this node is the leader, nothing to do", info)
+		c.Logger.Infof("Request %s leader-forwarding timeout expired, this node is the leader, nothing to do", info)
 		return
 	}
 
@@ -204,7 +206,7 @@ func (c *Controller) OnLeaderFwdRequestTimeout(request []byte, info types.Reques
 // OnAutoRemoveTimeout is called when the auto-remove timeout expires.
 // Called by the request-pool timeout goroutine.
 func (c *Controller) OnAutoRemoveTimeout(requestInfo types.RequestInfo) {
-	c.Logger.Warnf("Request %s auto-remove timeout expired, removed from the request pool", requestInfo)
+	c.Logger.Debugf("Request %s auto-remove timeout expired, removed from the request pool", requestInfo)
 }
 
 // OnHeartbeatTimeout is called when the heartbeat timeout expires.
@@ -242,6 +244,10 @@ func (c *Controller) ProcessMessages(sender uint64, m *protos.Message) {
 		c.ViewChanger.HandleMessage(sender, m)
 	case *protos.Message_HeartBeat:
 		c.LeaderMonitor.ProcessMsg(sender, m)
+	case *protos.Message_StateTransferRequest:
+		c.respondToStateTransferRequest(sender)
+	case *protos.Message_StateTransferResponse:
+		c.Collector.HandleMessage(sender, m)
 
 	case *protos.Message_Error:
 		c.Logger.Debugf("Error message handling not yet implemented, ignoring message: %v, from %d", m, sender)
@@ -249,6 +255,22 @@ func (c *Controller) ProcessMessages(sender uint64, m *protos.Message) {
 	default:
 		c.Logger.Warnf("Unexpected message type, ignoring")
 	}
+}
+
+func (c *Controller) respondToStateTransferRequest(sender uint64) {
+	vs := c.ViewSequences.Load()
+	if vs == nil {
+		c.Logger.Panicf("ViewSequences is nil")
+	}
+	msg := &protos.Message{
+		Content: &protos.Message_StateTransferResponse{
+			StateTransferResponse: &protos.StateTransferResponse{
+				ViewNum:  c.getCurrentViewNumber(),
+				Sequence: vs.(ViewSequence).ProposalSeq,
+			},
+		},
+	}
+	c.Comm.SendConsensus(sender, msg)
 }
 
 func (c *Controller) startView(proposalSequence uint64) {
@@ -318,7 +340,7 @@ func (c *Controller) Sync() {
 func (c *Controller) AbortView(view uint64) {
 	c.Logger.Debugf("AbortView, the current view num is %d", c.getCurrentViewNumber())
 
-	// don't close batcher, it will be closed in ViewChanged
+	c.Batcher.Close()
 
 	c.abortViewChan <- view
 }
@@ -385,7 +407,7 @@ func (c *Controller) run() {
 			case <-c.stopChan:
 				return
 			}
-			c.maybePruneRevokedRequests()
+			c.MaybePruneRevokedRequests()
 			if iAm, _ := c.iAmTheLeader(); iAm {
 				c.acquireLeaderToken()
 			}
@@ -414,6 +436,26 @@ func (c *Controller) sync() {
 	decision := c.Synchronizer.Sync()
 	if decision.Proposal.Metadata == nil {
 		c.Logger.Infof("Synchronizer returned with proposal metadata nil")
+		response := c.fetchState()
+		if response == nil {
+			return
+		}
+		if response.View > 0 && response.Seq == 1 {
+			c.Logger.Infof("The collected state is with view %d and sequence %d", response.View, response.Seq)
+			newViewToSave := &protos.SavedMessage{
+				Content: &protos.SavedMessage_NewView{
+					NewView: &protos.ViewMetadata{
+						ViewId:         response.View,
+						LatestSequence: 0,
+					},
+				},
+			}
+			if err := c.State.Save(newViewToSave); err != nil {
+				c.Logger.Panicf("Failed to save message to state, error: %v", err)
+			}
+			c.ViewChanger.InformNewView(response.View, 0)
+			c.viewChange <- viewInfo{viewNumber: response.View, proposalSeq: 1}
+		}
 		return
 	}
 	md := &protos.ViewMetadata{}
@@ -425,10 +467,43 @@ func (c *Controller) sync() {
 		return
 	}
 	c.Logger.Infof("Synchronized to view %d and sequence %d with verification sequence %d", md.ViewId, md.LatestSequence, decision.Proposal.VerificationSequence)
+
+	view := md.ViewId
+
+	response := c.fetchState()
+	if response != nil {
+		if response.View > md.ViewId && response.Seq == md.LatestSequence+1 {
+			c.Logger.Infof("The collected state is with view %d and sequence %d", response.View, response.Seq)
+			view = response.View
+			newViewToSave := &protos.SavedMessage{
+				Content: &protos.SavedMessage_NewView{
+					NewView: &protos.ViewMetadata{
+						ViewId:         view,
+						LatestSequence: md.LatestSequence,
+					},
+				},
+			}
+			if err := c.State.Save(newViewToSave); err != nil {
+				c.Logger.Panicf("Failed to save message to state, error: %v", err)
+			}
+		}
+	}
+
 	c.Checkpoint.Set(decision.Proposal, decision.Signatures)
 	c.verificationSequence = uint64(decision.Proposal.VerificationSequence)
-	c.ViewChanger.InformNewView(md.ViewId, md.LatestSequence)
-	c.viewChange <- viewInfo{viewNumber: md.ViewId, proposalSeq: md.LatestSequence + 1}
+	c.ViewChanger.InformNewView(view, md.LatestSequence)
+	c.viewChange <- viewInfo{viewNumber: view, proposalSeq: md.LatestSequence + 1}
+}
+
+func (c *Controller) fetchState() *types.ViewAndSeq {
+	msg := &protos.Message{
+		Content: &protos.Message_StateTransferRequest{
+			StateTransferRequest: &protos.StateTransferRequest{},
+		},
+	}
+	c.Collector.ClearCollected()
+	c.Comm.BroadcastConsensus(msg)
+	return c.Collector.CollectStateResponses()
 }
 
 func (c *Controller) grabSyncToken() {
@@ -445,7 +520,7 @@ func (c *Controller) relinquishSyncToken() {
 	}
 }
 
-func (c *Controller) maybePruneRevokedRequests() {
+func (c *Controller) MaybePruneRevokedRequests() {
 	oldVerSqn := c.verificationSequence
 	newVerSqn := c.Verifier.VerificationSequence()
 	if newVerSqn == oldVerSqn {
@@ -569,7 +644,7 @@ func (c *Controller) Decide(proposal types.Proposal, signatures []types.Signatur
 func (c *Controller) removeDeliveredFromPool(d decision) {
 	for _, reqInfo := range d.requests {
 		if err := c.RequestPool.RemoveRequest(reqInfo); err != nil {
-			c.Logger.Warnf("Error during remove of request %s from the pool : %s", reqInfo, err)
+			c.Logger.Debugf("Error during remove of request %s from the pool : %s", reqInfo, err)
 		}
 	}
 }
