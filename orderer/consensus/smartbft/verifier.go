@@ -22,15 +22,21 @@ import (
 	"github.com/pkg/errors"
 )
 
+//go:generate mockery -dir . -name Sequencer -case underscore -output mocks
+
 // Sequencer returns sequences
 type Sequencer interface {
 	Sequence() uint64
 }
 
+//go:generate mockery -dir . -name BlockVerifier -case underscore -output mocks
+
 // BlockVerifier verifies block signatures
 type BlockVerifier interface {
 	VerifyBlockSignature(sd []*common.SignedData, _ *common.ConfigEnvelope) error
 }
+
+//go:generate mockery -dir . -name AccessController -case underscore -output mocks
 
 // AccessController is used to determine if a signature of a certain client is valid
 type AccessController interface {
@@ -83,6 +89,11 @@ func (v *Verifier) VerifyProposal(proposal types.Proposal) ([]types.RequestInfo,
 	requests, err := v.verifyBlockDataAndMetadata(block, proposal.Metadata)
 	if err != nil {
 		return nil, err
+	}
+
+	verificationSeq := v.VerificationSequence()
+	if verificationSeq != uint64(proposal.VerificationSequence) {
+		return nil, errors.Errorf("expected verification sequence %d, but proposal has %d", verificationSeq, proposal.VerificationSequence)
 	}
 
 	return requests, nil
