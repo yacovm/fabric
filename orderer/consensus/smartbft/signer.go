@@ -21,7 +21,7 @@ type SignerSerializer interface {
 
 type Signer struct {
 	ID               uint64
-	SignerSerializer SignerSerializer
+	SignerSerializer identity.SignerSerializer
 	Logger           PanicLogger
 }
 

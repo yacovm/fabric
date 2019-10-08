@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"time"
 
+	"encoding/base64"
+
 	smartbft "github.com/SmartBFT-Go/consensus/pkg/consensus"
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/pkg/wal"
@@ -177,9 +179,10 @@ func bftSmartConsensusBuild(
 		Logger:   logger,
 		Verifier: c.verifier,
 		Signer: &Signer{
-			ID:               c.SelfID,
-			Logger:           flogging.MustGetLogger("orderer.consensus.smartbft.signer").With(channelDecorator),
-			SignerSerializer: c.SignerSerializer,
+			ID:                 c.SelfID,
+			Logger:             flogging.MustGetLogger("orderer.consensus.smartbft.signer").With(channelDecorator),
+			SignerSerializer:   c.SignerSerializer,
+			LastConfigBlockNum: c.verifier.lastConfigBlockNum,
 		},
 		Metadata:          latestMetadata,
 		WAL:               consensusWAL,
@@ -261,7 +264,14 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 	var ordererBlockMetadata []byte
 	for _, s := range signatures {
 		sig := &Signature{}
-		sig.Unmarshal(s.Msg)
+		if err := sig.Unmarshal(s.Msg); err != nil {
+			c.Logger.Errorf("Failed unmarshaling signature from %d: %v", s.Id, err)
+			c.Logger.Errorf("Offending signature Msg: %s", base64.StdEncoding.EncodeToString(s.Msg))
+			c.Logger.Errorf("Offending signature Value: %s", base64.StdEncoding.EncodeToString(s.Value))
+			c.Logger.Errorf("Halting chain.")
+			c.Halt()
+			return
+		}
 
 		if ordererBlockMetadata == nil {
 			ordererBlockMetadata = sig.OrdererBlockMetadata
