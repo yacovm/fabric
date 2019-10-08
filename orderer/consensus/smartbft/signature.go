@@ -24,9 +24,9 @@ type Signature struct {
 	OrdererBlockMetadata []byte
 }
 
-func (sig *Signature) Unmarshal(bytes []byte) *Signature {
-	asn1.Unmarshal(bytes, sig)
-	return sig
+func (sig *Signature) Unmarshal(bytes []byte) error {
+	_, err := asn1.Unmarshal(bytes, sig)
+	return err
 }
 
 func (sig *Signature) Marshal() []byte {
