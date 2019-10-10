@@ -51,6 +51,9 @@ func TestSignProposal(t *testing.T) {
 		SignerSerializer: ss,
 		Logger:           flogging.MustGetLogger("test"),
 		ID:               3,
+		LastConfigBlockNum: func() uint64 {
+			return 10
+		},
 	}
 
 	lastBlock := makeNonConfigBlock(19, 10)
@@ -86,7 +89,7 @@ func TestSignProposal(t *testing.T) {
 	assert.NoError(t, proto.Unmarshal(signature.SignatureHeader, sigHdr))
 	assert.Equal(t, []byte{0, 2, 4, 6}, sigHdr.Creator)
 	assert.Equal(t, signature.OrdererBlockMetadata, protoutil.MarshalOrPanic(&common.OrdererBlockMetadata{
-		LastConfig:        &common.LastConfig{Index: uint64(prop.VerificationSequence)},
+		LastConfig:        &common.LastConfig{Index: 10},
 		ConsenterMetadata: prop.Metadata,
 	}))
 }

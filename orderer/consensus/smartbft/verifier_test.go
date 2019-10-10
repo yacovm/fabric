@@ -13,6 +13,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
+	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
@@ -21,6 +22,7 @@ import (
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/msp"
 	"github.com/hyperledger/fabric/protoutil"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -55,6 +57,346 @@ func TestNodeIdentitiesByID(t *testing.T) {
 
 	_, ok = m.IdentityToID([]byte{1, 2, 3})
 	assert.False(t, ok)
+}
+
+func TestVerifySignature(t *testing.T) {
+	logger := flogging.MustGetLogger("test")
+
+	ac := &mocks.AccessController{}
+	ac.On("Evaluate", mock.Anything).Return(errors.New("bad signature"))
+
+	v := &smartbft.Verifier{
+		Logger:           logger,
+		AccessController: ac,
+		Id2Identity:      map[uint64][]byte{3: {0, 2, 4, 6}},
+	}
+
+	t.Run("identity doesn't exist", func(t *testing.T) {
+		err := v.VerifySignature(types.Signature{
+			Id: 2,
+		})
+		assert.EqualError(t, err, "node with id of 2 doesn't exist")
+	})
+
+	t.Run("signature doesn't verify", func(t *testing.T) {
+		err := v.VerifySignature(types.Signature{
+			Id: 3,
+		})
+		assert.EqualError(t, err, "bad signature")
+	})
+
+}
+
+func TestVerifyConsenterSig(t *testing.T) {
+	logger := flogging.MustGetLogger("test")
+
+	lastBlock := makeNonConfigBlock(19, 10)
+	lastConfigBlock := makeConfigBlock(10)
+
+	ac := &mocks.AccessController{}
+	ac.On("Evaluate", mock.Anything).Return(nil)
+
+	ledger := &mocks.Ledger{}
+	ledger.On("Height").Return(uint64(20))
+	ledger.On("Block", uint64(19)).Return(lastBlock)
+	ledger.On("Block", uint64(10)).Return(lastConfigBlock)
+
+	sequencer := &mocks.Sequencer{}
+	sequencer.On("Sequence").Return(uint64(12))
+
+	reqInspector := &smartbft.RequestInspector{
+		ValidateIdentityStructure: func(_ *msp.SerializedIdentity) error {
+			return nil
+		},
+	}
+
+	bv := &mocks.BlockVerifier{}
+	bv.On("VerifyBlockSignature", mock.Anything, mock.Anything).Return(errors.New("bad signature"))
+
+	lastHash := hex.EncodeToString(protoutil.BlockHeaderHash(lastBlock.Header))
+
+	for _, testCase := range []struct {
+		description                 string
+		verificationSequence        uint64
+		lastBlock                   *common.Block
+		id2Identity                 map[uint64][]byte
+		signatureMutator            func(types.Signature) types.Signature
+		lastConfigBlockNum          uint64
+		bftMetadataMutator          func([]byte) []byte
+		proposalMutator             func(proposal types.Proposal) types.Proposal
+		ordererBlockMetadataMutator func(metadata *common.OrdererBlockMetadata)
+		expectedErr                 string
+	}{
+		{
+			description:        "No consenter in mapping",
+			expectedErr:        "node with id of 3 doesn't exist",
+			lastBlock:          lastBlock,
+			lastConfigBlockNum: lastConfigBlock.Header.Number,
+		},
+		{
+			description: "Bad signature format",
+			expectedErr: "malformed signature format: asn1: structure error: tags don't match (16 vs " +
+				"{class:0 tag:1 length:2 isCompound:false}) {optional:false explicit:false application:" +
+				"false private:false defaultValue:<nil> tag:<nil> stringType:0 timeType:0 set:false omitEmpty:false} Signature @2",
+			lastBlock:          lastBlock,
+			lastConfigBlockNum: lastConfigBlock.Header.Number,
+			id2Identity:        map[uint64][]byte{3: {0, 2, 4, 6}},
+			signatureMutator: func(signature types.Signature) types.Signature {
+				return types.Signature{
+					Id:    signature.Id,
+					Value: signature.Value,
+					Msg:   []byte{1, 2, 3},
+				}
+			},
+		},
+		{
+			description:        "metadata doesn't match proposal",
+			expectedErr:        "consenter metadata in OrdererBlockMetadata doesn't match proposal",
+			lastBlock:          lastBlock,
+			lastConfigBlockNum: lastConfigBlock.Header.Number,
+			id2Identity:        map[uint64][]byte{3: {0, 2, 4, 6}},
+			signatureMutator: func(signature types.Signature) types.Signature {
+				sig := smartbft.Signature{}
+				sig.Unmarshal(signature.Msg)
+				sig.OrdererBlockMetadata = nil
+				return types.Signature{
+					Id:    signature.Id,
+					Value: signature.Value,
+					Msg:   sig.Marshal(),
+				}
+			},
+		},
+		{
+			description:        "block header doesn't match proposal",
+			expectedErr:        "mismatched block header",
+			lastBlock:          lastBlock,
+			lastConfigBlockNum: lastConfigBlock.Header.Number,
+			id2Identity:        map[uint64][]byte{3: {0, 2, 4, 6}},
+			signatureMutator: func(signature types.Signature) types.Signature {
+				sig := smartbft.Signature{}
+				sig.Unmarshal(signature.Msg)
+				sig.BlockHeader = nil
+				return types.Signature{
+					Id:    signature.Id,
+					Value: signature.Value,
+					Msg:   sig.Marshal(),
+				}
+			},
+		},
+		{
+			description:        "signature header doesn't match proposal",
+			expectedErr:        "identity in signature header does not match expected identity",
+			lastBlock:          lastBlock,
+			lastConfigBlockNum: lastConfigBlock.Header.Number,
+			id2Identity:        map[uint64][]byte{3: {0, 2, 4, 6}},
+			signatureMutator: func(signature types.Signature) types.Signature {
+				sig := smartbft.Signature{}
+				sig.Unmarshal(signature.Msg)
+				sig.SignatureHeader = nil
+				return types.Signature{
+					Id:    signature.Id,
+					Value: signature.Value,
+					Msg:   sig.Marshal(),
+				}
+			},
+		},
+		{
+			description:        "signature header is malformed",
+			expectedErr:        "malformed signature header: proto: common.SignatureHeader: illegal tag 0 (wire type 1)",
+			lastBlock:          lastBlock,
+			lastConfigBlockNum: lastConfigBlock.Header.Number,
+			id2Identity:        map[uint64][]byte{3: {0, 2, 4, 6}},
+			signatureMutator: func(signature types.Signature) types.Signature {
+				sig := smartbft.Signature{}
+				sig.Unmarshal(signature.Msg)
+				sig.SignatureHeader = []byte{1, 2, 3}
+				return types.Signature{
+					Id:    signature.Id,
+					Value: signature.Value,
+					Msg:   sig.Marshal(),
+				}
+			},
+		},
+		{
+			description:        "orderer block metadata is malformed",
+			expectedErr:        "malformed orderer metadata in signature: proto: common.OrdererBlockMetadata: illegal tag 0 (wire type 1)",
+			lastBlock:          lastBlock,
+			lastConfigBlockNum: lastConfigBlock.Header.Number,
+			id2Identity:        map[uint64][]byte{3: {0, 2, 4, 6}},
+			signatureMutator: func(signature types.Signature) types.Signature {
+				sig := smartbft.Signature{}
+				sig.Unmarshal(signature.Msg)
+				sig.OrdererBlockMetadata = []byte{1, 2, 3}
+				return types.Signature{
+					Id:    signature.Id,
+					Value: signature.Value,
+					Msg:   sig.Marshal(),
+				}
+			},
+		},
+		{
+			description:        "signature doesn't verify",
+			expectedErr:        "bad signature",
+			lastBlock:          lastBlock,
+			lastConfigBlockNum: lastConfigBlock.Header.Number,
+			id2Identity:        map[uint64][]byte{3: {0, 2, 4, 6}},
+		},
+		{
+			description: "malformed proposal",
+			expectedErr: "bad payload and metadata tuple: asn1: structure error: " +
+				"tags don't match (16 vs {class:0 tag:1 length:2 isCompound:false}) " +
+				"{optional:false explicit:false application:false private:false " +
+				"defaultValue:<nil> tag:<nil> stringType:0 timeType:0 set:false " +
+				"omitEmpty:false} ByteBufferTuple @2",
+			lastBlock:          lastBlock,
+			lastConfigBlockNum: lastConfigBlock.Header.Number,
+			id2Identity:        map[uint64][]byte{3: {0, 2, 4, 6}},
+			proposalMutator: func(proposal types.Proposal) types.Proposal {
+				proposal.Payload = []byte{1, 2, 3}
+				return proposal
+			},
+		},
+		{
+			description:        "empty proposal payload",
+			expectedErr:        "proposal payload cannot be nil",
+			lastBlock:          lastBlock,
+			lastConfigBlockNum: lastConfigBlock.Header.Number,
+			id2Identity:        map[uint64][]byte{3: {0, 2, 4, 6}},
+			proposalMutator: func(proposal types.Proposal) types.Proposal {
+				proposal.Payload = nil
+				return proposal
+			},
+		},
+		{
+			description:        "metadata too short",
+			expectedErr:        "block metadata is of size 3 but should be of size 4",
+			lastBlock:          lastBlock,
+			lastConfigBlockNum: lastConfigBlock.Header.Number,
+			id2Identity:        map[uint64][]byte{3: {0, 2, 4, 6}},
+			proposalMutator: func(proposal types.Proposal) types.Proposal {
+				block, _ := smartbft.ProposalToBlock(proposal)
+				block.Metadata.Metadata = make([][]byte, len(common.BlockMetadataIndex_name)-1)
+				bbt := &smartbft.ByteBufferTuple{}
+				bbt.FromBytes(proposal.Payload)
+				bbt.B = protoutil.MarshalOrPanic(block.Metadata)
+				proposal.Payload = bbt.ToBytes()
+				return proposal
+			},
+		},
+		{
+			description:        "malformed signature metadata",
+			expectedErr:        "malformed signature metadata: proto: common.Metadata: illegal tag 0 (wire type 1)",
+			lastBlock:          lastBlock,
+			lastConfigBlockNum: lastConfigBlock.Header.Number,
+			id2Identity:        map[uint64][]byte{3: {0, 2, 4, 6}},
+			proposalMutator: func(proposal types.Proposal) types.Proposal {
+				block, _ := smartbft.ProposalToBlock(proposal)
+				block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = []byte{1, 2, 3}
+				bbt := &smartbft.ByteBufferTuple{}
+				bbt.FromBytes(proposal.Payload)
+				bbt.B = protoutil.MarshalOrPanic(block.Metadata)
+				proposal.Payload = bbt.ToBytes()
+				return proposal
+			},
+		},
+		{
+			description:        "malformed OrdererBlockMetadata",
+			expectedErr:        "malformed orderer metadata in block: proto: common.OrdererBlockMetadata: illegal tag 0 (wire type 1)",
+			lastBlock:          lastBlock,
+			lastConfigBlockNum: lastConfigBlock.Header.Number,
+			id2Identity:        map[uint64][]byte{3: {0, 2, 4, 6}},
+			proposalMutator: func(proposal types.Proposal) types.Proposal {
+				block, _ := smartbft.ProposalToBlock(proposal)
+				md := &common.Metadata{}
+				proto.Unmarshal(block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], md)
+				md.Value = []byte{1, 2, 3}
+				block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = protoutil.MarshalOrPanic(md)
+				bbt := &smartbft.ByteBufferTuple{}
+				bbt.FromBytes(proposal.Payload)
+				bbt.B = protoutil.MarshalOrPanic(block.Metadata)
+				proposal.Payload = bbt.ToBytes()
+				return proposal
+			},
+		},
+		{
+			description:        "mismatched OrdererBlockMetadata",
+			expectedErr:        "signature's OrdererBlockMetadata and OrdererBlockMetadata extracted from block do not match",
+			lastBlock:          lastBlock,
+			lastConfigBlockNum: lastConfigBlock.Header.Number,
+			id2Identity:        map[uint64][]byte{3: {0, 2, 4, 6}},
+			proposalMutator: func(proposal types.Proposal) types.Proposal {
+				block, _ := smartbft.ProposalToBlock(proposal)
+				md := &common.Metadata{}
+				proto.Unmarshal(block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], md)
+				obm := &common.OrdererBlockMetadata{}
+				proto.Unmarshal(md.Value, obm)
+				obm.LastConfig.Index++
+				md.Value = protoutil.MarshalOrPanic(obm)
+				block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = protoutil.MarshalOrPanic(md)
+				bbt := &smartbft.ByteBufferTuple{}
+				bbt.FromBytes(proposal.Payload)
+				bbt.B = protoutil.MarshalOrPanic(block.Metadata)
+				proposal.Payload = bbt.ToBytes()
+				return proposal
+			},
+		},
+	} {
+		t.Run(testCase.description, func(t *testing.T) {
+			ss := &mocks.SignerSerializer{}
+			ss.On("Sign", mock.Anything).Return([]byte{1, 2, 3}, nil).Once()
+			ss.On("Serialize", mock.Anything).Return([]byte{0, 2, 4, 6}, nil)
+
+			s := &smartbft.Signer{
+				LastConfigBlockNum: func() uint64 {
+					return lastConfigBlock.Header.Number
+				},
+				SignerSerializer: ss,
+				Logger:           flogging.MustGetLogger("test"),
+				ID:               3,
+			}
+
+			assembler := &smartbft.Assembler{
+				VerificationSeq: func() uint64 {
+					return testCase.verificationSequence
+				},
+				Logger:             logger,
+				LastBlock:          testCase.lastBlock,
+				LastConfigBlockNum: testCase.lastConfigBlockNum,
+			}
+
+			md := protoutil.MarshalOrPanic(&smartbftprotos.ViewMetadata{
+				LatestSequence: 1,
+				ViewId:         2,
+			})
+
+			proposal, _ := assembler.AssembleProposal(md, [][]byte{nonConfigTx})
+
+			signature := *s.SignProposal(proposal)
+			if testCase.signatureMutator != nil {
+				signature = testCase.signatureMutator(signature)
+			}
+
+			v := &smartbft.Verifier{
+				Id2Identity:            testCase.id2Identity,
+				Logger:                 logger,
+				Ledger:                 ledger,
+				VerificationSequencer:  sequencer,
+				AccessController:       ac,
+				BlockVerifier:          bv,
+				ReqInspector:           reqInspector,
+				LastConfigBlockNum:     10,
+				LastCommittedBlockHash: lastHash,
+			}
+
+			if testCase.proposalMutator != nil {
+				proposal = testCase.proposalMutator(proposal)
+			}
+
+			err := v.VerifyConsenterSig(signature, proposal)
+
+			assert.EqualError(t, err, testCase.expectedErr)
+		})
+	}
 }
 
 func TestVerifyProposal(t *testing.T) {

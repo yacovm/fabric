@@ -20,9 +20,10 @@ type SignerSerializer interface {
 }
 
 type Signer struct {
-	ID               uint64
-	SignerSerializer identity.SignerSerializer
-	Logger           PanicLogger
+	ID                 uint64
+	SignerSerializer   identity.SignerSerializer
+	Logger             PanicLogger
+	LastConfigBlockNum func() uint64
 }
 
 func (s *Signer) Sign(msg []byte) []byte {
@@ -42,7 +43,7 @@ func (s *Signer) SignProposal(proposal types.Proposal) *types.Signature {
 		BlockHeader:     protoutil.BlockHeaderBytes(block.Header),
 		SignatureHeader: protoutil.MarshalOrPanic(protoutil.NewSignatureHeaderOrPanic(s.SignerSerializer)),
 		OrdererBlockMetadata: protoutil.MarshalOrPanic(&common.OrdererBlockMetadata{
-			LastConfig:        &common.LastConfig{Index: uint64(proposal.VerificationSequence)},
+			LastConfig:        &common.LastConfig{Index: uint64(s.LastConfigBlockNum())},
 			ConsenterMetadata: proposal.Metadata,
 		}),
 	}

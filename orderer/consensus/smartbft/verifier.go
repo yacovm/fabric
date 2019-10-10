@@ -11,6 +11,8 @@ import (
 	"encoding/hex"
 	"sync"
 
+	"encoding/base64"
+
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
 	"github.com/golang/protobuf/proto"
@@ -134,8 +136,12 @@ func (v *Verifier) VerifyConsenterSig(signature types.Signature, prop types.Prop
 	}
 
 	sig := &Signature{}
-	// TODO: check error
-	sig.Unmarshal(signature.Msg)
+	if err := sig.Unmarshal(signature.Msg); err != nil {
+		v.Logger.Errorf("Failed unmarshaling signature from %d: %v", signature.Id, err)
+		v.Logger.Errorf("Offending signature Msg: %s", base64.StdEncoding.EncodeToString(signature.Msg))
+		v.Logger.Errorf("Offending signature Value: %s", base64.StdEncoding.EncodeToString(signature.Value))
+		return errors.Wrap(err, "malformed signature format")
+	}
 
 	if err := v.verifySignatureIsBoundToProposal(sig, identity, prop); err != nil {
 		return err
@@ -289,6 +295,8 @@ func (v *Verifier) verifySignatureIsBoundToProposal(sig *Signature, identity []b
 
 	// Ensure block header is equal
 	if !bytes.Equal(prop.Header, sig.BlockHeader) {
+		v.Logger.Errorf("Expected block header %s but got %s", base64.StdEncoding.EncodeToString(prop.Header),
+			base64.StdEncoding.EncodeToString(sig.BlockHeader))
 		return errors.Errorf("mismatched block header")
 	}
 
@@ -298,6 +306,8 @@ func (v *Verifier) verifySignatureIsBoundToProposal(sig *Signature, identity []b
 		return errors.Wrap(err, "malformed signature header")
 	}
 	if !bytes.Equal(sigHdr.Creator, identity) {
+		v.Logger.Warnf("Expected identity %s but got %s", base64.StdEncoding.EncodeToString(sigHdr.Creator),
+			base64.StdEncoding.EncodeToString(identity))
 		return errors.Errorf("identity in signature header does not match expected identity")
 	}
 
@@ -308,6 +318,8 @@ func (v *Verifier) verifySignatureIsBoundToProposal(sig *Signature, identity []b
 	}
 
 	if !bytes.Equal(ordererMD.ConsenterMetadata, prop.Metadata) {
+		v.Logger.Warnf("Expected consenter metadata %s but got %s in proposal",
+			base64.StdEncoding.EncodeToString(ordererMD.ConsenterMetadata), base64.StdEncoding.EncodeToString(prop.Metadata))
 		return errors.Errorf("consenter metadata in OrdererBlockMetadata doesn't match proposal")
 	}
 
@@ -329,7 +341,7 @@ func (v *Verifier) verifySignatureIsBoundToProposal(sig *Signature, identity []b
 	}
 
 	ordererMDFromBlock := &common.OrdererBlockMetadata{}
-	if err := proto.Unmarshal(sig.OrdererBlockMetadata, ordererMDFromBlock); err != nil {
+	if err := proto.Unmarshal(signatureMetadata.Value, ordererMDFromBlock); err != nil {
 		return errors.Wrap(err, "malformed orderer metadata in block")
 	}
 
@@ -337,8 +349,6 @@ func (v *Verifier) verifySignatureIsBoundToProposal(sig *Signature, identity []b
 	if !proto.Equal(ordererMDFromBlock, ordererMD) {
 		return errors.Errorf("signature's OrdererBlockMetadata and OrdererBlockMetadata extracted from block do not match")
 	}
-
-	// TODO: Check last config block
 
 	return nil
 }
