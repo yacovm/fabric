@@ -8,7 +8,6 @@ package smartbft
 
 import (
 	"bytes"
-	"crypto/elliptic"
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -17,6 +16,8 @@ import (
 	"encoding/pem"
 	"math/big"
 	"time"
+
+	"crypto/ecdsa"
 
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
@@ -244,9 +245,8 @@ func sanitizeIdentity(identity []byte, logger *flogging.FabricLogger) []byte {
 		logger.Panicf("Failed unmarshaling ECDSA signature on identity: %s", string(sID.IdBytes))
 	}
 
-	// TODO: Make this robust... search the signature algorithm
-	// and match it to the curve.
-	curveOrderUsedByCryptoGen := elliptic.P256().Params().N
+	// We assume that the consenter and the CA use the same signature scheme.
+	curveOrderUsedByCryptoGen := cert.PublicKey.(*ecdsa.PublicKey).Curve.Params().N
 	halfOrder := new(big.Int).Rsh(curveOrderUsedByCryptoGen, 1)
 	// Low S, nothing to do here!
 	if s.Cmp(halfOrder) != 1 {
