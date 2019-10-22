@@ -19,12 +19,14 @@ import (
 
 	"crypto/ecdsa"
 
+	"encoding/base64"
+	"fmt"
+
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/bccsp/utils"
 	"github.com/hyperledger/fabric/common/channelconfig"
-	"github.com/hyperledger/fabric/common/configtx"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
@@ -171,25 +173,6 @@ func (ri *RequestInspector) unwrapReq(req []byte) (*request, error) {
 	}, nil
 }
 
-// ConfigurationEnvelop extract configuration envelop
-func ConfigurationEnvelop(configBlock *common.Block) (*common.ConfigEnvelope, error) {
-	envelopeConfig, err := protoutil.ExtractEnvelope(configBlock, 0)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to extract envelop from block")
-	}
-
-	payload, err := protoutil.UnmarshalPayload(envelopeConfig.Payload)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal envelop payload")
-	}
-
-	configEnvelope, err := configtx.UnmarshalConfigEnvelope(payload.Data)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal configuration payload")
-	}
-	return configEnvelope, nil
-}
-
 // ConsenterCertificate denotes a TLS certificate of a consenter
 type ConsenterCertificate []byte
 
@@ -213,7 +196,7 @@ func (conCert ConsenterCertificate) IsConsenterOfChannel(configBlock *common.Blo
 		return errors.New("no orderer config in bundle")
 	}
 	if oc.ConsensusType() != "smartbft" {
-		return errors.New("not an etcdraft config block")
+		return errors.New("not a SmartBFT config block")
 	}
 	m := &smartbft.ConfigMetadata{}
 	if err := proto.Unmarshal(oc.ConsensusMetadata(), m); err != nil {
@@ -221,6 +204,7 @@ func (conCert ConsenterCertificate) IsConsenterOfChannel(configBlock *common.Blo
 	}
 
 	for _, consenter := range m.Consenters {
+		fmt.Println(base64.StdEncoding.EncodeToString(consenter.ServerTlsCert))
 		if bytes.Equal(conCert, consenter.ServerTlsCert) || bytes.Equal(conCert, consenter.ClientTlsCert) {
 			return nil
 		}
@@ -228,7 +212,7 @@ func (conCert ConsenterCertificate) IsConsenterOfChannel(configBlock *common.Blo
 	return cluster.ErrNotInChannel
 }
 
-func sanitizeIdentity(identity []byte, logger *flogging.FabricLogger) []byte {
+func SanitizeIdentity(identity []byte, logger *flogging.FabricLogger) []byte {
 	sID := &msp.SerializedIdentity{}
 	if err := proto.Unmarshal(identity, sID); err != nil {
 		logger.Panicf("Failed unmarshaling identity %s", string(identity))
