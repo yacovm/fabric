@@ -16,6 +16,9 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 
+	"crypto/sha256"
+	"encoding/hex"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/crypto/tlsgen"
 	"github.com/hyperledger/fabric/common/flogging"
@@ -207,4 +210,50 @@ func TestSanitizeIdentity(t *testing.T) {
 			Roots: certPool,
 		})
 	})
+}
+
+func makeTx(nonce, creator []byte) []byte {
+	return protoutil.MarshalOrPanic(&common.Envelope{
+		Payload: protoutil.MarshalOrPanic(&common.Payload{
+			Header: &common.Header{
+				ChannelHeader: protoutil.MarshalOrPanic(&common.ChannelHeader{
+					Type:      int32(common.HeaderType_ENDORSER_TRANSACTION),
+					ChannelId: "test-chain",
+				}),
+				SignatureHeader: protoutil.MarshalOrPanic(&common.SignatureHeader{
+					Creator: creator,
+					Nonce:   nonce,
+				}),
+			},
+		}),
+	})
+}
+
+func TestRequestID(t *testing.T) {
+	ri := &RequestInspector{
+		ValidateIdentityStructure: func(identity *msp.SerializedIdentity) error {
+			return nil
+		},
+	}
+
+	nonce := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	creator := protoutil.MarshalOrPanic(&msp.SerializedIdentity{
+		Mspid:   "SampleOrg",
+		IdBytes: []byte{1, 2, 3},
+	})
+
+	tx := makeTx(nonce, creator)
+
+	var expectedTxID []byte
+	expectedTxID = append(expectedTxID, nonce...)
+	expectedTxID = append(expectedTxID, creator...)
+
+	txID := sha256.Sum256(expectedTxID)
+	expectedTxString := hex.EncodeToString(txID[:])
+
+	expectedClient := sha256.Sum256(creator)
+
+	info := ri.RequestID(tx)
+	assert.Equal(t, expectedTxString, info.ID)
+	assert.Equal(t, hex.EncodeToString(expectedClient[:]), info.ClientID)
 }
