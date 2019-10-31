@@ -14,18 +14,24 @@ import (
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
 )
 
+// A node could either be a leader or a follower
 const (
 	Leader   Role = false
 	Follower Role = true
 )
 
-//go:generate mockery -dir . -name HeartbeatTimeoutHandler -case underscore -output ./mocks/
+//go:generate mockery -dir . -name HeartbeatEventHandler -case underscore -output ./mocks/
 
-// HeartbeatTimeoutHandler defines who to call when a heartbeat timeout expires.
-type HeartbeatTimeoutHandler interface {
+// HeartbeatEventHandler defines who to call when a heartbeat timeout expires or a Sync needs to be triggered.
+// This is implemented by the Controller.
+type HeartbeatEventHandler interface {
+	// OnHeartbeatTimeout is called when a heartbeat timeout expires.
 	OnHeartbeatTimeout(view uint64, leaderID uint64)
+	// Sync is called when enough heartbeat responses report that the current leader's view is outdated.
+	Sync()
 }
 
+// Role indicates if this node is a follower or a leader
 type Role bool
 
 type roleChange struct {
@@ -34,47 +40,62 @@ type roleChange struct {
 	follower Role
 }
 
+// heartbeatResponseCollector is a map from node ID to view number, and hold the last response from each node.
+type heartbeatResponseCollector map[uint64]uint64
+
+// HeartbeatMonitor implements LeaderMonitor
 type HeartbeatMonitor struct {
-	scheduler     <-chan time.Time
-	inc           chan incMsg
-	stopChan      chan struct{}
-	commandChan   chan roleChange
-	logger        api.Logger
-	hbTimeout     time.Duration
-	hbCount       int
-	comm          Comm
-	handler       HeartbeatTimeoutHandler
-	view          uint64
-	leaderID      uint64
-	follower      Role
-	lastHeartbeat time.Time
-	lastTick      time.Time
-	running       sync.WaitGroup
-	runOnce       sync.Once
-	timedOut      bool
-	viewSequences *atomic.Value
+	scheduler           <-chan time.Time
+	inc                 chan incMsg
+	stopChan            chan struct{}
+	commandChan         chan roleChange
+	logger              api.Logger
+	hbTimeout           time.Duration
+	hbCount             int
+	comm                Comm
+	numberOfNodes       uint64
+	handler             HeartbeatEventHandler
+	view                uint64
+	leaderID            uint64
+	follower            Role
+	lastHeartbeat       time.Time
+	lastTick            time.Time
+	hbRespCollector     heartbeatResponseCollector
+	running             sync.WaitGroup
+	runOnce             sync.Once
+	timedOut            bool
+	syncReq             bool
+	viewSequences       *atomic.Value
+	sentHeartbeat       chan struct{}
+	artificialHeartbeat chan incMsg
 }
 
+// NewHeartbeatMonitor creates a new HeartbeatMonitor
 func NewHeartbeatMonitor(
 	scheduler <-chan time.Time,
 	logger api.Logger,
 	heartbeatTimeout time.Duration,
 	heartbeatCount int,
 	comm Comm,
-	handler HeartbeatTimeoutHandler,
+	numberOfNodes uint64,
+	handler HeartbeatEventHandler,
 	viewSequences *atomic.Value,
 ) *HeartbeatMonitor {
 	hm := &HeartbeatMonitor{
-		stopChan:      make(chan struct{}),
-		inc:           make(chan incMsg),
-		commandChan:   make(chan roleChange),
-		scheduler:     scheduler,
-		logger:        logger,
-		hbTimeout:     heartbeatTimeout,
-		hbCount:       heartbeatCount,
-		comm:          comm,
-		handler:       handler,
-		viewSequences: viewSequences,
+		stopChan:            make(chan struct{}),
+		inc:                 make(chan incMsg),
+		commandChan:         make(chan roleChange),
+		scheduler:           scheduler,
+		logger:              logger,
+		hbTimeout:           heartbeatTimeout,
+		hbCount:             heartbeatCount,
+		comm:                comm,
+		numberOfNodes:       numberOfNodes,
+		handler:             handler,
+		hbRespCollector:     make(heartbeatResponseCollector),
+		viewSequences:       viewSequences,
+		sentHeartbeat:       make(chan struct{}, 1),
+		artificialHeartbeat: make(chan incMsg, 1),
 	}
 	return hm
 }
@@ -106,16 +127,34 @@ func (hm *HeartbeatMonitor) run() {
 			hm.handleMsg(msg.sender, msg.Message)
 		case cmd := <-hm.commandChan:
 			hm.handleCommand(cmd)
+		case <-hm.sentHeartbeat:
+			hm.lastHeartbeat = hm.lastTick
+		case msg := <-hm.artificialHeartbeat:
+			hm.handleArtificialHeartBeat(msg.sender, msg.GetHeartBeat())
 		}
 	}
 }
 
-// ProcessMsg handles an incoming heartbeat.
+// ProcessMsg handles an incoming heartbeat or heartbeat-response.
 // If the sender and msg.View equal what we expect, and the timeout had not expired yet, the timeout is extended.
 func (hm *HeartbeatMonitor) ProcessMsg(sender uint64, msg *smartbftprotos.Message) {
-	hm.inc <- incMsg{
+	select {
+	case hm.inc <- incMsg{
 		sender:  sender,
 		Message: msg,
+	}:
+	case <-hm.stopChan:
+	}
+}
+
+// InjectArtificialHeartbeat injects an artificial heartbeat to the monitor
+func (hm *HeartbeatMonitor) InjectArtificialHeartbeat(sender uint64, msg *smartbftprotos.Message) {
+	select {
+	case hm.artificialHeartbeat <- incMsg{
+		sender:  sender,
+		Message: msg,
+	}:
+	default:
 	}
 }
 
@@ -145,33 +184,91 @@ func (hm *HeartbeatMonitor) ChangeRole(follower Role, view uint64, leaderID uint
 }
 
 func (hm *HeartbeatMonitor) handleMsg(sender uint64, msg *smartbftprotos.Message) {
-	if !hm.follower {
-		hm.logger.Infof("Heartbeat monitor is not a follower, ignoring; sender: %d, msg: %v", sender, msg)
+	switch msg.GetContent().(type) {
+	case *smartbftprotos.Message_HeartBeat:
+		hm.handleRealHeartBeat(sender, msg.GetHeartBeat())
+	case *smartbftprotos.Message_HeartBeatResponse:
+		hm.handleHeartBeatResponse(sender, msg.GetHeartBeatResponse())
+	default:
+		hm.logger.Warnf("Unexpected message type, ignoring")
+	}
+}
+
+func (hm *HeartbeatMonitor) handleRealHeartBeat(sender uint64, hb *smartbftprotos.HeartBeat) {
+	hm.handleHeartBeat(sender, hb, false)
+}
+
+func (hm *HeartbeatMonitor) handleArtificialHeartBeat(sender uint64, hb *smartbftprotos.HeartBeat) {
+	hm.handleHeartBeat(sender, hb, true)
+}
+
+func (hm *HeartbeatMonitor) handleHeartBeat(sender uint64, hb *smartbftprotos.HeartBeat, artificial bool) {
+	if hb.View < hm.view {
+		hm.logger.Debugf("Heartbeat view is lower than expected, sending response; expected-view=%d, received-view: %d", hm.view, hb.View)
+		hm.sendHeartBeatResponse(sender)
 		return
 	}
 
 	if sender != hm.leaderID {
-		hm.logger.Infof("Heartbeat from %d which is not the leader %d", sender, hm.leaderID)
+		hm.logger.Debugf("Heartbeat sender is not leader, ignoring; leader: %d, sender: %d", hm.leaderID, sender)
 		return
 	}
 
-	hbMsg := msg.GetHeartBeat()
-	// TODO Optimisation: check for extension due to data messages sent by leader (backlog)
-	if hbMsg == nil {
+	if hb.View > hm.view {
+		hm.logger.Debugf("Heartbeat view is bigger than expected, syncing and ignoring; expected-view=%d, received-view: %d", hm.view, hb.View)
+		hm.handler.Sync()
 		return
 	}
 
-	if hbMsg.View != hm.view {
-		hm.logger.Infof("Heartbeat view is different than monitor view, ignoring; view: %d, sender: %d, msg: %v", hm.leaderID, sender, msg)
-		return
-	}
-
-	if hm.viewActiveButBehindLeader(hbMsg) {
+	if hm.viewActiveButBehindLeader(hb) && !artificial {
+		hm.logger.Debugf("Heartbeat sequence is bigger than expected, syncing and ignoring")
+		hm.handler.Sync()
 		return
 	}
 
 	hm.logger.Debugf("Received heartbeat from %d, last heartbeat was %v ago", sender, hm.lastTick.Sub(hm.lastHeartbeat))
 	hm.lastHeartbeat = hm.lastTick
+}
+
+// handleHeartBeatResponse keeps track of responses, and if we get f+1 identical, force a sync
+func (hm *HeartbeatMonitor) handleHeartBeatResponse(sender uint64, hbr *smartbftprotos.HeartBeatResponse) {
+	if hm.follower {
+		hm.logger.Debugf("Monitor is not a leader, ignoring HeartBeatResponse; sender: %d, msg: %v", sender, hbr)
+		return
+	}
+
+	if hm.syncReq {
+		hm.logger.Debugf("Monitor already called Sync, ignoring HeartBeatResponse; sender: %d, msg: %v", sender, hbr)
+		return
+	}
+
+	if hm.view >= hbr.View {
+		hm.logger.Debugf("Monitor view: %d >= HeartBeatResponse, ignoring; sender: %d, msg: %v", hm.view, sender, hbr)
+		return
+	}
+
+	hm.logger.Debugf("Received HeartBeatResponse, msg: %v; from %d", hbr, sender)
+	hm.hbRespCollector[sender] = hbr.View
+
+	// check if we have f+1 votes
+	_, f := computeQuorum(hm.numberOfNodes)
+	if len(hm.hbRespCollector) >= f+1 {
+		hm.logger.Infof("Received HeartBeatResponse triggered a call to HeartBeatEventHandler Sync, view: %d", hbr.View)
+		hm.handler.Sync()
+		hm.syncReq = true
+	}
+}
+
+func (hm *HeartbeatMonitor) sendHeartBeatResponse(target uint64) {
+	heartbeatResponse := &smartbftprotos.Message{
+		Content: &smartbftprotos.Message_HeartBeatResponse{
+			HeartBeatResponse: &smartbftprotos.HeartBeatResponse{
+				View: hm.view,
+			},
+		},
+	}
+	hm.comm.SendConsensus(target, heartbeatResponse)
+	hm.logger.Debugf("Sent HeartBeatResponse view: %d; to %d", hm.view, target)
 }
 
 func (hm *HeartbeatMonitor) viewActiveButBehindLeader(hbMsg *smartbftprotos.HeartBeat) bool {
@@ -191,7 +288,7 @@ func (hm *HeartbeatMonitor) viewActiveButBehindLeader(hbMsg *smartbftprotos.Hear
 	areWeBehind := ourSeq+1 < hbMsg.Seq
 
 	if areWeBehind {
-		hm.logger.Infof("Leader's sequence is %d and ours is %d", hbMsg.Seq, ourSeq)
+		hm.logger.Debugf("Leader's sequence is %d and ours is %d", hbMsg.Seq, ourSeq)
 	}
 
 	return areWeBehind
@@ -224,6 +321,8 @@ func (hm *HeartbeatMonitor) handleCommand(cmd roleChange) {
 	hm.leaderID = cmd.leaderID
 	hm.follower = cmd.follower
 	hm.lastHeartbeat = hm.lastTick
+	hm.hbRespCollector = make(heartbeatResponseCollector)
+	hm.syncReq = false
 }
 
 func (hm *HeartbeatMonitor) leaderTick(now time.Time) {
@@ -268,4 +367,11 @@ func (hm *HeartbeatMonitor) followerTick(now time.Time) {
 	}
 
 	hm.logger.Debugf("Last heartbeat from %d was %v ago", hm.leaderID, delta)
+}
+
+func (hm *HeartbeatMonitor) HeartbeatWasSent() {
+	select {
+	case hm.sentHeartbeat <- struct{}{}:
+	default:
+	}
 }
