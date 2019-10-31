@@ -15,16 +15,19 @@ import (
 	"github.com/golang/protobuf/proto"
 )
 
+// Decider delivers the proposal with signatures to the application
 //go:generate mockery -dir . -name Decider -case underscore -output ./mocks/
 type Decider interface {
 	Decide(proposal types.Proposal, signatures []types.Signature, requests []types.RequestInfo)
 }
 
+// FailureDetector initiates a view change when there is a complaint
 //go:generate mockery -dir . -name FailureDetector -case underscore -output ./mocks/
 type FailureDetector interface {
 	Complain(viewNum uint64, stopView bool)
 }
 
+// Batcher batches requests to eventually become a new proposal
 //go:generate mockery -dir . -name Batcher -case underscore -output ./mocks/
 type Batcher interface {
 	NextBatch() [][]byte
@@ -33,27 +36,30 @@ type Batcher interface {
 	Reset()
 }
 
+// RequestPool is a pool of client's requests
 //go:generate mockery -dir . -name RequestPool -case underscore -output ./mocks/
-
 type RequestPool interface {
 	Prune(predicate func([]byte) error)
 	Submit(request []byte) error
 	Size() int
-	NextRequests(maxCount int, maxSizeBytes uint64) (batch [][]byte, full bool)
+	NextRequests(maxCount int, maxSizeBytes uint64, check bool) (batch [][]byte, full bool)
 	RemoveRequest(request types.RequestInfo) error
 	StopTimers()
 	RestartTimers()
 	Close()
 }
 
+// LeaderMonitor monitors the heartbeat from the current leader
 //go:generate mockery -dir . -name LeaderMonitor -case underscore -output ./mocks/
-
 type LeaderMonitor interface {
 	ChangeRole(role Role, view uint64, leaderID uint64)
 	ProcessMsg(sender uint64, msg *protos.Message)
+	InjectArtificialHeartbeat(sender uint64, msg *protos.Message)
+	HeartbeatWasSent()
 	Close()
 }
 
+// Proposer proposes a new proposal to be agreed on
 type Proposer interface {
 	Propose(proposal types.Proposal)
 	Start()
@@ -62,15 +68,19 @@ type Proposer interface {
 	HandleMessage(sender uint64, m *protos.Message)
 }
 
+// ProposerBuilder builds a new Proposer
 //go:generate mockery -dir . -name ProposerBuilder -case underscore -output ./mocks/
 type ProposerBuilder interface {
 	NewProposer(leader, proposalSequence, viewNum uint64, quorumSize int) Proposer
 }
 
+// Controller controls the entire flow of the consensus
 type Controller struct {
+	api.Comm
 	// configuration
 	ID               uint64
 	N                uint64
+	NodesList        []uint64
 	RequestPool      RequestPool
 	Batcher          Batcher
 	LeaderMonitor    LeaderMonitor
@@ -80,7 +90,6 @@ type Controller struct {
 	Application      api.Application
 	FailureDetector  FailureDetector
 	Synchronizer     api.Synchronizer
-	Comm             Comm
 	Signer           api.Signer
 	RequestInspector api.RequestInspector
 	WAL              api.WriteAheadLog
@@ -91,7 +100,6 @@ type Controller struct {
 	State            State
 
 	quorum int
-	nodes  []uint64
 
 	currView Proposer
 
@@ -137,9 +145,10 @@ func (c *Controller) iAmTheLeader() (bool, uint64) {
 
 // thread safe
 func (c *Controller) leaderID() uint64 {
-	return getLeaderID(c.getCurrentViewNumber(), c.N, c.nodes)
+	return getLeaderID(c.getCurrentViewNumber(), c.N, c.NodesList)
 }
 
+// HandleRequest handles a request from the client
 func (c *Controller) HandleRequest(sender uint64, req []byte) {
 	iAm, leaderID := c.iAmTheLeader()
 	if !iAm {
@@ -210,7 +219,7 @@ func (c *Controller) OnAutoRemoveTimeout(requestInfo types.RequestInfo) {
 }
 
 // OnHeartbeatTimeout is called when the heartbeat timeout expires.
-// Called by the HeartbeatMonitor timer goroutine.
+// Called by the HeartbeatMonitor goroutine.
 func (c *Controller) OnHeartbeatTimeout(view uint64, leaderID uint64) {
 	c.Logger.Debugf("Heartbeat timeout expired, reported-view: %d, reported-leader: %d", view, leaderID)
 
@@ -240,9 +249,12 @@ func (c *Controller) ProcessMessages(sender uint64, m *protos.Message) {
 		c.currViewLock.RUnlock()
 		view.HandleMessage(sender, m)
 		c.ViewChanger.HandleViewMessage(sender, m)
+		if sender == c.leaderID() {
+			c.LeaderMonitor.InjectArtificialHeartbeat(sender, c.convertViewMessageToHeartbeat(m))
+		}
 	case *protos.Message_ViewChange, *protos.Message_ViewData, *protos.Message_NewView:
 		c.ViewChanger.HandleMessage(sender, m)
-	case *protos.Message_HeartBeat:
+	case *protos.Message_HeartBeat, *protos.Message_HeartBeatResponse:
 		c.LeaderMonitor.ProcessMsg(sender, m)
 	case *protos.Message_StateTransferRequest:
 		c.respondToStateTransferRequest(sender)
@@ -271,6 +283,19 @@ func (c *Controller) respondToStateTransferRequest(sender uint64) {
 		},
 	}
 	c.Comm.SendConsensus(sender, msg)
+}
+
+func (c *Controller) convertViewMessageToHeartbeat(m *protos.Message) *protos.Message {
+	view := viewNumber(m)
+	seq := proposalSequence(m)
+	return &protos.Message{
+		Content: &protos.Message_HeartBeat{
+			HeartBeat: &protos.HeartBeat{
+				View: view,
+				Seq:  seq,
+			},
+		},
+	}
 }
 
 func (c *Controller) startView(proposalSequence uint64) {
@@ -329,6 +354,7 @@ func (c *Controller) abortView(view uint64) {
 	c.currView.Abort()
 }
 
+// Sync initiates a synchronization
 func (c *Controller) Sync() {
 	if iAmLeader, _ := c.iAmTheLeader(); iAmLeader {
 		c.Batcher.Close()
@@ -383,7 +409,6 @@ func (c *Controller) propose() {
 		c.Logger.Debugf("Assembler packed only some of the batch TX's into the proposal, length of: batch=%d, remainder=%d, in-proposal=%d",
 			len(nextBatch), len(remainder), len(nextBatch)-len(remainder))
 	}
-	c.Logger.Debugf("Leader proposing proposal: %v", proposal)
 	c.currView.Propose(proposal)
 }
 
@@ -421,6 +446,7 @@ func (c *Controller) run() {
 			c.propose()
 		case <-c.syncChan:
 			c.sync()
+			c.MaybePruneRevokedRequests()
 		}
 	}
 }
@@ -502,7 +528,7 @@ func (c *Controller) fetchState() *types.ViewAndSeq {
 		},
 	}
 	c.Collector.ClearCollected()
-	c.Comm.BroadcastConsensus(msg)
+	c.BroadcastConsensus(msg)
 	return c.Collector.CollectStateResponses()
 }
 
@@ -520,6 +546,7 @@ func (c *Controller) relinquishSyncToken() {
 	}
 }
 
+// MaybePruneRevokedRequests prunes requests with different verification sequence
 func (c *Controller) MaybePruneRevokedRequests() {
 	oldVerSqn := c.verificationSequence
 	newVerSqn := c.Verifier.VerificationSequence()
@@ -566,8 +593,6 @@ func (c *Controller) Start(startViewNumber uint64, startProposalSequence uint64)
 	Q, F := computeQuorum(c.N)
 	c.Logger.Debugf("The number of nodes (N) is %d, F is %d, and the quorum size is %d", c.N, F, Q)
 	c.quorum = Q
-
-	c.nodes = c.Comm.Nodes()
 
 	c.currViewNumber = startViewNumber
 	c.startView(startProposalSequence)
@@ -658,4 +683,21 @@ type decision struct {
 	proposal   types.Proposal
 	signatures []types.Signature
 	requests   []types.RequestInfo
+}
+
+//BroadcastConsensus broadcasts the message and informs the heartbeat monitor if necessary
+func (c *Controller) BroadcastConsensus(m *protos.Message) {
+	for _, node := range c.NodesList {
+		// Do not send to yourself
+		if c.ID == node {
+			continue
+		}
+		c.Comm.SendConsensus(node, m)
+	}
+
+	if m.GetPrePrepare() != nil || m.GetPrepare() != nil || m.GetCommit() != nil {
+		if leader, _ := c.iAmTheLeader(); leader {
+			c.LeaderMonitor.HeartbeatWasSent()
+		}
+	}
 }
