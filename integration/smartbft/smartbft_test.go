@@ -292,7 +292,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Starting view with number 0 and sequence 2"))
 
 			By("Waiting communication to be established from the leader")
-			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 0"))
+			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 0 channel=testchannel1"))
 
 			By("Waiting for follower to understand it is behind")
 			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Leader's sequence is 5 and ours is 2"))
