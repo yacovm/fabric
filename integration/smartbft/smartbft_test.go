@@ -403,8 +403,8 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 				assertBlockReception(map[string]int{channel: 2}, network.Orderers[:4], peer, network)
 			}
 
-			restart := func() {
-				for i, orderer := range network.Orderers[:4] {
+			restart := func(until int) {
+				for i, orderer := range network.Orderers[:until] {
 					By(fmt.Sprintf("Killing %s", orderer.Name))
 					ordererProcesses[i].Signal(syscall.SIGTERM)
 					Eventually(ordererProcesses[i].Wait(), network.EventuallyTimeout).Should(Receive())
@@ -419,7 +419,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			}
 
 			By("Restarting all orderers")
-			restart()
+			restart(4)
 
 			By("Waiting for followers to see the leader")
 			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 0"))
@@ -439,6 +439,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 
 			By("Launching the added orderer")
 			runner := network.OrdererRunner(orderer5)
+			ordererRunners = append(ordererRunners, runner)
 			proc := ifrit.Invoke(runner)
 			ordererProcesses = append(ordererProcesses, proc)
 			Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
@@ -457,9 +458,14 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			By("Ensure all nodes are in sync")
 			assertBlockReception(map[string]int{channel: 7}, network.Orderers, peer, network)
 
-			By("Killing the added node")
-			proc.Signal(syscall.SIGTERM)
-			Eventually(proc.Wait(), network.EventuallyTimeout).Should(Receive())
+			By("Enter maintenance mode")
+			for _, channel := range []string{"systemchannel", "testchannel1"} {
+				updateConsensusState(network, peer, orderer, channel, protosorderer.ConsensusType_STATE_MAINTENANCE)
+			}
+			assertBlockReception(map[string]int{
+				"systemchannel": 5,
+				"testchannel1":  10,
+			}, network.Orderers, peer, network)
 
 			By("Removing the added node from the channels")
 			for _, channel := range []string{"systemchannel", "testchannel1"} {
@@ -469,18 +475,25 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			}
 
 			assertBlockReception(map[string]int{
-				"systemchannel": 3,
-				"testchannel1":  8,
-			}, network.Orderers[:4], peer, network)
+				"systemchannel": 6,
+				"testchannel1":  11,
+			}, network.Orderers, peer, network)
 
 			By("Restarting all orderers")
-			restart()
+			restart(5)
+			By("Waiting for followers to see the leader")
+			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 0"))
+			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 0"))
+			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 0"))
 
-			By("Launching the added orderer again")
-			runner = network.OrdererRunner(orderer5)
-			proc = ifrit.Invoke(runner)
-			ordererProcesses[4] = proc
-			Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
+			By("Exit maintenance mode")
+			for _, channel := range []string{"systemchannel", "testchannel1"} {
+				updateConsensusState(network, peer, orderer, channel, protosorderer.ConsensusType_STATE_NORMAL)
+			}
+			assertBlockReception(map[string]int{
+				"systemchannel": 7,
+				"testchannel1":  12,
+			}, network.Orderers[:4], peer, network)
 
 			By("Ensuring the leader talks to existing followers")
 			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 0"))
@@ -496,19 +509,8 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 				"testchannel1":  9,
 			}, network.Orderers[:4], peer, network)
 
-			By("Ensuring the removed node didn't get the blocks")
-			assertBlockReception(map[string]int{
-				"systemchannel": 2,
-				"testchannel1":  7,
-			}, []*nwo.Orderer{orderer5}, peer, network)
-
-			By("Waiting for the removed node to start a view change")
-			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Heartbeat timeout expired, complaining about leader"))
-
-			By("Ensuring the other nodes do not speak with the removed node")
-			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("certificate extracted from TLS connection isn't authorized"))
-			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("certificate extracted from TLS connection isn't authorized"))
-			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("certificate extracted from TLS connection isn't authorized"))
+			By("Waiting for the removed node to say the channel is not serviced by it")
+			Eventually(ordererRunners[4].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("channel systemchannel is not serviced by me"))
 		})
 
 		It("smartbft multiple nodes view change", func() {
