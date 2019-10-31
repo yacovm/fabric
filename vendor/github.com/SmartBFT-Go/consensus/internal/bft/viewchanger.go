@@ -18,17 +18,20 @@ import (
 	"github.com/pkg/errors"
 )
 
+// ViewController controls the view
 //go:generate mockery -dir . -name ViewController -case underscore -output ./mocks/
 type ViewController interface {
 	ViewChanged(newViewNumber uint64, newProposalSequence uint64)
 	AbortView(view uint64)
 }
 
+// Pruner prunes revoked requests
 //go:generate mockery -dir . -name Pruner -case underscore -output ./mocks/
 type Pruner interface {
 	MaybePruneRevokedRequests()
 }
 
+// RequestsTimer controls requests
 //go:generate mockery -dir . -name RequestsTimer -case underscore -output ./mocks/
 type RequestsTimer interface {
 	StopTimers()
@@ -41,13 +44,14 @@ type change struct {
 	stopView bool
 }
 
+// ViewChanger is responsible for running the view change protocol
 type ViewChanger struct {
 	// Configuration
-	SelfID uint64
-	nodes  []uint64
-	N      uint64
-	f      int
-	quorum int
+	SelfID    uint64
+	NodesList []uint64
+	N         uint64
+	f         int
+	quorum    int
 
 	Logger       api.Logger
 	Comm         Comm
@@ -103,8 +107,6 @@ func (v *ViewChanger) Start(startViewNumber uint64) {
 	v.startChangeChan = make(chan *change, 1)
 	v.informChan = make(chan *types.ViewAndSeq, 1)
 
-	v.nodes = v.Comm.Nodes()
-
 	v.quorum, v.f = computeQuorum(v.N)
 
 	v.stopChan = make(chan struct{})
@@ -116,7 +118,7 @@ func (v *ViewChanger) Start(startViewNumber uint64) {
 	// set without locking
 	v.currView = startViewNumber
 	v.nextView = v.currView
-	v.leader = getLeaderID(v.currView, v.N, v.nodes)
+	v.leader = getLeaderID(v.currView, v.N, v.NodesList)
 
 	v.lastTick = time.Now()
 	v.lastResend = v.lastTick
@@ -296,7 +298,7 @@ func (v *ViewChanger) informNewView(info *types.ViewAndSeq) {
 	v.Logger.Debugf("Node %d was informed of a new view %d", v.SelfID, view)
 	v.currView = view
 	v.nextView = v.currView
-	v.leader = getLeaderID(v.currView, v.N, v.nodes)
+	v.leader = getLeaderID(v.currView, v.N, v.NodesList)
 	v.viewChangeMsgs.clear(v.N)
 	v.viewDataMsgs.clear(v.N)
 	v.checkTimeout = false
@@ -316,6 +318,11 @@ func (v *ViewChanger) StartViewChange(view uint64, stopView bool) {
 func (v *ViewChanger) startViewChange(change *change) {
 	if change.view < v.currView { // this is about an old view
 		v.Logger.Debugf("Node %d has a view change request with an old view %d, while the current view is %d", v.SelfID, change.view, v.currView)
+		return
+	}
+	if v.nextView == v.currView+1 {
+		v.Logger.Debugf("Node %d has already started view change with last view %d", v.SelfID, v.currView)
+		v.checkTimeout = true // make sure timeout is checked anyway
 		return
 	}
 	v.nextView = v.currView + 1
@@ -355,7 +362,7 @@ func (v *ViewChanger) processViewChangeMsg(restore bool) {
 			}
 		}
 		v.currView = v.nextView
-		v.leader = getLeaderID(v.currView, v.N, v.nodes)
+		v.leader = getLeaderID(v.currView, v.N, v.NodesList)
 		v.viewChangeMsgs.clear(v.N)
 		v.viewDataMsgs.clear(v.N) // clear because currView changed
 
@@ -451,7 +458,7 @@ func (v *ViewChanger) validateViewDataMsg(vd *protos.SignedViewData, sender uint
 		v.Logger.Warnf("Node %d got viewData message %v from %d, but %d is in view %d", v.SelfID, rvd, sender, v.SelfID, v.currView)
 		return false
 	}
-	if getLeaderID(rvd.NextView, v.N, v.nodes) != v.SelfID { // check if I am the next leader
+	if getLeaderID(rvd.NextView, v.N, v.NodesList) != v.SelfID { // check if I am the next leader
 		v.Logger.Warnf("Node %d got viewData message %v from %d, but %d is not the next leader", v.SelfID, rvd, sender, v.SelfID)
 		return false
 	}
@@ -469,6 +476,7 @@ func (v *ViewChanger) validateViewDataMsg(vd *protos.SignedViewData, sender uint
 	return true
 }
 
+// ValidateLastDecision validates the given decision, and returns its sequence when valid
 func ValidateLastDecision(vd *protos.ViewData, quorum int, N uint64, verifier api.Verifier) (lastSequence uint64, err error) {
 	if vd.LastDecision == nil {
 		return 0, errors.Errorf("the last decision is not set")
@@ -517,6 +525,7 @@ func ValidateLastDecision(vd *protos.ViewData, quorum int, N uint64, verifier ap
 	return md.LatestSequence, nil
 }
 
+// ValidateInFlight validates the given in-flight proposal
 func ValidateInFlight(inFlightProposal *protos.Proposal, lastSequence uint64) error {
 	if inFlightProposal == nil {
 		return nil
@@ -594,8 +603,9 @@ type proposalAndMetadata struct {
 	metadata *protos.ViewMetadata
 }
 
+// CheckInFlight checks if there is an in-flight proposal that needs to be decided on (because a node might decided on it already)
 func CheckInFlight(messages []*protos.ViewData, f int, quorum int, N uint64, verifier api.Verifier) (ok, noInFlight bool, inFlightProposal *protos.Proposal, err error) {
-	expectedSequence := MaxLastDecisionSequence(messages, quorum, N, verifier) + 1
+	expectedSequence := maxLastDecisionSequence(messages, quorum, N, verifier) + 1
 	possibleProposals := make([]*possibleProposal, 0)
 	proposalsAndMetadata := make([]*proposalAndMetadata, 0)
 	noInFlightCount := 0
@@ -692,7 +702,7 @@ func CheckInFlight(messages []*protos.ViewData, f int, quorum int, N uint64, ver
 	return false, false, nil, nil
 }
 
-func MaxLastDecisionSequence(messages []*protos.ViewData, quorum int, N uint64, verifier api.Verifier) uint64 {
+func maxLastDecisionSequence(messages []*protos.ViewData, quorum int, N uint64, verifier api.Verifier) uint64 {
 	max := uint64(0)
 	for _, vd := range messages {
 		seq, err := ValidateLastDecision(vd, quorum, N, verifier)
@@ -968,6 +978,7 @@ func (v *ViewChanger) commitInFlightProposal(proposal *protos.Proposal) {
 	v.inFlightView.Abort()
 }
 
+// Decide delivers to the application and informs the view changer after delivery
 func (v *ViewChanger) Decide(proposal types.Proposal, signatures []types.Signature, requests []types.RequestInfo) {
 	v.inFlightView.stop()
 	v.Logger.Debugf("Delivering to app the last decision proposal %v", proposal)
@@ -982,10 +993,12 @@ func (v *ViewChanger) Decide(proposal types.Proposal, signatures []types.Signatu
 	v.inFlightDecideChan <- struct{}{}
 }
 
+// Complain panics when a view change is requested
 func (v *ViewChanger) Complain(viewNum uint64, stopView bool) {
 	v.Logger.Panicf("Node %d has complained while in the view for the in flight proposal", v.SelfID)
 }
 
+// Sync calls the synchronizer and informs the view changer of the sync
 func (v *ViewChanger) Sync() {
 	// the in flight proposal view asked to sync
 	v.Logger.Debugf("Node %d is calling sync because the in flight proposal view has asked to sync", v.SelfID)
