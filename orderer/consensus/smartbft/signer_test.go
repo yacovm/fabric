@@ -84,7 +84,7 @@ func TestSignProposal(t *testing.T) {
 	signature := smartbft.Signature{}
 	signature.Unmarshal(sig.Msg)
 
-	assert.Equal(t, s.ID, sig.Id)
+	assert.Equal(t, s.ID, sig.ID)
 	assert.Equal(t, []byte{1, 2, 3}, sig.Value)
 	assert.Equal(t, prop.Header, signature.BlockHeader)
 	sigHdr := &common.SignatureHeader{}

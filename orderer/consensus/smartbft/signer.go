@@ -49,7 +49,7 @@ func (s *Signer) SignProposal(proposal types.Proposal) *types.Signature {
 
 	signature := utils.SignOrPanic(s.SignerSerializer, sig.AsBytes())
 	return &types.Signature{
-		Id:    s.ID,
+		ID:    s.ID,
 		Value: signature,
 		Msg:   sig.Marshal(),
 	}
