@@ -617,7 +617,7 @@ func initializeMultichannelRegistrar(
 	srvConf comm.ServerConfig,
 	srv *comm.GRPCServer,
 	conf *localconfig.TopLevel,
-	signer crypto.LocalSigner,
+	signer crypto.SignerSupport,
 	metricsProvider metrics.Provider,
 	healthChecker healthChecker,
 	lf blockledger.Factory,
@@ -634,7 +634,7 @@ func initializeMultichannelRegistrar(
 	dpmr := &DynamicPolicyManagerRegistry{}
 	callbacks = append(callbacks, dpmr.Update)
 
-	registrar := multichannel.NewRegistrar(*conf, lf, signer, metricsProvider, callbacks...)
+	registrar := multichannel.NewRegistrar(*conf, lf, &localSigner{signer: signer}, metricsProvider, callbacks...)
 
 	consenters := make(map[string]consensus.Consenter)
 	consenters["solo"] = solo.New()
@@ -867,4 +867,32 @@ func prettyPrintStruct(i interface{}) {
 		buffer.WriteString(params[i])
 	}
 	logger.Infof("Orderer config values:%s\n", buffer.String())
+}
+
+func newSignatureHeaderOrPanic(signer crypto.SignerSupport) *cb.SignatureHeader {
+	creator, err := signer.Serialize()
+	if err != nil {
+		panic(err)
+	}
+	nonce, err := crypto.GetRandomNonce()
+	if err != nil {
+		panic(err)
+	}
+
+	return &cb.SignatureHeader{
+		Creator: creator,
+		Nonce:   nonce,
+	}
+}
+
+type localSigner struct {
+	signer smartbft.SignerSerializer
+}
+
+func (ls *localSigner) NewSignatureHeader() (*cb.SignatureHeader, error) {
+	return newSignatureHeaderOrPanic(ls.signer), nil
+}
+
+func (ls *localSigner) Sign(message []byte) ([]byte, error) {
+	return ls.signer.Sign(message)
 }

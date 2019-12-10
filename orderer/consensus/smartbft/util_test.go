@@ -27,6 +27,7 @@ import (
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
 	"github.com/hyperledger/fabric/orderer/mocks/common/multichannel"
 	"github.com/hyperledger/fabric/protos/common"
+	"github.com/hyperledger/fabric/protos/msp"
 	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/stretchr/testify/assert"
 )
@@ -75,19 +76,16 @@ func TestNewBlockPuller(t *testing.T) {
 }
 
 func TestIsConsenterOfChannel(t *testing.T) {
-	certInsideConfigBlock, err := base64.StdEncoding.DecodeString("LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURDakNDQXJDZ0F3SUJB" +
-		"Z0lRSVdvNWZYbDVFT3RIbmlqUXdMSVhXekFLQmdncWhrak9QUVFEQWpCc01Rc3cKQ1FZRFZRUUdFd0pWVXpFVE1CRUdBMVVFQ0JNS1EyRnNhV1p2Y201cFlUR" +
-		"VdNQlFHQTFVRUJ4TU5VMkZ1SUVaeQpZVzVqYVhOamJ6RVVNQklHQTFVRUNoTUxaWGhoYlhCc1pTNWpiMjB4R2pBWUJnTlZCQU1URVhSc2MyTmhMbVY0CllXM" +
-		"XdiR1V1WTI5dE1CNFhEVEU1TVRBeU1qRXlNVFF3TUZvWERUSTVNVEF4T1RFeU1UUXdNRm93V1RFTE1Ba0cKQTFVRUJoTUNWVk14RXpBUkJnTlZCQWdUQ2tOaG" +
-		"JHbG1iM0p1YVdFeEZqQVVCZ05WQkFjVERWTmhiaUJHY21GdQpZMmx6WTI4eEhUQWJCZ05WQkFNVEZHOXlaR1Z5WlhJeUxtVjRZVzF3YkdVdVkyOXRNRmt3RX" +
-		"dZSEtvWkl6ajBDCkFRWUlLb1pJemowREFRY0RRZ0FFS1ZIYnEzUENJTnJzdmpWRXQ1S29aNjFpbTQ0cStuNVFjd1ltaFhBUlVPSU0Kanl2dyt0bXpDcTlCeW" +
-		"tLRTRBY1pKUHVib1lRa2JhS2RTMkVqbGF3YmJxT0NBVVV3Z2dGQk1BNEdBMVVkRHdFQgovd1FFQXdJRm9EQWRCZ05WSFNVRUZqQVVCZ2dyQmdFRkJRY0RBUV" +
-		"lJS3dZQkJRVUhBd0l3REFZRFZSMFRBUUgvCkJBSXdBREFyQmdOVkhTTUVKREFpZ0NDMHhsZkxxOGNBTTNjdElJN2Jiek9HWFhtQ3JqeFBCb3pObCtKL2UrSj" +
-		"cKRXpDQjFBWURWUjBSQklITU1JSEpnaFJ2Y21SbGNtVnlNaTVsZUdGdGNHeGxMbU52YllJSWIzSmtaWEpsY2pLQwpDV3h2WTJGc2FHOXpkSUlKTVRJM0xqQX" +
-		"VNQzR4Z2dNNk9qR0NGRzl5WkdWeVpYSXlMbVY0WVcxd2JHVXVZMjl0CmdnaHZjbVJsY21WeU1vSUpiRzlqWVd4b2IzTjBnZ2t4TWpjdU1DNHdMakdDQXpvNk" +
-		"1ZSVViM0prWlhKbGNqSXUKWlhoaGJYQnNaUzVqYjIyQ0NHOXlaR1Z5WlhJeWdnbHNiMk5oYkdodmMzU0NDVEV5Tnk0d0xqQXVNWUlET2pveApod1IvQUFBQ" +
-		"mh4QUFBQUFBQUFBQUFBQUFBQUFBQUFBQk1Bb0dDQ3FHU000OUJBTUNBMGdBTUVVQ0lRQ1Nod1N1CitLd3YvaVdobHVJMU5UNDYyYzFNamNvam8wNTVKOG9Q" +
-		"M0VLKzN3SWdhMFhqT0JZd3dFSTZQRlZCY0V5MjA4TG4Kc0NCUE5NdTdNeFFRR3NFbnc3ST0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=")
+	certInsideConfigBlock, err := base64.StdEncoding.DecodeString("LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUNmekNDQWlhZ0F3SUJBZ0lSQUlMS" +
+		"ThQL1ZwTXZIUWxJTTJkRWZ0aHd3Q2dZSUtvWkl6ajBFQXdJd2JERUwKTUFrR0ExVUVCaE1DVlZNeEV6QVJCZ05WQkFnVENrTmhiR2xtYjNKdWFXRXhGakFVQmdOVkJBY1R" +
+		"EVk5oYmlCRwpjbUZ1WTJselkyOHhGREFTQmdOVkJBb1RDMlY0WVcxd2JHVXVZMjl0TVJvd0dBWURWUVFERXhGMGJITmpZUzVsCmVHRnRjR3hsTG1OdmJUQWVGdzB4T1RFe" +
+		"U1UWXhNVEU0TURCYUZ3MHlPVEV5TVRNeE1URTRNREJhTUZreEN6QUoKQmdOVkJBWVRBbFZUTVJNd0VRWURWUVFJRXdwRFlXeHBabTl5Ym1saE1SWXdGQVlEVlFRSEV3MVR" +
+		"ZVzRnUm5KaApibU5wYzJOdk1SMHdHd1lEVlFRREV4UnZjbVJsY21WeU5DNWxlR0Z0Y0d4bExtTnZiVEJaTUJNR0J5cUdTTTQ5CkFnRUdDQ3FHU000OUF3RUhBMElBQkF4Z" +
+		"UJxaVRnN21TK1dURGpvd0c4V3pmeFI2L1FHNEFxdHJYaTJRNTBKMUwKY2xkdzF4bTdJejQ4THZqa3pTTjNRMm9peFRHVjB6ZFFzcUtuOWNyRXp0MmpnYnN3Z2Jnd0RnWUR" +
+		"WUjBQQVFILwpCQVFEQWdXZ01CMEdBMVVkSlFRV01CUUdDQ3NHQVFVRkJ3TUJCZ2dyQmdFRkJRY0RBakFNQmdOVkhSTUJBZjhFCkFqQUFNQ3NHQTFVZEl3UWtNQ0tBSUUzY" +
+		"VEwV2IrSXlSM0xFa2RmNWRyaUoyYlU0MXYvcUNTQkxMQlhXazZxSHMKTUV3R0ExVWRFUVJGTUVPQ0ZHOXlaR1Z5WlhJMExtVjRZVzF3YkdVdVkyOXRnZ2h2Y21SbGNtVnl" +
+		"OSUlKYkc5agpZV3hvYjNOMGh3Ui9BQUFCaHhBQUFBQUFBQUFBQUFBQUFBQUFBQUFCTUFvR0NDcUdTTTQ5QkFNQ0EwY0FNRVFDCklFTGdpYzNSSU9QRjFucll2Rit2STBTc" +
+		"mVPN1dEc2FTM0NOaDZqdUdkTGlOQWlCOHdSYVRXY3ZaKzg4Qkxwc3QKVkdnUE9PbVAzRTJPeVJVMEpTWFFMamlHeFE9PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==")
 	assert.NoError(t, err)
 
 	loadBlock := func(fileName string) *common.Block {
@@ -119,7 +117,7 @@ func TestIsConsenterOfChannel(t *testing.T) {
 				" error unmarshaling Payload: proto: common.Payload: illegal tag 0 (wire type 1)",
 			configBlock: &common.Block{
 				Data: &common.BlockData{
-					Data: [][]byte{protoutil.MarshalOrPanic(&common.Envelope{
+					Data: [][]byte{utils.MarshalOrPanic(&common.Envelope{
 						Payload: []byte{1, 2, 3},
 					})},
 				},
@@ -178,7 +176,7 @@ func TestSanitizeIdentity(t *testing.T) {
 			Mspid:   "SampleOrg",
 			IdBytes: cert,
 		}
-		identityPreSanitation := protoutil.MarshalOrPanic(identity)
+		identityPreSanitation := utils.MarshalOrPanic(identity)
 		identityAfterSanitation := SanitizeIdentity(identityPreSanitation, logger)
 		assert.Equal(t, identityPreSanitation, identityAfterSanitation)
 	})
@@ -194,7 +192,7 @@ func TestSanitizeIdentity(t *testing.T) {
 			Mspid:   "SampleOrg",
 			IdBytes: cert,
 		}
-		identityPreSanitation := protoutil.MarshalOrPanic(identity)
+		identityPreSanitation := utils.MarshalOrPanic(identity)
 		identityAfterSanitation := SanitizeIdentity(identityPreSanitation, logger)
 		assert.NotEqual(t, identityPreSanitation, identityAfterSanitation)
 
@@ -212,14 +210,14 @@ func TestSanitizeIdentity(t *testing.T) {
 }
 
 func makeTx(nonce, creator []byte) []byte {
-	return protoutil.MarshalOrPanic(&common.Envelope{
-		Payload: protoutil.MarshalOrPanic(&common.Payload{
+	return utils.MarshalOrPanic(&common.Envelope{
+		Payload: utils.MarshalOrPanic(&common.Payload{
 			Header: &common.Header{
-				ChannelHeader: protoutil.MarshalOrPanic(&common.ChannelHeader{
+				ChannelHeader: utils.MarshalOrPanic(&common.ChannelHeader{
 					Type:      int32(common.HeaderType_ENDORSER_TRANSACTION),
 					ChannelId: "test-chain",
 				}),
-				SignatureHeader: protoutil.MarshalOrPanic(&common.SignatureHeader{
+				SignatureHeader: utils.MarshalOrPanic(&common.SignatureHeader{
 					Creator: creator,
 					Nonce:   nonce,
 				}),
@@ -236,7 +234,7 @@ func TestRequestID(t *testing.T) {
 	}
 
 	nonce := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-	creator := protoutil.MarshalOrPanic(&msp.SerializedIdentity{
+	creator := utils.MarshalOrPanic(&msp.SerializedIdentity{
 		Mspid:   "SampleOrg",
 		IdBytes: []byte{1, 2, 3},
 	})

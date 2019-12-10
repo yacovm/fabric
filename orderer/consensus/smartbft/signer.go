@@ -16,13 +16,15 @@ import (
 //go:generate mockery -dir . -name SignerSerializer -case underscore -output ./mocks/
 
 type SignerSerializer interface {
-	crypto.LocalSigner
+	crypto.Signer
+	crypto.IdentitySerializer
 }
 
 type Signer struct {
-	ID               uint64
-	SignerSerializer identity.SignerSerializer
-	Logger           PanicLogger
+	ID                 uint64
+	SignerSerializer   SignerSerializer
+	Logger             PanicLogger
+	LastConfigBlockNum func() uint64
 }
 
 func (s *Signer) Sign(msg []byte) []byte {
@@ -40,9 +42,9 @@ func (s *Signer) SignProposal(proposal types.Proposal) *types.Signature {
 	}
 	sig := Signature{
 		BlockHeader:     block.Header.Bytes(),
-		SignatureHeader: utils.MarshalOrPanic(utils.NewSignatureHeaderOrPanic(s.SignerSerializer)),
+		SignatureHeader: utils.MarshalOrPanic(s.newSignatureHeaderOrPanic()),
 		OrdererBlockMetadata: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
-			LastConfig:        &common.LastConfig{Index: uint64(proposal.VerificationSequence)},
+			LastConfig:        &common.LastConfig{Index: uint64(s.LastConfigBlockNum())},
 			ConsenterMetadata: proposal.Metadata,
 		}),
 	}
@@ -52,5 +54,22 @@ func (s *Signer) SignProposal(proposal types.Proposal) *types.Signature {
 		ID:    s.ID,
 		Value: signature,
 		Msg:   sig.Marshal(),
+	}
+}
+
+// NewSignatureHeader creates a SignatureHeader with the correct signing identity and a valid nonce
+func (s *Signer) newSignatureHeaderOrPanic() *common.SignatureHeader {
+	creator, err := s.SignerSerializer.Serialize()
+	if err != nil {
+		panic(err)
+	}
+	nonce, err := crypto.GetRandomNonce()
+	if err != nil {
+		panic(err)
+	}
+
+	return &common.SignatureHeader{
+		Creator: creator,
+		Nonce:   nonce,
 	}
 }

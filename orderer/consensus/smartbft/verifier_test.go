@@ -21,7 +21,7 @@ import (
 	"github.com/hyperledger/fabric/orderer/consensus/smartbft/mocks"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/msp"
-	"github.com/hyperledger/fabric/protoutil"
+	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -34,7 +34,7 @@ var (
 func TestNodeIdentitiesByID(t *testing.T) {
 	m := make(smartbft.NodeIdentitiesByID)
 	for id := uint64(0); id < 4; id++ {
-		m[id] = protoutil.MarshalOrPanic(&msp.SerializedIdentity{
+		m[id] = utils.MarshalOrPanic(&msp.SerializedIdentity{
 			IdBytes: []byte(fmt.Sprintf("%d", id)),
 			Mspid:   "OrdererOrg",
 		})
@@ -48,7 +48,7 @@ func TestNodeIdentitiesByID(t *testing.T) {
 		assert.Equal(t, id, id2)
 	}
 
-	_, ok := m.IdentityToID(protoutil.MarshalOrPanic(&msp.SerializedIdentity{
+	_, ok := m.IdentityToID(utils.MarshalOrPanic(&msp.SerializedIdentity{
 		IdBytes: []byte(fmt.Sprintf("%d", 4)),
 		Mspid:   "OrdererOrg",
 	}))
@@ -113,7 +113,7 @@ func TestVerifyConsenterSig(t *testing.T) {
 	bv := &mocks.BlockVerifier{}
 	bv.On("VerifyBlockSignature", mock.Anything, mock.Anything).Return(errors.New("bad signature"))
 
-	lastHash := hex.EncodeToString(protoutil.BlockHeaderHash(lastBlock.Header))
+	lastHash := hex.EncodeToString(lastBlock.Header.Hash())
 
 	for _, testCase := range []struct {
 		description                 string
@@ -269,7 +269,7 @@ func TestVerifyConsenterSig(t *testing.T) {
 		},
 		{
 			description:        "metadata too short",
-			expectedErr:        "block metadata is of size 3 but should be of size 4",
+			expectedErr:        "block metadata is of size 4 but should be of size 5",
 			lastBlock:          lastBlock,
 			lastConfigBlockNum: lastConfigBlock.Header.Number,
 			id2Identity:        map[uint64][]byte{3: {0, 2, 4, 6}},
@@ -278,7 +278,7 @@ func TestVerifyConsenterSig(t *testing.T) {
 				block.Metadata.Metadata = make([][]byte, len(common.BlockMetadataIndex_name)-1)
 				bbt := &smartbft.ByteBufferTuple{}
 				bbt.FromBytes(proposal.Payload)
-				bbt.B = protoutil.MarshalOrPanic(block.Metadata)
+				bbt.B = utils.MarshalOrPanic(block.Metadata)
 				proposal.Payload = bbt.ToBytes()
 				return proposal
 			},
@@ -294,7 +294,7 @@ func TestVerifyConsenterSig(t *testing.T) {
 				block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = []byte{1, 2, 3}
 				bbt := &smartbft.ByteBufferTuple{}
 				bbt.FromBytes(proposal.Payload)
-				bbt.B = protoutil.MarshalOrPanic(block.Metadata)
+				bbt.B = utils.MarshalOrPanic(block.Metadata)
 				proposal.Payload = bbt.ToBytes()
 				return proposal
 			},
@@ -310,10 +310,10 @@ func TestVerifyConsenterSig(t *testing.T) {
 				md := &common.Metadata{}
 				proto.Unmarshal(block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], md)
 				md.Value = []byte{1, 2, 3}
-				block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = protoutil.MarshalOrPanic(md)
+				block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(md)
 				bbt := &smartbft.ByteBufferTuple{}
 				bbt.FromBytes(proposal.Payload)
-				bbt.B = protoutil.MarshalOrPanic(block.Metadata)
+				bbt.B = utils.MarshalOrPanic(block.Metadata)
 				proposal.Payload = bbt.ToBytes()
 				return proposal
 			},
@@ -331,11 +331,11 @@ func TestVerifyConsenterSig(t *testing.T) {
 				obm := &common.OrdererBlockMetadata{}
 				proto.Unmarshal(md.Value, obm)
 				obm.LastConfig.Index++
-				md.Value = protoutil.MarshalOrPanic(obm)
-				block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = protoutil.MarshalOrPanic(md)
+				md.Value = utils.MarshalOrPanic(obm)
+				block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(md)
 				bbt := &smartbft.ByteBufferTuple{}
 				bbt.FromBytes(proposal.Payload)
-				bbt.B = protoutil.MarshalOrPanic(block.Metadata)
+				bbt.B = utils.MarshalOrPanic(block.Metadata)
 				proposal.Payload = bbt.ToBytes()
 				return proposal
 			},
@@ -364,7 +364,7 @@ func TestVerifyConsenterSig(t *testing.T) {
 				LastConfigBlockNum: testCase.lastConfigBlockNum,
 			}
 
-			md := protoutil.MarshalOrPanic(&smartbftprotos.ViewMetadata{
+			md := utils.MarshalOrPanic(&smartbftprotos.ViewMetadata{
 				LatestSequence: 1,
 				ViewId:         2,
 			})
@@ -424,7 +424,7 @@ func TestVerifyProposal(t *testing.T) {
 		},
 	}
 
-	lastHash := hex.EncodeToString(protoutil.BlockHeaderHash(lastBlock.Header))
+	lastHash := hex.EncodeToString(lastBlock.Header.Hash())
 
 	for _, testCase := range []struct {
 		description                 string
@@ -469,8 +469,8 @@ func TestVerifyProposal(t *testing.T) {
 			bftMetadataMutator:          noopMutator,
 			ordererBlockMetadataMutator: noopOrdererBlockMetadataMutator,
 			expectedErr: fmt.Sprintf("previous header hash is %s but expected %s",
-				hex.EncodeToString(protoutil.BlockHeaderHash(notLastBlock.Header)),
-				hex.EncodeToString(protoutil.BlockHeaderHash(lastBlock.Header))),
+				hex.EncodeToString(notLastBlock.Header.Hash()),
+				hex.EncodeToString(lastBlock.Header.Hash())),
 		},
 		{
 			description:          "corrupt metadata",
@@ -489,7 +489,7 @@ func TestVerifyProposal(t *testing.T) {
 			lastBlock:            lastBlock,
 			lastConfigBlockNum:   lastConfigBlock.Header.Number,
 			bftMetadataMutator: func([]byte) []byte {
-				return protoutil.MarshalOrPanic(&smartbftprotos.ViewMetadata{LatestSequence: 100, ViewId: 2})
+				return utils.MarshalOrPanic(&smartbftprotos.ViewMetadata{LatestSequence: 100, ViewId: 2})
 			},
 			ordererBlockMetadataMutator: noopOrdererBlockMetadataMutator,
 			expectedErr:                 "expected metadata in block to be view_id:2 latest_sequence:100  but got view_id:2 latest_sequence:1 ",
@@ -534,7 +534,7 @@ func TestVerifyProposal(t *testing.T) {
 			lastConfigBlockNum:   lastConfigBlock.Header.Number,
 			bftMetadataMutator:   noopMutator,
 			ordererBlockMetadataMutator: func(metadata *common.OrdererBlockMetadata) {
-				metadata.ConsenterMetadata = protoutil.MarshalOrPanic(&smartbftprotos.ViewMetadata{LatestSequence: 666})
+				metadata.ConsenterMetadata = utils.MarshalOrPanic(&smartbftprotos.ViewMetadata{LatestSequence: 666})
 			},
 			expectedErr: "expected metadata in block to be view_id:2 latest_sequence:1  but got latest_sequence:666 ",
 		},
@@ -549,7 +549,7 @@ func TestVerifyProposal(t *testing.T) {
 				LastConfigBlockNum: testCase.lastConfigBlockNum,
 			}
 
-			md := protoutil.MarshalOrPanic(&smartbftprotos.ViewMetadata{
+			md := utils.MarshalOrPanic(&smartbftprotos.ViewMetadata{
 				LatestSequence: 1,
 				ViewId:         2,
 			})
@@ -575,9 +575,9 @@ func TestVerifyProposal(t *testing.T) {
 			testCase.ordererBlockMetadataMutator(ordererMetadataFromSignature)
 
 			// And fold it back into the block
-			sigMD.Value = protoutil.MarshalOrPanic(ordererMetadataFromSignature)
-			blockMD.Metadata[common.BlockMetadataIndex_SIGNATURES] = protoutil.MarshalOrPanic(sigMD)
-			tuple.B = protoutil.MarshalOrPanic(blockMD)
+			sigMD.Value = utils.MarshalOrPanic(ordererMetadataFromSignature)
+			blockMD.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(sigMD)
+			tuple.B = utils.MarshalOrPanic(blockMD)
 			proposal.Payload = tuple.ToBytes()
 
 			v := &smartbft.Verifier{

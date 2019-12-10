@@ -49,14 +49,11 @@ func (a *Assembler) AssembleProposal(metadata []byte, requests [][]byte) (nextPr
 	}
 	batchedRequests := singleConfigTxOrSeveralNonConfigTx(requests, a.Logger)
 
-	lastConfigBlock := lastConfigBlockFromLedgerOrPanic(a.Ledger, a.Logger)
-	lastBlock := lastBlockFromLedgerOrPanic(a.Ledger, a.Logger)
-
 	block := common.NewBlock(lastBlock.Header.Number+1, lastBlock.Header.Hash())
 	block.Data = &common.BlockData{Data: batchedRequests}
 	block.Header.DataHash = block.Data.Hash()
 	block.Metadata.Metadata[common.BlockMetadataIndex_LAST_CONFIG] = utils.MarshalOrPanic(&common.Metadata{
-		Value: utils.MarshalOrPanic(&common.LastConfig{Index: lastConfigBlock.Header.Number}),
+		Value: utils.MarshalOrPanic(&common.LastConfig{Index: lastConfigBlockNum}),
 	})
 	block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(&common.Metadata{
 		Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
