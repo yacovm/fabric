@@ -18,8 +18,6 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	proto2 "github.com/golang/protobuf/proto"
-	"github.com/hyperledger/fabric/common/channelconfig"
-	"github.com/hyperledger/fabric/common/crypto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/common/metrics"
 	"github.com/hyperledger/fabric/common/policies"
@@ -32,7 +30,6 @@ import (
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/orderer"
 	"github.com/hyperledger/fabric/protos/orderer/smartbft"
-	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
 )
@@ -54,7 +51,7 @@ type Consenter struct {
 	Cert             []byte
 	Comm             *cluster.Comm
 	Chains           ChainGetter
-	SignerSerializer crypto.LocalSigner
+	SignerSerializer signerSerializer
 	Registrar        *multichannel.Registrar
 	WALBaseDir       string
 	ClusterDialer    *cluster.PredicateDialer
@@ -63,7 +60,8 @@ type Consenter struct {
 
 // New creates Consenter of type smart bft
 func New(
-	signerSerializer crypto.LocalSigner,
+	pmr PolicyManagerRetriever,
+	signerSerializer signerSerializer,
 	clusterDialer *cluster.PredicateDialer,
 	conf *localconfig.TopLevel,
 	srvConf comm.ServerConfig,
@@ -143,7 +141,7 @@ func (c *Consenter) ReceiverByChain(channelID string) MessageReceiver {
 }
 
 func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *common.Metadata) (consensus.Chain, error) {
-	m := &protossmartbft.ConfigMetadata{}
+	m := &smartbft.ConfigMetadata{}
 	if err := proto.Unmarshal(support.SharedConfig().ConsensusMetadata(), m); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal consensus metadata")
 	}
@@ -188,23 +186,6 @@ func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *co
 		})
 	}
 
-	// build configuration bundle to get policy manager
-	block, err := lastConfigBlockFromLedger(support)
-	if err != nil {
-		return nil, errors.Errorf("failed to obtain last config block cause of: %s", err)
-	}
-	if block == nil {
-		return nil, errors.New("nil block")
-	}
-	envelopeConfig, err := utils.ExtractEnvelope(block, 0)
-	if err != nil {
-		return nil, err
-	}
-	bundle, err := channelconfig.NewBundleFromEnvelope(envelopeConfig)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed extracting bundle from envelope")
-	}
-
 	puller, err := newBlockPuller(support, c.ClusterDialer, c.Conf.General.Cluster)
 	if err != nil {
 		c.Logger.Panicf("Failed initializing block puller")
@@ -233,7 +214,7 @@ func (c *Consenter) pemToDER(pemBytes []byte, id uint64, certType string) ([]byt
 	return bl.Bytes, nil
 }
 
-func (c *Consenter) detectSelfID(consenters []*protossmartbft.Consenter) (uint64, error) {
+func (c *Consenter) detectSelfID(consenters []*smartbft.Consenter) (uint64, error) {
 	var serverCertificates []string
 	for _, cst := range consenters {
 		serverCertificates = append(serverCertificates, string(cst.ServerTlsCert))

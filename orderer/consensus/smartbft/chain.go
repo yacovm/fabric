@@ -16,8 +16,7 @@ import (
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/pkg/wal"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
-	"github.com/gogo/protobuf/proto"
-	"github.com/hyperledger/fabric/common/crypto"
+	"github.com/hyperledger/fabric/common/channelconfig"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/common/policies"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
@@ -25,9 +24,11 @@ import (
 	"github.com/hyperledger/fabric/orderer/consensus"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/msp"
+	smartbft2 "github.com/hyperledger/fabric/protos/orderer/smartbft"
 	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
+	"github.com/golang/protobuf/proto"
 )
 
 //go:generate counterfeiter -o mocks/mock_blockpuller.go . BlockPuller
@@ -46,6 +47,14 @@ type WALConfig struct {
 	EvictionSuspicion string // Duration threshold that the node samples in order to suspect its eviction from the channel.
 }
 
+type signerSerializer interface {
+	// Sign a message and return the signature over the digest, or error on failure
+	Sign(message []byte) ([]byte, error)
+
+	// Serialize converts an identity to bytes
+	Serialize() ([]byte, error)
+}
+
 // BFTChain implements Chain interface to wire with
 // BFT smart library
 type BFTChain struct {
@@ -53,7 +62,7 @@ type BFTChain struct {
 	Config           smartbft.Configuration
 	BlockPuller      BlockPuller
 	Comm             cluster.Communicator
-	SignerSerializer crypto.LocalSigner
+	SignerSerializer signerSerializer
 	PolicyManager    policies.Manager
 	RemoteNodes      []cluster.RemoteNode
 	ID2Identities    NodeIdentitiesByID
@@ -75,7 +84,7 @@ func NewChain(
 	walDir string,
 	blockPuller BlockPuller,
 	comm cluster.Communicator,
-	signerSerializer crypto.LocalSigner,
+	signerSerializer signerSerializer,
 	policyManager policies.Manager,
 	remoteNodes []cluster.RemoteNode,
 	id2Identities NodeIdentitiesByID,
@@ -116,7 +125,7 @@ func NewChain(
 	c.verifier = buildVerifier(c.lastConfigBlock, support, requestInspector, id2Identities, policyManager)
 
 	if c.verifier.LastCommittedBlockHash == "" {
-		c.verifier.LastCommittedBlockHash = hex.EncodeToString(protoutil.BlockHeaderHash(c.lastBlock.Header))
+		c.verifier.LastCommittedBlockHash = hex.EncodeToString(c.lastBlock.Header.Hash())
 	}
 
 	c.consensus = bftSmartConsensusBuild(c, requestInspector, nodes)
@@ -294,7 +303,7 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 		c.assembler.LastBlock = block
 	}()
 	c.Logger.Debugf("Delivering proposal, writing block %d to the ledger, node id %d", block.Header.Number, c.Config.SelfID)
-	if protoutil.IsConfigBlock(block) {
+	if utils.IsConfigBlock(block) {
 		defer c.updateLastConfigBlockNum(block.Header.Number)
 		defer func() {
 			c.assembler.Lock()
@@ -383,10 +392,10 @@ func (c *BFTChain) lastPersistedProposalAndSignatures() (*types.Proposal, []type
 
 func (c *BFTChain) blockToDecision(block *common.Block) *types.Decision {
 	proposal := types.Proposal{
-		Header: protoutil.BlockHeaderBytes(block.Header),
+		Header: block.Header.Hash(),
 		Payload: (&ByteBufferTuple{
-			A: protoutil.MarshalOrPanic(block.Data),
-			B: protoutil.MarshalOrPanic(block.Metadata),
+			A: utils.MarshalOrPanic(block.Data),
+			B: utils.MarshalOrPanic(block.Metadata),
 		}).ToBytes(),
 	}
 
@@ -411,7 +420,7 @@ func (c *BFTChain) blockToDecision(block *common.Block) *types.Decision {
 	id2Identities := c.ID2Identities
 	// if this block is a config block (and not genesis block)
 	// then use the identities from the previous config block
-	if protoutil.IsConfigBlock(block) && block.Header.Number != 0 {
+	if utils.IsConfigBlock(block) && block.Header.Number != 0 {
 		prev := PreviousConfigBlockFromLedgerOrPanic(c.support, c.Logger)
 		id2Identities = c.blockToID2Identities(prev)
 	}
@@ -428,7 +437,7 @@ func (c *BFTChain) blockToDecision(block *common.Block) *types.Decision {
 		}
 		sig := &Signature{
 			SignatureHeader:      sigMD.SignatureHeader,
-			BlockHeader:          protoutil.BlockHeaderBytes(block.Header),
+			BlockHeader:          block.Header.Bytes(),
 			OrdererBlockMetadata: signatureMetadata.Value,
 		}
 		signatures = append(signatures, types.Signature{
@@ -457,7 +466,7 @@ func (c *BFTChain) blockToID2Identities(block *common.Block) NodeIdentitiesByID 
 	if oc == nil {
 		c.Logger.Panicf("Orderer config of previous config block is nil")
 	}
-	m := &protossmartbft.ConfigMetadata{}
+	m := &smartbft2.ConfigMetadata{}
 	if err := proto.Unmarshal(oc.ConsensusMetadata(), m); err != nil {
 		c.Logger.Panicf("Failed to unmarshal consensus metadata: %v", err)
 	}

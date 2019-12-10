@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	protos "github.com/SmartBFT-Go/consensus/smartbftprotos"
-	"github.com/gogo/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/orderer/consensus/smartbft"
 	"github.com/hyperledger/fabric/orderer/consensus/smartbft/mocks"
@@ -19,6 +18,7 @@ import (
 	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/golang/protobuf/proto"
 )
 
 func TestDispatchConsensus(t *testing.T) {

@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/SmartBFT-Go/consensus/pkg/types"
-	"github.com/gogo/protobuf/proto"
+	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/orderer/consensus/smartbft"
 	"github.com/hyperledger/fabric/orderer/consensus/smartbft/mocks"
@@ -45,6 +45,7 @@ func TestSigner(t *testing.T) {
 func TestSignProposal(t *testing.T) {
 	ss := &mocks.SignerSerializer{}
 	ss.On("Sign", mock.Anything).Return([]byte{1, 2, 3}, nil).Once()
+	ss.On("Serialize", mock.Anything).Return([]byte{0, 2, 4, 6}, nil).Once()
 	ss.On("NewSignatureHeader", mock.Anything).Return(&common.SignatureHeader{
 		Creator: []byte{0, 2, 4, 6},
 	}, nil)
@@ -76,7 +77,7 @@ func TestSignProposal(t *testing.T) {
 	}
 
 	env := utils.MarshalOrPanic(&common.Envelope{Payload: []byte{1, 2, 3, 4, 5}})
-	prop, _ := assembler.AssembleProposal(nil, [][]byte{env})
+	prop := assembler.AssembleProposal(nil, [][]byte{env})
 
 	sig := s.SignProposal(prop)
 	assert.NotNil(t, sig)
@@ -91,7 +92,7 @@ func TestSignProposal(t *testing.T) {
 	assert.NoError(t, proto.Unmarshal(signature.SignatureHeader, sigHdr))
 	assert.Equal(t, []byte{0, 2, 4, 6}, sigHdr.Creator)
 	assert.Equal(t, signature.OrdererBlockMetadata, utils.MarshalOrPanic(&common.OrdererBlockMetadata{
-		LastConfig:        &common.LastConfig{Index: uint64(prop.VerificationSequence)},
+		LastConfig:        &common.LastConfig{Index: 10},
 		ConsenterMetadata: prop.Metadata,
 	}))
 }

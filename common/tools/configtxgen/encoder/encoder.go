@@ -10,6 +10,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/hyperledger/fabric/common/cauthdsl"
 	"github.com/hyperledger/fabric/common/channelconfig"
+	"github.com/hyperledger/fabric/common/crypto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/common/genesis"
 	"github.com/hyperledger/fabric/common/policies"
@@ -505,7 +506,7 @@ func MakeChannelCreationTransactionWithSystemChannelContext(
 // MakeChannelCreationTransaction or MakeChannelCreationTransactionWithSystemChannelContext.
 func MakeChannelCreationTransactionFromTemplate(
 	channelID string,
-	signer smartbft.SignerSerializer,
+	signer SignerSerializer,
 	conf *localconfig.Profile,
 	template *cb.ConfigGroup,
 ) (*cb.Envelope, error) {
@@ -519,10 +520,7 @@ func MakeChannelCreationTransactionFromTemplate(
 	}
 
 	if signer != nil {
-		sigHeader := protoutil.NewSignatureHeaderOrPanic(signer)
-		if err != nil {
-			return nil, errors.Wrap(err, "creating signature header failed")
-		}
+		sigHeader := newSignatureHeaderOrPanic(signer)
 
 		newConfigUpdateEnv.Signatures = []*cb.ConfigSignature{{
 			SignatureHeader: protoutil.MarshalOrPanic(sigHeader),
@@ -535,7 +533,11 @@ func MakeChannelCreationTransactionFromTemplate(
 
 	}
 
-	return protoutil.CreateSignedEnvelope(cb.HeaderType_CONFIG_UPDATE, channelID, signer, newConfigUpdateEnv, msgVersion, epoch)
+	var lc crypto.LocalSigner
+	if signer != nil {
+		lc = &localSigner{signer: signer}
+	}
+	return protoutil.CreateSignedEnvelope(cb.HeaderType_CONFIG_UPDATE, channelID, lc, newConfigUpdateEnv, msgVersion, epoch)
 }
 
 // HasSkippedForeignOrgs is used to detect whether a configuration includes
@@ -597,4 +599,37 @@ func (bs *Bootstrapper) GenesisBlock() *cb.Block {
 // GenesisBlockForChannel produces a genesis block for a given channel ID
 func (bs *Bootstrapper) GenesisBlockForChannel(channelID string) *cb.Block {
 	return genesis.NewFactoryImpl(bs.channelGroup).Block(channelID)
+}
+
+type SignerSerializer interface {
+	crypto.Signer
+	crypto.IdentitySerializer
+}
+
+func newSignatureHeaderOrPanic(signer SignerSerializer) *cb.SignatureHeader {
+	creator, err := signer.Serialize()
+	if err != nil {
+		panic(err)
+	}
+	nonce, err := crypto.GetRandomNonce()
+	if err != nil {
+		panic(err)
+	}
+
+	return &cb.SignatureHeader{
+		Creator: creator,
+		Nonce:   nonce,
+	}
+}
+
+type localSigner struct {
+	signer smartbft.SignerSerializer
+}
+
+func (ls *localSigner) NewSignatureHeader() (*cb.SignatureHeader, error) {
+	return newSignatureHeaderOrPanic(ls.signer), nil
+}
+
+func (ls *localSigner) Sign(message []byte) ([]byte, error) {
+	return ls.signer.Sign(message)
 }

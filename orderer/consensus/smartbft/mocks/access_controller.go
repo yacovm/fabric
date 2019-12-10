@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	protoutil "github.com/hyperledger/fabric/protoutil"
+	common "github.com/hyperledger/fabric/protos/common"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -13,11 +13,11 @@ type AccessController struct {
 }
 
 // Evaluate provides a mock function with given fields: signatureSet
-func (_m *AccessController) Evaluate(signatureSet []*protoutil.SignedData) error {
+func (_m *AccessController) Evaluate(signatureSet []*common.SignedData) error {
 	ret := _m.Called(signatureSet)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func([]*protoutil.SignedData) error); ok {
+	if rf, ok := ret.Get(0).(func([]*common.SignedData) error); ok {
 		r0 = rf(signatureSet)
 	} else {
 		r0 = ret.Error(0)

@@ -35,7 +35,7 @@ type Sequencer interface {
 
 // BlockVerifier verifies block signatures
 type BlockVerifier interface {
-	VerifyBlockSignature(sd []*common.SignedData, _ *common.ConfigEnvelope) error
+	VerifyBlockSignature(sd []*common.SignedData, ce *common.ConfigEnvelope) error
 }
 
 //go:generate mockery -dir . -name AccessController -case underscore -output mocks
@@ -194,7 +194,7 @@ func (v *Verifier) verifyBlockDataAndMetadata(block *common.Block, metadata []by
 		return nil, errors.New("block metadata is either missing or contains too few entries")
 	}
 
-	signatureMetadata, err := protoutil.GetMetadataFromBlock(block, common.BlockMetadataIndex_SIGNATURES)
+	signatureMetadata, err := utils.GetMetadataFromBlock(block, common.BlockMetadataIndex_SIGNATURES)
 	if err != nil {
 		return nil, err
 	}
