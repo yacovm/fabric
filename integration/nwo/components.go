@@ -7,9 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package nwo
 
 import (
-	"fmt"
 	"os"
-	"runtime"
 
 	"github.com/hyperledger/fabric/integration/helpers"
 	. "github.com/onsi/gomega"
@@ -21,7 +19,7 @@ type Components struct {
 }
 
 var RequiredImages = []string{
-	fmt.Sprintf("hyperledger/fabric-ccenv:%s-latest", runtime.GOARCH),
+	"hyperledger/fabric-ccenv:latest",
 	//runner.CouchDBDefaultImage,
 	//runner.KafkaDefaultImage,
 	//runner.ZooKeeperDefaultImage,
