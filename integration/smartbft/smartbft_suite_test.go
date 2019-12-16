@@ -29,6 +29,7 @@ var suiteBase = integration.SmartBFTBasePort
 
 var _ = SynchronizedBeforeSuite(func() []byte {
 	components = &nwo.Components{}
+	components.Build()
 
 	payload, err := json.Marshal(components)
 	Expect(err).NotTo(HaveOccurred())

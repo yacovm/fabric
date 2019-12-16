@@ -20,9 +20,6 @@ Organizations:{{ range .PeerOrgs }}
     Writers:
       Type: Signature
       Rule: OR('{{.MSPID}}.admin', '{{.MSPID}}.client')
-    Endorsement:
-      Type: Signature
-      Rule: OR('{{.MSPID}}.peer')
     Admins:
       Type: Signature
       Rule: OR('{{.MSPID}}.admin')
@@ -94,7 +91,7 @@ Profiles:{{ range .Profiles }}
           SnapshotIntervalSize: 1 KB
         Consenters:{{ range .Orderers }}{{ with $w.Orderer . }}
         - Host: 127.0.0.1
-          Port: {{ $w.OrdererPort . "Cluster" }}
+          Port: {{ $w.OrdererPort . "Listen" }}
           ClientTLSCert: {{ $w.OrdererLocalCryptoDir . "tls" }}/server.crt
           ServerTLSCert: {{ $w.OrdererLocalCryptoDir . "tls" }}/server.crt
         {{- end }}{{- end }}
@@ -103,7 +100,7 @@ Profiles:{{ range .Profiles }}
       SmartBFT:
         Consenters:{{ range .Orderers }}{{ with $w.Orderer . }}
         - Host: 127.0.0.1
-          Port: {{ $w.OrdererPort . "Listen" }}
+          Port: {{ $w.OrdererPort . "Cluster" }}
           ClientTLSCert: {{ $w.OrdererLocalCryptoDir . "tls" }}/server.crt
           ServerTLSCert: {{ $w.OrdererLocalCryptoDir . "tls" }}/server.crt
           MSPID: {{ $w.OrdererMSPID . }}
@@ -132,12 +129,8 @@ Profiles:{{ range .Profiles }}
     Consortium: {{ .Consortium }}
     Application:
       Capabilities:
-      {{- if .AppCapabilities }}{{ range .AppCapabilities }}
-        {{ . }}: true
-        {{- end }}
-      {{- else }}
         V1_3: true
-      {{- end }}
+        CAPABILITY_PLACEHOLDER: false
       Organizations:{{ range .Organizations }}
       - *{{ ($w.Organization .).MSPID }}
       {{- end}}

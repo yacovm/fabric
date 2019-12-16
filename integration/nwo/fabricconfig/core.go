@@ -31,7 +31,7 @@ type Peer struct {
 	ID                     string          `yaml:"id,omitempty"`
 	NetworkID              string          `yaml:"networkId,omitempty"`
 	ListenAddress          string          `yaml:"listenAddress,omitempty"`
-	ChaincodeListenAddress string          `yaml:"ChaincodeListenAddress,omitempty"`
+	ChaincodeListenAddress string          `yaml:"chaincodeListenAddress,omitempty"`
 	ChaincodeAddress       string          `yaml:"chaincodeAddress,omitempty"`
 	Address                string          `yaml:"address,omitempty"`
 	AddressAutoDetect      bool            `yaml:"addressAutoDetect"`
@@ -46,6 +46,7 @@ type Peer struct {
 	LocalMSPID             string          `yaml:"localMspId,omitempty"`
 	Deliveryclient         *DeliveryClient `yaml:"deliveryclient,omitempty"`
 	LocalMspType           string          `yaml:"localMspType,omitempty"`
+	AdminService           *Service        `yaml:"adminService,omitempty"`
 	Handlers               *Handlers       `yaml:"handlers,omitempty"`
 	ValidatorPoolSize      int             `yaml:"validatorPoolSize,omitempty"`
 	Discovery              *Discovery      `yaml:"discovery,omitempty"`
@@ -236,12 +237,11 @@ type Node struct {
 }
 
 type SystemFlags struct {
-	NEWLIFECYCLE string `yaml:"_lifecycle,omitempty"`
-	CSCC         string `yaml:"cscc,omitempty"`
-	LSCC         string `yaml:"lscc,omitempty"`
-	ESCC         string `yaml:"escc,omitempty"`
-	VSCC         string `yaml:"vscc,omitempty"`
-	QSCC         string `yaml:"qscc,omitempty"`
+	CSCC string `yaml:"cscc,omitempty"`
+	LSCC string `yaml:"lscc,omitempty"`
+	ESCC string `yaml:"escc,omitempty"`
+	VSCC string `yaml:"vscc,omitempty"`
+	QSCC string `yaml:"qscc,omitempty"`
 }
 
 type Ledger struct {

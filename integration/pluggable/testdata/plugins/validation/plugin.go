@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package main
 
 import (
-	validation "github.com/hyperledger/fabric/core/handlers/validation/api"
+	"github.com/hyperledger/fabric/core/handlers/validation/api"
 	"github.com/hyperledger/fabric/core/handlers/validation/builtin"
 	"github.com/hyperledger/fabric/integration/pluggable"
 )

@@ -412,7 +412,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 						ServerTlsCert: ordererCertificate,
 						ClientTlsCert: ordererCertificate,
 						Host:          "127.0.0.1",
-						Port:          uint32(network.OrdererPort(orderer5, nwo.ListenPort)),
+						Port:          uint32(network.OrdererPort(orderer5, nwo.ClusterPort)),
 					})
 				})
 			}

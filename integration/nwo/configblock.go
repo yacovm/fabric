@@ -7,11 +7,13 @@ SPDX-License-Identifier: Apache-2.0
 package nwo
 
 import (
-	"bytes"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"bytes"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/tools/configtxlator/update"
@@ -19,11 +21,11 @@ import (
 	"github.com/hyperledger/fabric/protos/common"
 	protosorderer "github.com/hyperledger/fabric/protos/orderer"
 	ectdraft_protos "github.com/hyperledger/fabric/protos/orderer/etcdraft"
-	"github.com/hyperledger/fabric/protos/orderer/smartbft"
 	"github.com/hyperledger/fabric/protos/utils"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gbytes"
 	"github.com/onsi/gomega/gexec"
+	"github.com/hyperledger/fabric/protos/orderer/smartbft"
 )
 
 // GetConfigBlock retrieves the current config block for a channel
@@ -124,12 +126,49 @@ func UpdateConfig(n *Network, orderer *Orderer, channel string, current, updated
 		Eventually(ccb, n.EventuallyTimeout).Should(BeNumerically(">", currentBlockNumber))
 		return
 	}
+
 	// wait for the block to be committed to all peers that
 	// have joined the channel
 	for _, peer := range n.PeersWithChannel(channel) {
 		ccb := func() uint64 { return CurrentConfigBlockNumber(n, peer, nil, channel) }
 		Eventually(ccb, n.EventuallyTimeout).Should(BeNumerically(">", currentBlockNumber))
 	}
+}
+
+// UpdateOrdererConfig computes, signs, and submits a configuration update which requires orderers signature and waits
+// for the update to complete.
+func UpdateOrdererConfig(n *Network, orderer *Orderer, channel string, current, updated *common.Config, submitter *Peer, additionalSigners ...*Orderer) {
+	tempDir, err := ioutil.TempDir("", "updateConfig")
+	Expect(err).NotTo(HaveOccurred())
+	updateFile := filepath.Join(tempDir, "update.pb")
+	defer os.RemoveAll(tempDir)
+
+	ComputeUpdateOrdererConfig(updateFile, n, channel, current, updated, submitter, additionalSigners...)
+
+	currentBlockNumber := CurrentConfigBlockNumber(n, submitter, orderer, channel)
+
+	Eventually(func() string {
+		sess, err := n.OrdererAdminSession(orderer, submitter, commands.ChannelUpdate{
+			ChannelID: channel,
+			Orderer:   n.OrdererAddress(orderer, ListenPort),
+			File:      updateFile,
+		})
+		if err != nil {
+			return err.Error()
+		}
+		sess.Wait(n.EventuallyTimeout)
+		if sess.ExitCode() != 0 {
+			return fmt.Sprintf("exit code is %d", sess.ExitCode())
+		}
+		if strings.Contains(string(sess.Err.Contents()), "Successfully submitted channel update") {
+			return ""
+		}
+		return fmt.Sprintf("channel update output: %s", string(sess.Err.Contents()))
+	}, n.EventuallyTimeout).Should(BeEmpty())
+
+	// wait for the block to be committed
+	ccb := func() uint64 { return CurrentConfigBlockNumber(n, submitter, orderer, channel) }
+	Eventually(ccb, n.EventuallyTimeout).Should(BeNumerically(">", currentBlockNumber))
 }
 
 // CurrentConfigBlockNumber retrieves the block number from the header of the
@@ -191,48 +230,15 @@ func FetchConfigBlock(n *Network, peer *Peer, orderer *Orderer, channel string, 
 	Eventually(fetch, n.EventuallyTimeout).Should(Equal(0))
 }
 
-// UpdateOrdererConfig computes, signs, and submits a configuration update which requires orderers signature and waits
-// for the update to complete.
-func UpdateOrdererConfig(n *Network, orderer *Orderer, channel string, current, updated *common.Config, submitter *Peer, additionalSigners ...*Orderer) {
+// UpdateOrdererConfigFail computes, signs, and submits a configuration update which requires orderers signature
+// and waits for the update to FAIL.
+func UpdateOrdererConfigFail(n *Network, orderer *Orderer, channel string, current, updated *common.Config, submitter *Peer, additionalSigners ...*Orderer) {
 	tempDir, err := ioutil.TempDir("", "updateConfig")
 	Expect(err).NotTo(HaveOccurred())
 	updateFile := filepath.Join(tempDir, "update.pb")
 	defer os.RemoveAll(tempDir)
 
-	currentBlockNumber := CurrentConfigBlockNumber(n, submitter, orderer, channel)
-	computeUpdateOrdererConfig(updateFile, n, channel, current, updated, submitter, additionalSigners...)
-
-	Eventually(func() bool {
-		sess, err := n.OrdererAdminSession(orderer, submitter, commands.ChannelUpdate{
-			ChannelID: channel,
-			Orderer:   n.OrdererAddress(orderer, ListenPort),
-			File:      updateFile,
-		})
-		Expect(err).NotTo(HaveOccurred())
-
-		sess.Wait(n.EventuallyTimeout)
-		if sess.ExitCode() != 0 {
-			return false
-		}
-
-		return strings.Contains(string(sess.Err.Contents()), "Successfully submitted channel update")
-	}, n.EventuallyTimeout).Should(BeTrue())
-
-	// wait for the block to be committed
-	ccb := func() uint64 { return CurrentConfigBlockNumber(n, submitter, orderer, channel) }
-	Eventually(ccb, n.EventuallyTimeout).Should(BeNumerically(">", currentBlockNumber))
-}
-
-// UpdateOrdererConfigSession computes, signs, and submits a configuration update which requires orderers signature
-// and waits for the update to complete. The command session is returned to the caller to enable ExitCode and command
-// output assertions.
-func UpdateOrdererConfigSession(n *Network, orderer *Orderer, channel string, current, updated *common.Config, submitter *Peer, additionalSigners ...*Orderer) *gexec.Session {
-	tempDir, err := ioutil.TempDir("", "updateConfig")
-	Expect(err).NotTo(HaveOccurred())
-	updateFile := filepath.Join(tempDir, "update.pb")
-	defer os.RemoveAll(tempDir)
-
-	computeUpdateOrdererConfig(updateFile, n, channel, current, updated, submitter, additionalSigners...)
+	ComputeUpdateOrdererConfig(updateFile, n, channel, current, updated, submitter, additionalSigners...)
 
 	//session should not return with a zero exit code nor with a success response
 	sess, err := n.OrdererAdminSession(orderer, submitter, commands.ChannelUpdate{
@@ -241,11 +247,11 @@ func UpdateOrdererConfigSession(n *Network, orderer *Orderer, channel string, cu
 		File:      updateFile,
 	})
 	Expect(err).NotTo(HaveOccurred())
-	Eventually(sess, n.EventuallyTimeout).Should(gexec.Exit())
-	return sess
+	Eventually(sess, n.EventuallyTimeout).ShouldNot(gexec.Exit(0))
+	Expect(sess.Err).NotTo(gbytes.Say("Successfully submitted channel update"))
 }
 
-func computeUpdateOrdererConfig(updateFile string, n *Network, channel string, current, updated *common.Config, submitter *Peer, additionalSigners ...*Orderer) {
+func ComputeUpdateOrdererConfig(updateFile string, n *Network, channel string, current, updated *common.Config, submitter *Peer, additionalSigners ...*Orderer) {
 	// compute update
 	configUpdate, err := update.Compute(current, updated)
 	Expect(err).NotTo(HaveOccurred())
