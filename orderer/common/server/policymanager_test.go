@@ -13,20 +13,20 @@ import (
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/common/genesis"
 	"github.com/hyperledger/fabric/common/policies"
-	"github.com/hyperledger/fabric/internal/configtxgen/configtxgentest"
-	"github.com/hyperledger/fabric/internal/configtxgen/encoder"
-	genesisconfig "github.com/hyperledger/fabric/internal/configtxgen/localconfig"
-	"github.com/hyperledger/fabric/protoutil"
+	"github.com/hyperledger/fabric/common/tools/configtxgen/configtxgentest"
+	"github.com/hyperledger/fabric/common/tools/configtxgen/encoder"
+	"github.com/hyperledger/fabric/common/tools/configtxgen/localconfig"
+	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestDynamicPolicyManager(t *testing.T) {
-	profile := configtxgentest.Load(genesisconfig.SampleDevModeSoloProfile)
+	profile := configtxgentest.Load(localconfig.SampleDevModeSoloProfile)
 	channelGroup, err := encoder.NewChannelGroup(profile)
 	assert.NoError(t, err)
 
 	block := genesis.NewFactoryImpl(channelGroup).Block("test")
-	env := protoutil.UnmarshalEnvelopeOrPanic(block.Data.Data[0])
+	env := utils.UnmarshalEnvelopeOrPanic(block.Data.Data[0])
 	bundle, err := channelconfig.NewBundleFromEnvelope(env)
 	assert.NoError(t, err)
 

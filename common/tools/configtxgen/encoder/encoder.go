@@ -18,7 +18,6 @@ import (
 	"github.com/hyperledger/fabric/common/tools/configtxlator/update"
 	"github.com/hyperledger/fabric/common/util"
 	"github.com/hyperledger/fabric/msp"
-	"github.com/hyperledger/fabric/orderer/consensus/smartbft"
 	cb "github.com/hyperledger/fabric/protos/common"
 	pb "github.com/hyperledger/fabric/protos/peer"
 	protoutil "github.com/hyperledger/fabric/protos/utils"
@@ -71,18 +70,7 @@ func addPolicy(cg *cb.ConfigGroup, policy policies.ConfigPolicy, modPolicy strin
 	}
 }
 
-func AddPolicies(cg *cb.ConfigGroup, policyMap map[string]*localconfig.Policy, modPolicy string) error {
-	switch {
-	case policyMap == nil:
-		return errors.Errorf("no policies defined")
-	case policyMap[channelconfig.AdminsPolicyKey] == nil:
-		return errors.Errorf("no Admins policy defined")
-	case policyMap[channelconfig.ReadersPolicyKey] == nil:
-		return errors.Errorf("no Readers policy defined")
-	case policyMap[channelconfig.WritersPolicyKey] == nil:
-		return errors.Errorf("no Writers policy defined")
-	}
-
+func addPolicies(cg *cb.ConfigGroup, policyMap map[string]*localconfig.Policy, modPolicy string) error {
 	for policyName, policy := range policyMap {
 		switch policy.Type {
 		case ImplicitMetaPolicyType:
@@ -116,6 +104,27 @@ func AddPolicies(cg *cb.ConfigGroup, policyMap map[string]*localconfig.Policy, m
 	return nil
 }
 
+// addImplicitMetaPolicyDefaults adds the Readers/Writers/Admins policies, with Any/Any/Majority rules respectively.
+func addImplicitMetaPolicyDefaults(cg *cb.ConfigGroup) {
+	addPolicy(cg, policies.ImplicitMetaMajorityPolicy(channelconfig.AdminsPolicyKey), channelconfig.AdminsPolicyKey)
+	addPolicy(cg, policies.ImplicitMetaAnyPolicy(channelconfig.ReadersPolicyKey), channelconfig.AdminsPolicyKey)
+	addPolicy(cg, policies.ImplicitMetaAnyPolicy(channelconfig.WritersPolicyKey), channelconfig.AdminsPolicyKey)
+}
+
+// addSignaturePolicyDefaults adds the Readers/Writers/Admins policies as signature policies requiring one signature from the given mspID.
+// If devMode is set to true, the Admins policy will accept arbitrary user certs for admin functions, otherwise it requires the cert satisfies
+// the admin role principal.
+func addSignaturePolicyDefaults(cg *cb.ConfigGroup, mspID string, devMode bool) {
+	if devMode {
+		logger.Warningf("Specifying AdminPrincipal is deprecated and will be removed in a future release, override the admin principal with explicit policies.")
+		addPolicy(cg, policies.SignaturePolicy(channelconfig.AdminsPolicyKey, cauthdsl.SignedByMspMember(mspID)), channelconfig.AdminsPolicyKey)
+	} else {
+		addPolicy(cg, policies.SignaturePolicy(channelconfig.AdminsPolicyKey, cauthdsl.SignedByMspAdmin(mspID)), channelconfig.AdminsPolicyKey)
+	}
+	addPolicy(cg, policies.SignaturePolicy(channelconfig.ReadersPolicyKey, cauthdsl.SignedByMspMember(mspID)), channelconfig.AdminsPolicyKey)
+	addPolicy(cg, policies.SignaturePolicy(channelconfig.WritersPolicyKey, cauthdsl.SignedByMspMember(mspID)), channelconfig.AdminsPolicyKey)
+}
+
 // NewChannelGroup defines the root of the channel configuration.  It defines basic operating principles like the hashing
 // algorithm used for the blocks, as well as the location of the ordering service.  It will recursively call into the
 // NewOrdererGroup, NewConsortiumsGroup, and NewApplicationGroup depending on whether these sub-elements are set in the
@@ -123,8 +132,13 @@ func AddPolicies(cg *cb.ConfigGroup, policyMap map[string]*localconfig.Policy, m
 // value which is set to "/Channel/Orderer/Admins".
 func NewChannelGroup(conf *localconfig.Profile) (*cb.ConfigGroup, error) {
 	channelGroup := cb.NewConfigGroup()
-	if err := AddPolicies(channelGroup, conf.Policies, channelconfig.AdminsPolicyKey); err != nil {
-		return nil, errors.Wrapf(err, "error adding policies to channel group")
+	if len(conf.Policies) == 0 {
+		logger.Warningf("Default policy emission is deprecated, please include policy specifications for the channel group in configtx.yaml")
+		addImplicitMetaPolicyDefaults(channelGroup)
+	} else {
+		if err := addPolicies(channelGroup, conf.Policies, channelconfig.AdminsPolicyKey); err != nil {
+			return nil, errors.Wrapf(err, "error adding policies to channel group")
+		}
 	}
 
 	addValue(channelGroup, channelconfig.HashingAlgorithmValue(), channelconfig.AdminsPolicyKey)
@@ -172,8 +186,13 @@ func NewChannelGroup(conf *localconfig.Profile) (*cb.ConfigGroup, error) {
 // It sets the mod_policy of all elements to "Admins".  This group is always present in any channel configuration.
 func NewOrdererGroup(conf *localconfig.Orderer) (*cb.ConfigGroup, error) {
 	ordererGroup := cb.NewConfigGroup()
-	if err := AddPolicies(ordererGroup, conf.Policies, channelconfig.AdminsPolicyKey); err != nil {
-		return nil, errors.Wrapf(err, "error adding policies to orderer group")
+	if len(conf.Policies) == 0 {
+		logger.Warningf("Default policy emission is deprecated, please include policy specifications for the orderer group in configtx.yaml")
+		addImplicitMetaPolicyDefaults(ordererGroup)
+	} else {
+		if err := addPolicies(ordererGroup, conf.Policies, channelconfig.AdminsPolicyKey); err != nil {
+			return nil, errors.Wrapf(err, "error adding policies to orderer group")
+		}
 	}
 	ordererGroup.Policies[BlockValidationPolicyKey] = &cb.ConfigPolicy{
 		Policy:    policies.ImplicitMetaAnyPolicy(channelconfig.WritersPolicyKey).Value(),
@@ -228,39 +247,53 @@ func NewOrdererGroup(conf *localconfig.Orderer) (*cb.ConfigGroup, error) {
 // NewConsortiumsGroup returns an org component of the channel configuration.  It defines the crypto material for the
 // organization (its MSP).  It sets the mod_policy of all elements to "Admins".
 func NewConsortiumOrgGroup(conf *localconfig.Organization) (*cb.ConfigGroup, error) {
-	consortiumsOrgGroup := cb.NewConfigGroup()
-	consortiumsOrgGroup.ModPolicy = channelconfig.AdminsPolicyKey
-
 	mspConfig, err := msp.GetVerifyingMspConfig(conf.MSPDir, conf.ID, conf.MSPType)
 	if err != nil {
 		return nil, errors.Wrapf(err, "1 - Error loading MSP configuration for org: %s", conf.Name)
 	}
 
-	if err := AddPolicies(consortiumsOrgGroup, conf.Policies, channelconfig.AdminsPolicyKey); err != nil {
-		return nil, errors.Wrapf(err, "error adding policies to consortiums org group '%s'", conf.Name)
+	consortiumOrgGroup := cb.NewConfigGroup()
+	if len(conf.Policies) == 0 {
+		logger.Warningf("Default policy emission is deprecated, please include policy specifications for the orderer org group %s in configtx.yaml", conf.Name)
+		addSignaturePolicyDefaults(consortiumOrgGroup, conf.ID, conf.AdminPrincipal != localconfig.AdminRoleAdminPrincipal)
+	} else {
+		if err := addPolicies(consortiumOrgGroup, conf.Policies, channelconfig.AdminsPolicyKey); err != nil {
+			return nil, errors.Wrapf(err, "error adding policies to orderer org group '%s'", conf.Name)
+		}
 	}
 
-	addValue(consortiumsOrgGroup, channelconfig.MSPValue(mspConfig), channelconfig.AdminsPolicyKey)
+	addValue(consortiumOrgGroup, channelconfig.MSPValue(mspConfig), channelconfig.AdminsPolicyKey)
 
-	return consortiumsOrgGroup, nil
+	consortiumOrgGroup.ModPolicy = channelconfig.AdminsPolicyKey
+
+	return consortiumOrgGroup, nil
 }
 
 // NewOrdererOrgGroup returns an orderer org component of the channel configuration.  It defines the crypto material for the
 // organization (its MSP).  It sets the mod_policy of all elements to "Admins".
 func NewOrdererOrgGroup(conf *localconfig.Organization) (*cb.ConfigGroup, error) {
-	ordererOrgGroup := cb.NewConfigGroup()
-	ordererOrgGroup.ModPolicy = channelconfig.AdminsPolicyKey
-
 	mspConfig, err := msp.GetVerifyingMspConfig(conf.MSPDir, conf.ID, conf.MSPType)
 	if err != nil {
 		return nil, errors.Wrapf(err, "1 - Error loading MSP configuration for org: %s", conf.Name)
 	}
 
-	if err := AddPolicies(ordererOrgGroup, conf.Policies, channelconfig.AdminsPolicyKey); err != nil {
-		return nil, errors.Wrapf(err, "error adding policies to orderer org group '%s'", conf.Name)
+	ordererOrgGroup := cb.NewConfigGroup()
+	if len(conf.Policies) == 0 {
+		logger.Warningf("Default policy emission is deprecated, please include policy specifications for the orderer org group %s in configtx.yaml", conf.Name)
+		addSignaturePolicyDefaults(ordererOrgGroup, conf.ID, conf.AdminPrincipal != localconfig.AdminRoleAdminPrincipal)
+	} else {
+		if err := addPolicies(ordererOrgGroup, conf.Policies, channelconfig.AdminsPolicyKey); err != nil {
+			return nil, errors.Wrapf(err, "error adding policies to orderer org group '%s'", conf.Name)
+		}
 	}
 
 	addValue(ordererOrgGroup, channelconfig.MSPValue(mspConfig), channelconfig.AdminsPolicyKey)
+
+	ordererOrgGroup.ModPolicy = channelconfig.AdminsPolicyKey
+
+	if len(conf.OrdererEndpoints) > 0 {
+		addValue(ordererOrgGroup, channelconfig.EndpointsValue(conf.OrdererEndpoints), channelconfig.AdminsPolicyKey)
+	}
 
 	return ordererOrgGroup, nil
 }
@@ -269,8 +302,13 @@ func NewOrdererOrgGroup(conf *localconfig.Organization) (*cb.ConfigGroup, error)
 // in application logic like chaincodes, and how these members may interact with the orderer.  It sets the mod_policy of all elements to "Admins".
 func NewApplicationGroup(conf *localconfig.Application) (*cb.ConfigGroup, error) {
 	applicationGroup := cb.NewConfigGroup()
-	if err := AddPolicies(applicationGroup, conf.Policies, channelconfig.AdminsPolicyKey); err != nil {
-		return nil, errors.Wrapf(err, "error adding policies to application group")
+	if len(conf.Policies) == 0 {
+		logger.Warningf("Default policy emission is deprecated, please include policy specifications for the application group in configtx.yaml")
+		addImplicitMetaPolicyDefaults(applicationGroup)
+	} else {
+		if err := addPolicies(applicationGroup, conf.Policies, channelconfig.AdminsPolicyKey); err != nil {
+			return nil, errors.Wrapf(err, "error adding policies to application group")
+		}
 	}
 
 	if len(conf.ACLs) > 0 {
@@ -296,16 +334,19 @@ func NewApplicationGroup(conf *localconfig.Application) (*cb.ConfigGroup, error)
 // NewApplicationOrgGroup returns an application org component of the channel configuration.  It defines the crypto material for the organization
 // (its MSP) as well as its anchor peers for use by the gossip network.  It sets the mod_policy of all elements to "Admins".
 func NewApplicationOrgGroup(conf *localconfig.Organization) (*cb.ConfigGroup, error) {
-	applicationOrgGroup := cb.NewConfigGroup()
-	applicationOrgGroup.ModPolicy = channelconfig.AdminsPolicyKey
-
 	mspConfig, err := msp.GetVerifyingMspConfig(conf.MSPDir, conf.ID, conf.MSPType)
 	if err != nil {
 		return nil, errors.Wrapf(err, "1 - Error loading MSP configuration for org %s", conf.Name)
 	}
 
-	if err := AddPolicies(applicationOrgGroup, conf.Policies, channelconfig.AdminsPolicyKey); err != nil {
-		return nil, errors.Wrapf(err, "error adding policies to application org group %s", conf.Name)
+	applicationOrgGroup := cb.NewConfigGroup()
+	if len(conf.Policies) == 0 {
+		logger.Warningf("Default policy emission is deprecated, please include policy specifications for the application org group %s in configtx.yaml", conf.Name)
+		addSignaturePolicyDefaults(applicationOrgGroup, conf.ID, conf.AdminPrincipal != localconfig.AdminRoleAdminPrincipal)
+	} else {
+		if err := addPolicies(applicationOrgGroup, conf.Policies, channelconfig.AdminsPolicyKey); err != nil {
+			return nil, errors.Wrapf(err, "error adding policies to application org group %s", conf.Name)
+		}
 	}
 	addValue(applicationOrgGroup, channelconfig.MSPValue(mspConfig), channelconfig.AdminsPolicyKey)
 
@@ -324,6 +365,7 @@ func NewApplicationOrgGroup(conf *localconfig.Organization) (*cb.ConfigGroup, er
 		addValue(applicationOrgGroup, channelconfig.AnchorPeersValue(anchorProtos), channelconfig.AdminsPolicyKey)
 	}
 
+	applicationOrgGroup.ModPolicy = channelconfig.AdminsPolicyKey
 	return applicationOrgGroup, nil
 }
 
@@ -428,9 +470,6 @@ func ConfigTemplateFromGroup(conf *localconfig.Profile, cg *cb.ConfigGroup) (*cb
 
 	template.Groups[channelconfig.ApplicationGroupKey] = &cb.ConfigGroup{
 		Groups: map[string]*cb.ConfigGroup{},
-		Policies: map[string]*cb.ConfigPolicy{
-			channelconfig.AdminsPolicyKey: {},
-		},
 	}
 
 	consortiums, ok := template.Groups[channelconfig.ConsortiumsGroupKey]
@@ -469,7 +508,7 @@ func ConfigTemplateFromGroup(conf *localconfig.Profile, cg *cb.ConfigGroup) (*cb
 // It assumes the invoker has no system channel context so ignores all but the application section.
 func MakeChannelCreationTransaction(
 	channelID string,
-	signer smartbft.SignerSerializer,
+	signer SignerSerializer,
 	conf *localconfig.Profile,
 ) (*cb.Envelope, error) {
 	template, err := DefaultConfigTemplate(conf)
@@ -484,7 +523,7 @@ func MakeChannelCreationTransaction(
 // transactions modifying pieces of the configuration like the orderer set.
 func MakeChannelCreationTransactionWithSystemChannelContext(
 	channelID string,
-	signer smartbft.SignerSerializer,
+	signer SignerSerializer,
 	conf,
 	systemChannelConf *localconfig.Profile,
 ) (*cb.Envelope, error) {
@@ -520,7 +559,20 @@ func MakeChannelCreationTransactionFromTemplate(
 	}
 
 	if signer != nil {
-		sigHeader := newSignatureHeaderOrPanic(signer)
+		creator, err := signer.Serialize()
+		if err != nil {
+			return nil, errors.Wrap(err, "creating signature header failed")
+		}
+
+		nonce, err := crypto.GetRandomNonce()
+		if err != nil {
+			return nil, err
+		}
+
+		sigHeader := &cb.SignatureHeader{
+			Creator: creator,
+			Nonce:   nonce,
+		}
 
 		newConfigUpdateEnv.Signatures = []*cb.ConfigSignature{{
 			SignatureHeader: protoutil.MarshalOrPanic(sigHeader),
@@ -535,7 +587,7 @@ func MakeChannelCreationTransactionFromTemplate(
 
 	var lc crypto.LocalSigner
 	if signer != nil {
-		lc = &localSigner{signer: signer}
+		lc = &LocalSigner{SS: signer}
 	}
 	return protoutil.CreateSignedEnvelope(cb.HeaderType_CONFIG_UPDATE, channelID, lc, newConfigUpdateEnv, msgVersion, epoch)
 }
@@ -622,14 +674,30 @@ func newSignatureHeaderOrPanic(signer SignerSerializer) *cb.SignatureHeader {
 	}
 }
 
-type localSigner struct {
-	signer smartbft.SignerSerializer
+type LocalSigner struct {
+	Signer crypto.LocalSigner
+	SS     SignerSerializer
 }
 
-func (ls *localSigner) NewSignatureHeader() (*cb.SignatureHeader, error) {
-	return newSignatureHeaderOrPanic(ls.signer), nil
+func (ls *LocalSigner) Serialize() ([]byte, error) {
+	sigHdr, err := ls.Signer.NewSignatureHeader()
+	if err != nil {
+		return nil, err
+	}
+	return sigHdr.Creator, nil
 }
 
-func (ls *localSigner) Sign(message []byte) ([]byte, error) {
-	return ls.signer.Sign(message)
+func (ls *LocalSigner) NewSignatureHeader() (*cb.SignatureHeader, error) {
+	return newSignatureHeaderOrPanic(ls.SS), nil
+}
+
+func (ls *LocalSigner) Sign(message []byte) ([]byte, error) {
+	if ls.SS != nil {
+		return ls.SS.Sign(message)
+	}
+	if ls.Signer != nil {
+		return ls.Signer.Sign(message)
+	}
+
+	panic("underlying signer is nil")
 }

@@ -900,7 +900,7 @@ var _ = Describe("Encoder", func() {
 			})
 
 			It("returns an encoded and signed tx", func() {
-				env, err := encoder.MakeChannelCreationTransaction("channel-id", fakeSigner, conf)
+				env, err := encoder.MakeChannelCreationTransaction("channel-id", &encoder.LocalSigner{Signer: fakeSigner}, conf)
 				Expect(err).NotTo(HaveOccurred())
 				payload := &cb.Payload{}
 				err = proto.Unmarshal(env.Payload, payload)
@@ -920,7 +920,7 @@ var _ = Describe("Encoder", func() {
 				})
 
 				It("wraps and returns the error", func() {
-					_, err := encoder.MakeChannelCreationTransaction("channel-id", fakeSigner, conf)
+					_, err := encoder.MakeChannelCreationTransaction("channel-id", &encoder.LocalSigner{Signer: fakeSigner}, conf)
 					Expect(err).To(MatchError("could not generate default config template: channel template configs must contain an application section"))
 				})
 			})
@@ -931,7 +931,7 @@ var _ = Describe("Encoder", func() {
 				})
 
 				It("wraps and returns the error", func() {
-					_, err := encoder.MakeChannelCreationTransaction("channel-id", fakeSigner, conf)
+					_, err := encoder.MakeChannelCreationTransaction("channel-id", &encoder.LocalSigner{Signer: fakeSigner}, conf)
 					Expect(err).To(MatchError("creating signature header failed: signature-header-error"))
 				})
 			})
@@ -942,7 +942,7 @@ var _ = Describe("Encoder", func() {
 				})
 
 				It("wraps and returns the error", func() {
-					_, err := encoder.MakeChannelCreationTransaction("channel-id", fakeSigner, conf)
+					_, err := encoder.MakeChannelCreationTransaction("channel-id", &encoder.LocalSigner{Signer: fakeSigner}, conf)
 					Expect(err).To(MatchError("signature failure over config update: sign-error"))
 				})
 			})

@@ -32,6 +32,10 @@ type LocalSigner struct {
 	Nonce    []byte
 }
 
+func (ls *LocalSigner) Serialize() ([]byte, error) {
+	return ls.Identity, nil
+}
+
 // Sign returns the msg, nil
 func (ls *LocalSigner) Sign(msg []byte) ([]byte, error) {
 	return msg, nil

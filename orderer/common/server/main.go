@@ -579,19 +579,19 @@ func isClusterType(genesisBlock *cb.Block) bool {
 
 func consensusType(genesisBlock *cb.Block) string {
 	if genesisBlock.Data == nil || len(genesisBlock.Data.Data) == 0 {
-		logger.Fatalf("Empty genesis block")
+		logger.Panicf("Empty genesis block")
 	}
 	env := &cb.Envelope{}
 	if err := proto.Unmarshal(genesisBlock.Data.Data[0], env); err != nil {
-		logger.Fatalf("Failed to unmarshal the genesis block's envelope: %v", err)
+		logger.Panicf("Failed to unmarshal the genesis block's envelope: %v", err)
 	}
 	bundle, err := channelconfig.NewBundleFromEnvelope(env)
 	if err != nil {
-		logger.Fatalf("Failed creating bundle from the genesis block: %v", err)
+		logger.Panicf("Failed creating bundle from the genesis block: %v", err)
 	}
 	ordConf, exists := bundle.OrdererConfig()
 	if !exists {
-		logger.Fatalf("Orderer config doesn't exist in bundle derived from genesis block")
+		logger.Panicf("Orderer config doesn't exist in bundle derived from genesis block")
 	}
 	return ordConf.ConsensusType()
 }

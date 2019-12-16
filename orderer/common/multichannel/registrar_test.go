@@ -9,8 +9,9 @@ package multichannel
 import (
 	"testing"
 
+	"fmt"
+
 	"github.com/golang/protobuf/proto"
-	"github.com/hyperledger/fabric/common/crypto"
 	"github.com/hyperledger/fabric/common/ledger/blockledger"
 	ramledger "github.com/hyperledger/fabric/common/ledger/blockledger/ram"
 	"github.com/hyperledger/fabric/common/metrics/disabled"
@@ -30,7 +31,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func mockCrypto() crypto.LocalSigner {
+func mockCrypto() *mockcrypto.LocalSigner {
 	return mockcrypto.FakeLocalSigner
 }
 
@@ -223,6 +224,7 @@ func TestCreateChain(t *testing.T) {
 		orglessChannelConf.Application.Organizations = nil
 		envConfigUpdate, err := encoder.MakeChannelCreationTransaction(newChainID, mockCrypto(), orglessChannelConf)
 		assert.NoError(t, err, "Constructing chain creation tx")
+		fmt.Println(err)
 
 		res, err := manager.NewChannelConfig(envConfigUpdate)
 		assert.NoError(t, err, "Constructing initial channel config")
