@@ -16,6 +16,7 @@ import (
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/pkg/wal"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
+	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/channelconfig"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/common/policies"
@@ -28,7 +29,6 @@ import (
 	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
-	"github.com/golang/protobuf/proto"
 )
 
 //go:generate counterfeiter -o mocks/mock_blockpuller.go . BlockPuller
