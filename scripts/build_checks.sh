@@ -25,16 +25,19 @@ else
 fi
 
 
-echo "Running unit tests"
-go test -race ./orderer/consensus/smartbft/...
+echo "Running orderer unit tests"
+go test -race ./orderer/...
 if [[ $? -ne 0 ]];then
     echo "unit tests failed"
     exit 1
 fi
 
-echo "Pulling docker pull hyperledger/fabric-ccenv:latest"
+echo "Pulling hyperledger/fabric-ccenv:latest"
 docker pull hyperledger/fabric-ccenv:latest
 docker tag hyperledger/fabric-ccenv hyperledger/fabric-ccenv:amd64-latest
+
+echo "Pulling hyperledger/fabric-couchdb"
+docker pull hyperledger/fabric-couchdb:latest
 
 echo "Installing Ginkgo :( "
 go get github.com/onsi/ginkgo/ginkgo
