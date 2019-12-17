@@ -1,8 +1,11 @@
 #!/usr/bin/env bash -e
 
 echo "Building docker images..."
-sleep 5
 git checkout origin/release-1.4-BFT
+
+echo "Building on top of $(git branch | sed -n '/\* /s///p')"
+
+git log -1 --stat
 
 make orderer-docker peer-docker
 
