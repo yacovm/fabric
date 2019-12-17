@@ -2,6 +2,8 @@
 
 go get -u golang.org/x/tools/cmd/goimports
 
+bash ./scripts/golinter.sh
+
 unformatted=$(find . -name "*.go" | grep -v "^./vendor" | grep -v "pb.go" | grep "./orderer" | xargs gofmt -l)
 
 if [[ $unformatted == "" ]];then
