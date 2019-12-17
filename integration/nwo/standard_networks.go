@@ -109,12 +109,48 @@ func BasicEtcdRaft() *Config {
 	return config
 }
 
-func MinimalRaft() *Config {
-	config := BasicEtcdRaft()
-	config.Peers[1].Channels = nil
-	config.Peers[2].Channels = nil
-	config.Peers[3].Channels = nil
-	config.Profiles[1].Organizations = []string{"Org1"}
+func BasicSmartBFT() *Config {
+	config := BasicSolo()
+	config.Consensus.Type = "smartbft"
+	config.Profiles = []*Profile{{
+		Name:     "SampleDevModeSmartBFT",
+		Orderers: []string{"orderer"},
+	}, {
+		Name:          "TwoOrgsChannel",
+		Consortium:    "SampleConsortium",
+		Organizations: []string{"Org1", "Org2"},
+	}}
+	config.SystemChannel.Profile = "SampleDevModeSmartBFT"
+	return config
+}
+
+func MultiNodeSmartBFT() *Config {
+	config := BasicSmartBFT()
+	config.Orderers = []*Orderer{
+		{Name: "orderer1", Organization: "OrdererOrg"},
+		{Name: "orderer2", Organization: "OrdererOrg"},
+		{Name: "orderer3", Organization: "OrdererOrg"},
+		{Name: "orderer4", Organization: "OrdererOrg"},
+	}
+	config.Profiles = []*Profile{{
+		Name:     "SampleDevModeSmartBFT",
+		Orderers: []string{"orderer1", "orderer2", "orderer3", "orderer4"},
+	}, {
+		Name:          "TwoOrgsChannel",
+		Consortium:    "SampleConsortium",
+		Organizations: []string{"Org1", "Org2"},
+	}}
+
+	config.Channels = []*Channel{
+		{Name: "testchannel1", Profile: "TwoOrgsChannel"},
+		{Name: "testchannel2", Profile: "TwoOrgsChannel"}}
+
+	for _, peer := range config.Peers {
+		peer.Channels = []*PeerChannel{
+			{Name: "testchannel1", Anchor: true},
+			{Name: "testchannel2", Anchor: true},
+		}
+	}
 	return config
 }
 

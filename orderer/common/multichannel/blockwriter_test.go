@@ -201,7 +201,7 @@ func TestGoodWriteConfig(t *testing.T) {
 			ReadWriter:  l,
 			Validator:   &mockconfigtx.Validator{ChainIDVal: genesisconfig.TestChainID},
 			fakeConfig:  fakeConfig,
-		},
+		}, false,
 	)
 
 	ctx := makeConfigTxFull(genesisconfig.TestChainID, 1)
@@ -236,7 +236,7 @@ func TestMigrationWriteConfig(t *testing.T) {
 			ReadWriter:  l,
 			Validator:   &mockconfigtx.Validator{ChainIDVal: genesisconfig.TestChainID},
 			fakeConfig:  fakeConfig,
-		},
+		}, false,
 	)
 
 	ctx := makeConfigTxMig(genesisconfig.TestChainID, 1)
@@ -271,7 +271,7 @@ func TestRaceWriteConfig(t *testing.T) {
 			ReadWriter:  l,
 			Validator:   &mockconfigtx.Validator{},
 			fakeConfig:  fakeConfig,
-		},
+		}, false,
 	)
 
 	ctx := makeConfigTxFull(genesisconfig.TestChainID, 1)

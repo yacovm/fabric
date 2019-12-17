@@ -47,6 +47,7 @@ import (
 	"github.com/hyperledger/fabric/orderer/consensus"
 	"github.com/hyperledger/fabric/orderer/consensus/etcdraft"
 	"github.com/hyperledger/fabric/orderer/consensus/kafka"
+	"github.com/hyperledger/fabric/orderer/consensus/smartbft"
 	"github.com/hyperledger/fabric/orderer/consensus/solo"
 	cb "github.com/hyperledger/fabric/protos/common"
 	ab "github.com/hyperledger/fabric/protos/orderer"
@@ -66,7 +67,10 @@ var (
 	version   = app.Command("version", "Show version information")
 	benchmark = app.Command("benchmark", "Run orderer in benchmark mode")
 
-	clusterTypes = map[string]struct{}{"etcdraft": {}}
+	clusterTypes = map[string]struct{}{
+		"etcdraft": {},
+		"smartbft": {},
+	}
 )
 
 // Main is the entry point of orderer process
@@ -575,19 +579,19 @@ func isClusterType(genesisBlock *cb.Block) bool {
 
 func consensusType(genesisBlock *cb.Block) string {
 	if genesisBlock.Data == nil || len(genesisBlock.Data.Data) == 0 {
-		logger.Fatalf("Empty genesis block")
+		logger.Panicf("Empty genesis block")
 	}
 	env := &cb.Envelope{}
 	if err := proto.Unmarshal(genesisBlock.Data.Data[0], env); err != nil {
-		logger.Fatalf("Failed to unmarshal the genesis block's envelope: %v", err)
+		logger.Panicf("Failed to unmarshal the genesis block's envelope: %v", err)
 	}
 	bundle, err := channelconfig.NewBundleFromEnvelope(env)
 	if err != nil {
-		logger.Fatalf("Failed creating bundle from the genesis block: %v", err)
+		logger.Panicf("Failed creating bundle from the genesis block: %v", err)
 	}
 	ordConf, exists := bundle.OrdererConfig()
 	if !exists {
-		logger.Fatalf("Orderer config doesn't exist in bundle derived from genesis block")
+		logger.Panicf("Orderer config doesn't exist in bundle derived from genesis block")
 	}
 	return ordConf.ConsensusType()
 }
@@ -629,7 +633,7 @@ func initializeMultichannelRegistrar(
 	srvConf comm.ServerConfig,
 	srv *comm.GRPCServer,
 	conf *localconfig.TopLevel,
-	signer crypto.LocalSigner,
+	signer crypto.SignerSupport,
 	metricsProvider metrics.Provider,
 	healthChecker healthChecker,
 	lf blockledger.Factory,
@@ -643,18 +647,34 @@ func initializeMultichannelRegistrar(
 		logger.Info("Not bootstrapping because of existing channels")
 	}
 
+	dpmr := &DynamicPolicyManagerRegistry{}
+	callbacks = append(callbacks, dpmr.Update)
+
+	registrar := multichannel.NewRegistrar(*conf, lf, &localSigner{signer: signer}, metricsProvider, callbacks...)
+
 	consenters := make(map[string]consensus.Consenter)
-
-	registrar := multichannel.NewRegistrar(*conf, lf, signer, metricsProvider, callbacks...)
-
 	consenters["solo"] = solo.New()
 	var kafkaMetrics *kafka.Metrics
 	consenters["kafka"], kafkaMetrics = kafka.New(conf.Kafka, metricsProvider, healthChecker)
 	// Note, we pass a 'nil' channel here, we could pass a channel that
 	// closes if we wished to cleanup this routine on exit.
 	go kafkaMetrics.PollGoMetricsUntilStop(time.Minute, nil)
-	if isClusterType(bootstrapBlock) {
-		initializeEtcdraftConsenter(consenters, conf, lf, clusterDialer, bootstrapBlock, ri, srvConf, srv, registrar, metricsProvider)
+	consenterType := consensusType(genesisBlock)
+	if _, exists := clusterTypes[consenterType]; exists {
+		switch consenterType {
+		case "etcdraft":
+			{
+				initializeEtcdraftConsenter(consenters, conf, lf, clusterDialer, bootstrapBlock, ri, srvConf, srv, registrar, metricsProvider)
+			}
+		case "smartbft":
+			{
+				// TODO: Add full initialization with required parameters. Consider to abstract out common pieces of Etcd Raft and
+				// BFT Smart to reuse them.
+				consenters["smartbft"] = smartbft.New(dpmr.Registry(), signer, clusterDialer, conf, srvConf, srv, registrar, metricsProvider)
+			}
+		default:
+			logger.Panicf("Unknown cluster type consenter")
+		}
 	}
 	registrar.Initialize(consenters)
 	return registrar
@@ -863,4 +883,32 @@ func prettyPrintStruct(i interface{}) {
 		buffer.WriteString(params[i])
 	}
 	logger.Infof("Orderer config values:%s\n", buffer.String())
+}
+
+func newSignatureHeaderOrPanic(signer crypto.SignerSupport) *cb.SignatureHeader {
+	creator, err := signer.Serialize()
+	if err != nil {
+		panic(err)
+	}
+	nonce, err := crypto.GetRandomNonce()
+	if err != nil {
+		panic(err)
+	}
+
+	return &cb.SignatureHeader{
+		Creator: creator,
+		Nonce:   nonce,
+	}
+}
+
+type localSigner struct {
+	signer smartbft.SignerSerializer
+}
+
+func (ls *localSigner) NewSignatureHeader() (*cb.SignatureHeader, error) {
+	return newSignatureHeaderOrPanic(ls.signer), nil
+}
+
+func (ls *localSigner) Sign(message []byte) ([]byte, error) {
+	return ls.signer.Sign(message)
 }

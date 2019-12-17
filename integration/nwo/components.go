@@ -12,7 +12,6 @@ import (
 	"runtime"
 
 	"github.com/hyperledger/fabric/integration/helpers"
-	"github.com/hyperledger/fabric/integration/runner"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
 )
@@ -23,9 +22,9 @@ type Components struct {
 
 var RequiredImages = []string{
 	fmt.Sprintf("hyperledger/fabric-ccenv:%s-latest", runtime.GOARCH),
-	runner.CouchDBDefaultImage,
-	runner.KafkaDefaultImage,
-	runner.ZooKeeperDefaultImage,
+	//runner.CouchDBDefaultImage,
+	//runner.KafkaDefaultImage,
+	//runner.ZooKeeperDefaultImage,
 }
 
 func (c *Components) Build(args ...string) {

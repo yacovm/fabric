@@ -27,10 +27,18 @@ import (
 type mspSigner struct {
 }
 
+func (s *mspSigner) Serialize() ([]byte, error) {
+	signer, err := mspmgmt.GetLocalMSP().GetDefaultSigningIdentity()
+	if err != nil {
+		return nil, fmt.Errorf("Failed getting MSP-based signer [%s]", err)
+	}
+	return signer.Serialize()
+}
+
 // NewSigner returns a new instance of the msp-based LocalSigner.
 // It assumes that the local msp has been already initialized.
 // Look at mspmgmt.LoadLocalMsp for further information.
-func NewSigner() crypto.LocalSigner {
+func NewSigner() *mspSigner {
 	return &mspSigner{}
 }
 

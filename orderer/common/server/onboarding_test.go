@@ -526,7 +526,7 @@ func TestReplicate(t *testing.T) {
 		{
 			name:               "Extraction of system channel name fails",
 			systemLedgerHeight: 10,
-			panicValue:         "Failed extracting system channel name from bootstrap block: failed to retrieve channel id - block is empty",
+			panicValue:         "Empty genesis block",
 			bootBlock:          &common.Block{Header: &common.BlockHeader{Number: 100}},
 			conf:               &localconfig.TopLevel{},
 			secOpts:            &comm.SecureOptions{},

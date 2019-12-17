@@ -9,6 +9,7 @@ package encoder_test
 import (
 	"fmt"
 
+	"github.com/hyperledger/fabric/protos/orderer/smartbft"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
@@ -278,6 +279,74 @@ var _ = Describe("Encoder", func() {
 				It("wraps and returns the error", func() {
 					_, err := encoder.NewOrdererGroup(conf)
 					Expect(err).To(MatchError("cannot marshal metadata for orderer type etcdraft: cannot load client cert for consenter :0: open : no such file or directory"))
+				})
+			})
+		})
+
+		Context("when the consensus type is smartbft", func() {
+			BeforeEach(func() {
+				conf.OrdererType = "smartbft"
+				conf.SmartBFT = &smartbft.ConfigMetadata{
+					Options: &smartbft.Options{
+						RequestBatchMaxCount:      uint64(100),
+						RequestBatchMaxBytes:      uint64(1000000),
+						RequestBatchMaxInterval:   "50ms",
+						IncomingMessageBufferSize: uint64(200),
+						RequestPoolSize:           uint64(400),
+						RequestForwardTimeout:     "2s",
+						RequestComplainTimeout:    "10s",
+						RequestAutoRemoveTimeout:  "1m",
+						ViewChangeResendInterval:  "5s",
+						ViewChangeTimeout:         "20s",
+						LeaderHeartbeatTimeout:    "30s",
+						LeaderHeartbeatCount:      uint64(10),
+						CollectTimeout:            "1m",
+						SyncOnStart:               false,
+						SpeedUpViewChange:         false,
+					},
+				}
+			})
+
+			It("adds the smartbft metadata", func() {
+				cg, err := encoder.NewOrdererGroup(conf)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(len(cg.Values)).To(Equal(5))
+				consensusType := &ab.ConsensusType{}
+				err = proto.Unmarshal(cg.Values["ConsensusType"].Value, consensusType)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(consensusType.Type).To(Equal("smartbft"))
+				metadata := &smartbft.ConfigMetadata{}
+				err = proto.Unmarshal(consensusType.Metadata, metadata)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(metadata.Options.RequestBatchMaxCount).To(Equal(uint64(100)))
+				Expect(metadata.Options.RequestBatchMaxBytes).To(Equal(uint64(1000000)))
+				Expect(metadata.Options.RequestBatchMaxInterval).To(Equal("50ms"))
+				Expect(metadata.Options.IncomingMessageBufferSize).To(Equal(uint64(200)))
+				Expect(metadata.Options.RequestPoolSize).To(Equal(uint64(400)))
+				Expect(metadata.Options.RequestForwardTimeout).To(Equal("2s"))
+				Expect(metadata.Options.RequestComplainTimeout).To(Equal("10s"))
+				Expect(metadata.Options.RequestAutoRemoveTimeout).To(Equal("1m"))
+				Expect(metadata.Options.ViewChangeResendInterval).To(Equal("5s"))
+				Expect(metadata.Options.ViewChangeTimeout).To(Equal("20s"))
+				Expect(metadata.Options.LeaderHeartbeatTimeout).To(Equal("30s"))
+				Expect(metadata.Options.LeaderHeartbeatCount).To(Equal(uint64(10)))
+				Expect(metadata.Options.CollectTimeout).To(Equal("1m"))
+				Expect(metadata.Options.SyncOnStart).To(Equal(false))
+				Expect(metadata.Options.SpeedUpViewChange).To(Equal(false))
+			})
+
+			Context("when the smartbft configuration is bad", func() {
+				BeforeEach(func() {
+					conf.SmartBFT = &smartbft.ConfigMetadata{
+						Consenters: []*smartbft.Consenter{
+							{},
+						},
+					}
+				})
+
+				It("wraps and returns the error", func() {
+					_, err := encoder.NewOrdererGroup(conf)
+					Expect(err).To(MatchError("cannot marshal metadata for orderer type smartbft: cannot load client cert for consenter :0: open : no such file or directory"))
 				})
 			})
 		})
@@ -831,7 +900,7 @@ var _ = Describe("Encoder", func() {
 			})
 
 			It("returns an encoded and signed tx", func() {
-				env, err := encoder.MakeChannelCreationTransaction("channel-id", fakeSigner, conf)
+				env, err := encoder.MakeChannelCreationTransaction("channel-id", &encoder.LocalSigner{Signer: fakeSigner}, conf)
 				Expect(err).NotTo(HaveOccurred())
 				payload := &cb.Payload{}
 				err = proto.Unmarshal(env.Payload, payload)
@@ -851,7 +920,7 @@ var _ = Describe("Encoder", func() {
 				})
 
 				It("wraps and returns the error", func() {
-					_, err := encoder.MakeChannelCreationTransaction("channel-id", fakeSigner, conf)
+					_, err := encoder.MakeChannelCreationTransaction("channel-id", &encoder.LocalSigner{Signer: fakeSigner}, conf)
 					Expect(err).To(MatchError("could not generate default config template: channel template configs must contain an application section"))
 				})
 			})
@@ -862,7 +931,7 @@ var _ = Describe("Encoder", func() {
 				})
 
 				It("wraps and returns the error", func() {
-					_, err := encoder.MakeChannelCreationTransaction("channel-id", fakeSigner, conf)
+					_, err := encoder.MakeChannelCreationTransaction("channel-id", &encoder.LocalSigner{Signer: fakeSigner}, conf)
 					Expect(err).To(MatchError("creating signature header failed: signature-header-error"))
 				})
 			})
@@ -873,7 +942,7 @@ var _ = Describe("Encoder", func() {
 				})
 
 				It("wraps and returns the error", func() {
-					_, err := encoder.MakeChannelCreationTransaction("channel-id", fakeSigner, conf)
+					_, err := encoder.MakeChannelCreationTransaction("channel-id", &encoder.LocalSigner{Signer: fakeSigner}, conf)
 					Expect(err).To(MatchError("signature failure over config update: sign-error"))
 				})
 			})

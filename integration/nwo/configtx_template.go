@@ -68,14 +68,16 @@ Profiles:{{ range .Profiles }}
     {{- if .Orderers }}
     Orderer:
       OrdererType: {{ $w.Consensus.Type }}
+      Addresses:{{ range .Orderers }}{{ with $w.Orderer . }}
+      - 127.0.0.1:{{ $w.OrdererPort . "Listen" }}
+      {{- end }}{{ end }}
       BatchTimeout: 1s
       BatchSize:
         MaxMessageCount: 1
         AbsoluteMaxBytes: 98 MB
         PreferredMaxBytes: 512 KB
       Capabilities:
-        V1_1: true
-
+        V1_4_2: true
       {{- if eq $w.Consensus.Type "kafka" }}
       Kafka:
         Brokers:{{ range $w.BrokerAddresses "HostPort" }}
@@ -89,9 +91,21 @@ Profiles:{{ range .Profiles }}
           SnapshotIntervalSize: 1 KB
         Consenters:{{ range .Orderers }}{{ with $w.Orderer . }}
         - Host: 127.0.0.1
+          Port: {{ $w.OrdererPort . "Listen" }}
+          ClientTLSCert: {{ $w.OrdererLocalCryptoDir . "tls" }}/server.crt
+          ServerTLSCert: {{ $w.OrdererLocalCryptoDir . "tls" }}/server.crt
+        {{- end }}{{- end }}
+      {{- end }}
+      {{- if eq $w.Consensus.Type "smartbft" }}
+      SmartBFT:
+        Consenters:{{ range .Orderers }}{{ with $w.Orderer . }}
+        - Host: 127.0.0.1
           Port: {{ $w.OrdererPort . "Cluster" }}
           ClientTLSCert: {{ $w.OrdererLocalCryptoDir . "tls" }}/server.crt
           ServerTLSCert: {{ $w.OrdererLocalCryptoDir . "tls" }}/server.crt
+          MSPID: {{ $w.OrdererMSPID . }}
+          Identity: {{ $w.OrdererCert . }}
+          ConsenterId: {{ $w.OrdererIndex . }}
         {{- end }}{{- end }}
       {{- end }}
       Organizations:{{ range $w.OrgsForOrderers .Orderers }}
