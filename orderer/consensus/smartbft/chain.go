@@ -19,6 +19,7 @@ import (
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/channelconfig"
+	"github.com/hyperledger/fabric/common/crypto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/common/policies"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
@@ -263,11 +264,13 @@ func buildVerifier(
 		ReqInspector:          requestInspector,
 		Logger:                logger,
 		Id2Identity:           id2Identities,
-		BlockVerifier: &cluster.BlockValidationPolicyVerifier{
-			Logger:    logger,
-			Channel:   support.ChainID(),
-			PolicyMgr: policyManager,
+
+		ConsenterVerifier: &consenterVerifier{
+			logger:        logger,
+			channel:       support.ChainID(),
+			policyManager: policyManager,
 		},
+
 		AccessController: &chainACL{
 			policyManager: policyManager,
 			Logger:        logger,
@@ -524,7 +527,11 @@ func (c *BFTChain) blockToID2Identities(block *common.Block) NodeIdentitiesByID 
 	}
 	id2Identies := map[uint64][]byte{}
 	for _, consenter := range m.Consenters {
-		id2Identies[consenter.ConsenterId] = SanitizeIdentity(consenter.Identity, c.Logger)
+		sanitizedID, err := crypto.SanitizeIdentity(consenter.Identity)
+		if err != nil {
+			c.Logger.Panicf("Failed to sanitize identity: %v", err)
+		}
+		id2Identies[consenter.ConsenterId] = sanitizedID
 	}
 	return id2Identies
 }

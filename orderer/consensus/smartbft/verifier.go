@@ -9,6 +9,7 @@ package smartbft
 import (
 	"bytes"
 	"encoding/hex"
+	"go.uber.org/zap/zapcore"
 	"sync"
 
 	"encoding/base64"
@@ -17,6 +18,7 @@ import (
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
+	"github.com/hyperledger/fabric/common/policies"
 	"github.com/hyperledger/fabric/common/util"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/msp"
@@ -31,11 +33,12 @@ type Sequencer interface {
 	Sequence() uint64
 }
 
-//go:generate mockery -dir . -name BlockVerifier -case underscore -output mocks
+//go:generate mockery -dir . -name ConsenterVerifier -case underscore -output mocks
 
-// BlockVerifier verifies block signatures
-type BlockVerifier interface {
-	VerifyBlockSignature(sd []*common.SignedData, ce *common.ConfigEnvelope) error
+// ConsenterVerifier is used to determine whether a signature from one of the consenters is valid
+type ConsenterVerifier interface {
+	// Evaluate takes a set of SignedData and evaluates whether this set of signatures satisfies the policy
+	Evaluate(signatureSet []*common.SignedData) error
 }
 
 //go:generate mockery -dir . -name AccessController -case underscore -output mocks
@@ -68,7 +71,7 @@ func (nibd NodeIdentitiesByID) IdentityToID(identity []byte) (uint64, bool) {
 type Verifier struct {
 	ReqInspector           *RequestInspector
 	Id2Identity            NodeIdentitiesByID
-	BlockVerifier          BlockVerifier
+	ConsenterVerifier      ConsenterVerifier
 	AccessController       AccessController
 	VerificationSequencer  Sequencer
 	Ledger                 Ledger
@@ -148,11 +151,13 @@ func (v *Verifier) VerifyConsenterSig(signature types.Signature, prop types.Prop
 	}
 
 	expectedMsgToBeSigned := util.ConcatenateBytes(sig.OrdererBlockMetadata, sig.SignatureHeader, sig.BlockHeader)
-	return v.BlockVerifier.VerifyBlockSignature([]*common.SignedData{{
+	signedData := &common.SignedData{
 		Signature: signature.Value,
 		Data:      expectedMsgToBeSigned,
 		Identity:  identity,
-	}}, nil)
+	}
+
+	return v.ConsenterVerifier.Evaluate([]*common.SignedData{signedData})
 }
 
 func (v *Verifier) VerificationSequence() uint64 {
@@ -351,4 +356,25 @@ func (v *Verifier) verifySignatureIsBoundToProposal(sig *Signature, identity []b
 	}
 
 	return nil
+}
+
+type consenterVerifier struct {
+	logger        *flogging.FabricLogger
+	channel       string
+	policyManager policies.Manager
+}
+
+func (cv *consenterVerifier) Evaluate(signatureSet []*common.SignedData) error {
+	policy, ok := cv.policyManager.GetPolicy(policies.ChannelOrdererWriters)
+	if !ok {
+		cv.logger.Errorf("[%s] Error: could not find policy %s in policy manager %v", cv.channel, policies.ChannelOrdererWriters, cv.policyManager)
+		return errors.Errorf("could not find policy %s", policies.ChannelOrdererWriters)
+	}
+
+	if cv.logger.IsEnabledFor(zapcore.DebugLevel) {
+		cv.logger.Debugf("== Evaluating %T Policy %s ==", policy, policies.ChannelOrdererWriters)
+		defer cv.logger.Debugf("== Done Evaluating %T Policy %s", policy, policies.ChannelOrdererWriters)
+	}
+
+	return policy.Evaluate(signatureSet)
 }
