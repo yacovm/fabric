@@ -32,6 +32,7 @@ fi
 
 echo "Pulling docker pull hyperledger/fabric-ccenv:latest"
 docker pull hyperledger/fabric-ccenv:latest
+docker tag hyperledger/fabric-ccenv hyperledger/fabric-ccenv:amd64-latest
 
 echo "Installing Ginkgo :( "
 go get github.com/onsi/ginkgo/ginkgo
