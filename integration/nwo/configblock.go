@@ -21,11 +21,11 @@ import (
 	"github.com/hyperledger/fabric/protos/common"
 	protosorderer "github.com/hyperledger/fabric/protos/orderer"
 	ectdraft_protos "github.com/hyperledger/fabric/protos/orderer/etcdraft"
+	"github.com/hyperledger/fabric/protos/orderer/smartbft"
 	"github.com/hyperledger/fabric/protos/utils"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gbytes"
 	"github.com/onsi/gomega/gexec"
-	"github.com/hyperledger/fabric/protos/orderer/smartbft"
 )
 
 // GetConfigBlock retrieves the current config block for a channel
