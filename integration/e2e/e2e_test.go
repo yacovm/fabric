@@ -468,7 +468,7 @@ var _ = Describe("EndToEnd", func() {
 
 	Describe("single node etcdraft network with remapped orderer endpoints", func() {
 		BeforeEach(func() {
-			network = nwo.New(nwo.MinimalRaft(), testDir, client, BasePort(), components)
+			network = nwo.New(nwo.BasicEtcdRaft(), testDir, client, BasePort(), components)
 			network.GenerateConfigTree()
 
 			ordererMSPDir := network.OrdererOrgMSPDir(network.OrdererOrgs()[0])
