@@ -12,5 +12,5 @@ jobs:
     - name: Publish image to dockerhub
       run: bash scripts/publish_images.sh
       env: 
-        DOCKER_PASSWORD: ${{ secrets.SHH }}
+        DOCKER_PASSWORD: ${{ secrets.dockerhub }}
 
