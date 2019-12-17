@@ -7,7 +7,6 @@ SPDX-License-Identifier: Apache-2.0
 package localconfig
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/hyperledger/fabric/core/config/configtest"
@@ -27,24 +26,12 @@ func TestLoadProfile(t *testing.T) {
 		SampleSingleMSPChannelProfile,
 		SampleSingleMSPKafkaProfile,
 		SampleSingleMSPSoloProfile,
-		SampleDevModeSmartBFTProfile,
 	}
 	for _, pName := range pNames {
 		t.Run(pName, func(t *testing.T) {
 			p := Load(pName)
 			assert.NotNil(t, p, "profile should not be nil")
 		})
-	}
-}
-
-func TestLoadBFTProfile(t *testing.T) {
-	cleanup := configtest.SetDevFabricConfigPath(t)
-	defer cleanup()
-
-	p := Load(SampleDevModeSmartBFTProfile)
-	assert.NotNil(t, p, "profile should not be nil")
-	for polN, pol := range p.Orderer.Policies {
-		fmt.Printf("%s %s \n", polN, pol)
 	}
 }
 
@@ -58,7 +45,6 @@ func TestLoadProfileWithPath(t *testing.T) {
 		SampleSingleMSPChannelProfile,
 		SampleSingleMSPKafkaProfile,
 		SampleSingleMSPSoloProfile,
-		SampleDevModeSmartBFTProfile,
 	}
 	for _, pName := range pNames {
 		t.Run(pName, func(t *testing.T) {
