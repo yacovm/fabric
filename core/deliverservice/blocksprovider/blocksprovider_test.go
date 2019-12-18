@@ -71,6 +71,7 @@ func makeTestCase(ledgerHeight uint64, mcs api.MessageCryptoService, shouldSucce
 		gossipServiceAdapter := &mocks.MockGossipServiceAdapter{GossipBlockDisseminations: make(chan uint64)}
 		deliverer := &mocks.MockBlocksDeliverer{Pos: ledgerHeight}
 		deliverer.MockRecv = rcv
+		deliverer.DisconnectCalled = make(chan struct{}, 10)
 		provider := NewBlocksProvider("***TEST_CHAINID***", deliverer, gossipServiceAdapter, mcs)
 
 		wg := sync.WaitGroup{}
@@ -342,15 +343,10 @@ func TestBlockFetchFailure(t *testing.T) {
 
 func TestBlockVerificationFailure(t *testing.T) {
 	attempts := int32(0)
+
 	rcvr := func(mock *mocks.MockBlocksDeliverer) (*orderer.DeliverResponse, error) {
-		if atomic.LoadInt32(&attempts) == int32(1) {
-			return &orderer.DeliverResponse{
-				Type: &orderer.DeliverResponse_Status{
-					Status: common.Status_SUCCESS,
-				},
-			}, nil
-		}
 		atomic.AddInt32(&attempts, int32(1))
+
 		return &orderer.DeliverResponse{
 			Type: &orderer.DeliverResponse_Block{
 				Block: &common.Block{
@@ -365,7 +361,67 @@ func TestBlockVerificationFailure(t *testing.T) {
 				}},
 		}, nil
 	}
+
 	mcs := &mockMCS{}
 	mcs.On("VerifyBlock", mock.Anything).Return(errors.New("Invalid signature"))
-	makeTestCase(uint64(0), mcs, false, rcvr)(t)
+
+	gossipServiceAdapter := &mocks.MockGossipServiceAdapter{GossipBlockDisseminations: make(chan uint64)}
+	deliverer := &mocks.MockBlocksDeliverer{Pos: 0}
+	deliverer.MockRecv = rcvr
+	deliverer.DisconnectCalled = make(chan struct{}, 10)
+	deliverer.CloseCalled = make(chan struct{}, 10)
+	provider := NewBlocksProvider("***TEST_CHAINID***", deliverer, gossipServiceAdapter, mcs)
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		provider.DeliverBlocks()
+	}()
+
+FOR_LOOP:
+	for {
+		select {
+		case <-deliverer.DisconnectCalled:
+			provider.Stop()
+			break FOR_LOOP
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	wg.Wait()
+	assert.True(t, atomic.LoadInt32(&attempts) > 0)
+}
+
+func TestBlocksProvider_computeBackoffDelay(t *testing.T) {
+	overflowPoint := uint64(0)
+	overflow := false
+	count := uint64(0)
+	delay := time.Millisecond
+	for n := uint64(0); n < 500; n++ {
+		nextDelay, nextCount := computeBackOffDelay(n)
+		assert.True(t, nextDelay >= delay)
+		assert.True(t, nextCount >= count)
+
+		if !overflow && (nextCount == count) {
+			overflow = true
+			overflowPoint = n
+			t.Logf("overflow %d %d %v", overflowPoint, nextCount, nextDelay)
+		}
+
+		if overflow && n > overflowPoint {
+			assert.Equal(t, nextDelay, delay)
+			assert.Equal(t, nextCount, n)
+		} else if n < overflowPoint {
+			assert.True(t, nextDelay > delay)
+			assert.Equal(t, nextCount, n+1)
+		}
+
+		delay = nextDelay
+		count = nextCount
+	}
+
+	assert.True(t, overflowPoint < 32, "%d < 32", overflowPoint)
 }

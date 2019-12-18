@@ -7,9 +7,8 @@ SPDX-License-Identifier: Apache-2.0
 package orderer
 
 import (
-	"math"
-
 	"github.com/hyperledger/fabric/common/crypto"
+	"math"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/cauthdsl"

@@ -13,10 +13,9 @@ import (
 	"bytes"
 	"encoding/pem"
 	"fmt"
+	"github.com/hyperledger/fabric/common/crypto"
 	"path"
 	"reflect"
-
-	"github.com/hyperledger/fabric/common/crypto"
 
 	"github.com/golang/protobuf/proto"
 	proto2 "github.com/golang/protobuf/proto"
