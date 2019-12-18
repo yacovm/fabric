@@ -9,9 +9,8 @@ package smartbft
 import (
 	"bytes"
 	"encoding/hex"
-	"sync"
-
 	"go.uber.org/zap/zapcore"
+	"sync"
 
 	"encoding/base64"
 

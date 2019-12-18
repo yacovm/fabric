@@ -109,7 +109,10 @@ func NewBlocksProvider(chainID string, client streamClient, gossip GossipService
 // distributed them across peers
 func (b *blocksProviderImpl) DeliverBlocks() {
 	errorStatusCounter := 0
-	statusCounter := 0
+	var statusCounter uint64 = 0
+	var verErrCounter uint64 = 0
+	var delay time.Duration
+
 	defer b.client.Close()
 	for !b.isDone() {
 		msg, err := b.client.Recv()
@@ -119,6 +122,8 @@ func (b *blocksProviderImpl) DeliverBlocks() {
 		}
 		switch t := msg.Type.(type) {
 		case *orderer.DeliverResponse_Status:
+			verErrCounter = 0
+
 			if t.Status == common.Status_SUCCESS {
 				logger.Warningf("[%s] ERROR! Received success for a seek that should never complete", b.chainID)
 				return
@@ -134,12 +139,9 @@ func (b *blocksProviderImpl) DeliverBlocks() {
 				errorStatusCounter = 0
 				logger.Warningf("[%s] Got error %v", b.chainID, t)
 			}
-			maxDelay := float64(maxRetryDelay)
-			currDelay := float64(time.Duration(math.Pow(2, float64(statusCounter))) * 100 * time.Millisecond)
-			time.Sleep(time.Duration(math.Min(maxDelay, currDelay)))
-			if currDelay < maxDelay {
-				statusCounter++
-			}
+
+			delay, statusCounter = computeBackOffDelay(statusCounter)
+			time.Sleep(delay)
 			b.client.Disconnect()
 			continue
 		case *orderer.DeliverResponse_Block:
@@ -149,13 +151,22 @@ func (b *blocksProviderImpl) DeliverBlocks() {
 
 			marshaledBlock, err := proto.Marshal(t.Block)
 			if err != nil {
-				logger.Errorf("[%s] Error serializing block with sequence number %d, due to %s", b.chainID, blockNum, err)
+				logger.Errorf("[%s] Error serializing block with sequence number %d, due to %s; Disconnecting client from orderer.", b.chainID, blockNum, err)
+				delay, verErrCounter = computeBackOffDelay(verErrCounter)
+				time.Sleep(delay)
+				b.client.Disconnect()
 				continue
 			}
+
 			if err := b.mcs.VerifyBlock(gossipcommon.ChainID(b.chainID), blockNum, marshaledBlock); err != nil {
-				logger.Errorf("[%s] Error verifying block with sequence number %d, due to %s", b.chainID, blockNum, err)
+				logger.Errorf("[%s] Error verifying block with sequnce number %d, due to %s; Disconnecting client from orderer.", b.chainID, blockNum, err)
+				delay, verErrCounter = computeBackOffDelay(verErrCounter)
+				time.Sleep(delay)
+				b.client.Disconnect()
 				continue
 			}
+
+			verErrCounter = 0 // On a good block
 
 			numberOfPeers := len(b.gossip.PeersOfChannel(gossipcommon.ChainID(b.chainID)))
 			// Create payload with a block received
@@ -211,4 +222,14 @@ func createPayload(seqNum uint64, marshaledBlock []byte) *gossip_proto.Payload {
 		Data:   marshaledBlock,
 		SeqNum: seqNum,
 	}
+}
+
+// computeBackOffDelay computes an exponential back-off delay and increments the counter, as long as the computed
+// delay is below the maximal delay.
+func computeBackOffDelay(count uint64) (time.Duration, uint64) {
+	currentDelayNano := math.Pow(2.0, float64(count)) * float64(10*time.Millisecond.Nanoseconds())
+	if currentDelayNano > float64(maxRetryDelay.Nanoseconds()) {
+		return maxRetryDelay, count
+	}
+	return time.Duration(currentDelayNano), count + 1
 }

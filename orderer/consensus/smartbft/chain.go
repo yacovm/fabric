@@ -13,14 +13,13 @@ import (
 	"sort"
 	"time"
 
-	"github.com/hyperledger/fabric/common/crypto"
-
 	smartbft "github.com/SmartBFT-Go/consensus/pkg/consensus"
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/pkg/wal"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/channelconfig"
+	"github.com/hyperledger/fabric/common/crypto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/common/policies"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
