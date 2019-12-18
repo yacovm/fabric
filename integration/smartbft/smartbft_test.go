@@ -114,9 +114,8 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
 
 			channel := "testchannel1"
-			orderer := network.Orderers[rand.Intn(len(network.Orderers))]
-			byText := fmt.Sprintf("Creating and joining %s channel, using orderer: %s", channel, orderer.Name)
-			By(byText)
+			By("Creating and joining  testchannel1")
+			orderer := network.Orderers[0]
 			network.CreateAndJoinChannel(orderer, channel)
 
 			By("Deploying chaincode")
@@ -142,9 +141,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			Eventually(sess, network.EventuallyTimeout).Should(gexec.Exit(0))
 			Expect(sess).To(gbytes.Say("100"))
 
-			orderer = network.Orderers[rand.Intn(len(network.Orderers))]
-			byText = fmt.Sprintf("Picking orderer %s to send invoke", orderer.Name)
-			By(byText)
+			By("invoking the chaincode")
 			invokeQuery(network, peer, orderer, channel, 90)
 
 			By("Taking down all the orderers")
@@ -165,9 +162,12 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 				Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
 			}
 
-			orderer = network.Orderers[rand.Intn(len(network.Orderers))]
-			byText = fmt.Sprintf("Picking orderer %s to send invoke", orderer.Name)
-			By(byText)
+			By("Waiting for followers to see the leader, again")
+			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+
+			By("invoking the chaincode, again")
 			invokeQuery(network, peer, orderer, channel, 80)
 		})
 
@@ -347,7 +347,8 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 
 			By("Ensuring the follower is functioning properly")
 			invokeQuery(network, peer, orderer, channel, 50)
-			assertBlockReception(map[string]int{"testchannel1": 6}, network.Orderers, peer, network)
+			invokeQuery(network, peer, orderer, channel, 40)
+			assertBlockReception(map[string]int{"testchannel1": 7}, network.Orderers, peer, network)
 		})
 
 		It("smartbft node addition and removal", func() {
