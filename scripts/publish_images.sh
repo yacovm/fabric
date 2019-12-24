@@ -7,11 +7,12 @@ echo "Building on top of $(git branch | sed -n '/\* /s///p')"
 
 git log -1 --stat
 
-make orderer-docker peer-docker
+make orderer-docker peer-docker tools-docker 
 
 echo "Tagging images..."
 docker tag hyperledger/fabric-peer:latest smartbft/fabric-peer:latest
 docker tag hyperledger/fabric-orderer:latest smartbft/fabric-orderer:latest
+docker tag hyperledger/fabric-tools:latest smartbft/fabric-tools:latest
 
 echo "Logging in to dockerhub..."
 echo ${DOCKER_PASSWORD} | docker login -u smartbft --password-stdin
@@ -20,5 +21,6 @@ echo "Pushing to dockerhub..."
 
 docker push smartbft/fabric-peer:latest
 docker push smartbft/fabric-orderer:latest
+docker push smartbft/fabric-tools:latest
 
 cat /dev/null > ~/.docker/config.json
