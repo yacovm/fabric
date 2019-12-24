@@ -21,6 +21,8 @@ import (
 	"github.com/hyperledger/fabric/protos/orderer"
 )
 
+//go:generate mockery -dir . -name LedgerInfo -case underscore -output ../mocks/
+
 // LedgerInfo an adapter to provide the interface to query
 // the ledger committer for current ledger height
 type LedgerInfo interface {
@@ -64,7 +66,7 @@ type BlocksDeliverer interface {
 	Send(*common.Envelope) error
 }
 
-type streamClient interface {
+type StreamClient interface {
 	BlocksDeliverer
 
 	// Close closes the stream and its underlying connection
@@ -72,13 +74,16 @@ type streamClient interface {
 
 	// Disconnect disconnects from the remote node.
 	Disconnect()
+
+	// Update the client on the last valid block number
+	UpdateReceived(blockNumber uint64)
 }
 
 // blocksProviderImpl the actual implementation for BlocksProvider interface
 type blocksProviderImpl struct {
 	chainID string
 
-	client streamClient
+	client StreamClient
 
 	gossip GossipServiceAdapter
 
@@ -95,7 +100,7 @@ var maxRetryDelay = time.Second * 10
 var logger = flogging.MustGetLogger("blocksProvider")
 
 // NewBlocksProvider constructor function to create blocks deliverer instance
-func NewBlocksProvider(chainID string, client streamClient, gossip GossipServiceAdapter, mcs api.MessageCryptoService) BlocksProvider {
+func NewBlocksProvider(chainID string, client StreamClient, gossip GossipServiceAdapter, mcs api.MessageCryptoService) BlocksProvider {
 	return &blocksProviderImpl{
 		chainID:              chainID,
 		client:               client,
@@ -185,6 +190,9 @@ func (b *blocksProviderImpl) DeliverBlocks() {
 			if !b.isDone() {
 				b.gossip.Gossip(gossipMsg)
 			}
+
+			b.client.UpdateReceived(blockNum)
+
 		default:
 			logger.Warningf("[%s] Received unknown: %v", b.chainID, t)
 			return

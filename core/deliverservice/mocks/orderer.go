@@ -9,6 +9,7 @@ package mocks
 import (
 	"fmt"
 	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -25,9 +26,13 @@ type Orderer struct {
 	nextExpectedSeek uint64
 	t                *testing.T
 	blockChannel     chan uint64
+	stop             bool
 	stopChan         chan struct{}
 	failFlag         int32
-	connCount        uint32
+
+	mutex       sync.Mutex
+	connCount   uint32
+	contentType orderer.SeekInfo_SeekContentType
 }
 
 func NewOrderer(port int, t *testing.T) *Orderer {
@@ -36,7 +41,8 @@ func NewOrderer(port int, t *testing.T) *Orderer {
 	if err != nil {
 		panic(err)
 	}
-	o := &Orderer{Server: srv,
+	o := &Orderer{
+		Server:           srv,
 		Listener:         lsnr,
 		t:                t,
 		nextExpectedSeek: uint64(1),
@@ -44,22 +50,45 @@ func NewOrderer(port int, t *testing.T) *Orderer {
 		stopChan:         make(chan struct{}, 1),
 	}
 	orderer.RegisterAtomicBroadcastServer(srv, o)
-	go srv.Serve(lsnr)
+	go func() { _ = srv.Serve(lsnr) }()
 	return o
 }
 
 func (o *Orderer) Shutdown() {
-	o.stopChan <- struct{}{}
+	o.mutex.Lock()
+	defer o.mutex.Unlock()
+
+	if o.stop {
+		return
+	}
+
+	o.stop = true
+	close(o.stopChan)
 	o.Server.Stop()
-	o.Listener.Close()
+	_ = o.Listener.Close()
 }
 
+func (o *Orderer) isStop() bool {
+	o.mutex.Lock()
+	defer o.mutex.Unlock()
+
+	if o.stop {
+		return true
+	}
+	return false
+}
 func (o *Orderer) Fail() {
+	if o.isStop() {
+		return
+	}
 	atomic.StoreInt32(&o.failFlag, int32(1))
 	o.blockChannel <- 0
 }
 
 func (o *Orderer) Resurrect() {
+	if o.isStop() {
+		return
+	}
 	atomic.StoreInt32(&o.failFlag, int32(0))
 	for {
 		select {
@@ -72,7 +101,17 @@ func (o *Orderer) Resurrect() {
 }
 
 func (o *Orderer) ConnCount() int {
-	return int(atomic.LoadUint32(&o.connCount))
+	o.mutex.Lock()
+	defer o.mutex.Unlock()
+
+	return int(o.connCount)
+}
+
+func (o *Orderer) ConnCountType() (int, orderer.SeekInfo_SeekContentType) {
+	o.mutex.Lock()
+	defer o.mutex.Unlock()
+
+	return int(o.connCount), o.contentType
 }
 
 func (o *Orderer) hasFailed() bool {
@@ -88,12 +127,14 @@ func (o *Orderer) SetNextExpectedSeek(seq uint64) {
 }
 
 func (o *Orderer) SendBlock(seq uint64) {
+	if o.isStop() {
+		return
+	}
 	o.blockChannel <- seq
 }
 
 func (o *Orderer) Deliver(stream orderer.AtomicBroadcast_DeliverServer) error {
-	atomic.AddUint32(&o.connCount, 1)
-	defer atomic.AddUint32(&o.connCount, ^uint32(0))
+
 	envlp, err := stream.Recv()
 	if err != nil {
 		return nil
@@ -101,25 +142,38 @@ func (o *Orderer) Deliver(stream orderer.AtomicBroadcast_DeliverServer) error {
 	if o.hasFailed() {
 		return stream.Send(statusUnavailable())
 	}
+
 	payload := &common.Payload{}
-	proto.Unmarshal(envlp.Payload, payload)
+	_ = proto.Unmarshal(envlp.Payload, payload)
 	seekInfo := &orderer.SeekInfo{}
-	proto.Unmarshal(payload.Data, seekInfo)
+	_ = proto.Unmarshal(payload.Data, seekInfo)
 	assert.True(o.t, seekInfo.Behavior == orderer.SeekInfo_BLOCK_UNTIL_READY)
-	assert.Equal(o.t, atomic.LoadUint64(&o.nextExpectedSeek), seekInfo.Start.GetSpecified().Number)
+	assert.Equal(o.t, atomic.LoadUint64(&o.nextExpectedSeek), seekInfo.Start.GetSpecified().Number, "seekInfo=%v, Addr=%v", seekInfo, o.Addr())
+
+	o.mutex.Lock()
+	o.connCount++
+	o.contentType = seekInfo.ContentType
+	o.mutex.Unlock()
+
+	defer func() {
+		o.mutex.Lock()
+		o.connCount--
+		o.mutex.Unlock()
+	}()
 
 	for {
 		select {
-		case <-o.stopChan:
+		case _ = <-o.stopChan:
 			return nil
+		case <-stream.Context().Done():
+			return stream.Context().Err()
 		case seq := <-o.blockChannel:
 			if o.hasFailed() {
 				return stream.Send(statusUnavailable())
 			}
-			o.sendBlock(stream, seq)
+			o.sendBlock(stream, seq, seekInfo.ContentType)
 		}
 	}
-
 }
 
 func statusUnavailable() *orderer.DeliverResponse {
@@ -130,13 +184,23 @@ func statusUnavailable() *orderer.DeliverResponse {
 	}
 }
 
-func (o *Orderer) sendBlock(stream orderer.AtomicBroadcast_DeliverServer, seq uint64) {
-	block := &common.Block{
-		Header: &common.BlockHeader{
-			Number: seq,
-		},
+func (o *Orderer) sendBlock(stream orderer.AtomicBroadcast_DeliverServer, seq uint64, contentType orderer.SeekInfo_SeekContentType) {
+	const numTx = 10
+	block := common.NewBlock(seq, []byte{1, 2, 3, 4, 5, 6, 7, 8})
+	data := &common.BlockData{
+		Data: make([][]byte, numTx),
 	}
-	stream.Send(&orderer.DeliverResponse{
+	for i := 0; i < numTx; i++ {
+		data.Data[i] = []byte{byte(i), byte(seq)}
+	}
+	block.Header.DataHash = data.Hash()
+	if contentType == orderer.SeekInfo_BLOCK {
+		block.Data = data
+	}
+
+	block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = []byte("good")
+
+	_ = stream.Send(&orderer.DeliverResponse{
 		Type: &orderer.DeliverResponse_Block{Block: block},
 	})
 }

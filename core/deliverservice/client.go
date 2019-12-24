@@ -21,8 +21,8 @@ import (
 	"google.golang.org/grpc"
 )
 
-// broadcastSetup is a function that is called by the broadcastClient immediately after each
-// successful connection to the ordering service
+// broadcastSetup is a function that is called by the broadcastClient immediately after each successful connection to
+// the ordering service in order to request the reception of a stream of blocks
 type broadcastSetup func(blocksprovider.BlocksDeliverer) error
 
 // retryPolicy receives as parameters the number of times the attempt has failed
@@ -258,6 +258,18 @@ func (bc *broadcastClient) Disconnect() {
 	bc.blocksDeliverer = nil
 }
 
+// GetEndpoint returns the endpoint the client is currently connected to.
+func (bc *broadcastClient) GetEndpoint() string {
+	bc.mutex.Lock()
+	defer bc.mutex.Unlock()
+
+	return bc.endpoint
+}
+
+func (bc *broadcastClient) UpdateReceived(blockNumber uint64) {
+	// Nothing to do.
+}
+
 // UpdateEndpoints update endpoints to new values
 func (bc *broadcastClient) UpdateEndpoints(endpoints []comm.EndpointCriteria) {
 	bc.mutex.Lock()
@@ -273,22 +285,24 @@ func (bc *broadcastClient) UpdateEndpoints(endpoints []comm.EndpointCriteria) {
 }
 
 func (bc *broadcastClient) areEndpointsUpdated(newEndpoints []comm.EndpointCriteria) bool {
-	existingEndpoints := bc.prod.GetEndpoints()
+	return !equalEndpoints(bc.prod.GetEndpoints(), newEndpoints)
+}
 
+func equalEndpoints(existingEndpoints, newEndpoints []comm.EndpointCriteria) bool {
 	if len(newEndpoints) != len(existingEndpoints) {
-		return true
+		return false
 	}
 
 	// Check that endpoints were actually updated
 	for _, endpoint := range newEndpoints {
 		if !contains(endpoint, existingEndpoints) {
 			// Found new endpoint
-			return true
+			return false
 		}
 	}
 	// Endpoints are of the same length and the existing endpoints contain all the new endpoints,
 	// so there are no new changes.
-	return false
+	return true
 }
 
 func contains(s comm.EndpointCriteria, a []comm.EndpointCriteria) bool {

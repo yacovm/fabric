@@ -127,6 +127,10 @@ func (mock *MockBlocksDeliverer) Disconnect() {
 	mock.DisconnectCalled <- struct{}{}
 }
 
+func (mock *MockBlocksDeliverer) UpdateReceived(blockNumber uint64) {
+	// nothing to do
+}
+
 func (mock *MockBlocksDeliverer) Close() {
 	if mock.CloseCalled == nil {
 		return
@@ -151,4 +155,8 @@ type MockLedgerInfo struct {
 // LedgerHeight returns mocked value to the ledger height
 func (li *MockLedgerInfo) LedgerHeight() (uint64, error) {
 	return atomic.LoadUint64(&li.Height), nil
+}
+
+func (li *MockLedgerInfo) Set(height uint64) {
+	atomic.StoreUint64(&li.Height, height)
 }

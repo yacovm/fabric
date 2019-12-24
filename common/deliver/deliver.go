@@ -339,6 +339,10 @@ func (h *Handler) deliverBlocks(ctx context.Context, srv *Server, envelope *cb.E
 
 		logger.Debugf("[channel: %s] Delivering block [%d] for (%p) for %s", chdr.ChannelId, block.Header.Number, seekInfo, addr)
 
+		if seekInfo.ContentType == ab.SeekInfo_HEADER_WITH_SIG {
+			block.Data = nil
+		}
+
 		if err := srv.SendBlockResponse(block); err != nil {
 			logger.Warningf("[channel: %s] Error sending to %s: %s", chdr.ChannelId, addr, err)
 			return cb.Status_INTERNAL_SERVER_ERROR, err
