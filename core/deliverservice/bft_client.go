@@ -157,7 +157,7 @@ func (c *bftDeliveryClient) Recv() (response *orderer.DeliverResponse, err error
 			return nil, errClientReconnectTimeout
 		}
 
-		c.closeBlockReceiver()
+		c.closeBlockReceiver(false)
 		numRetries++
 		if numRetries%numEP == 0 { //double the back-off delay on every round of attempts.
 			dur := backOffDuration(2.0, uint(numRetries/numEP), c.minBackoffDelay, c.maxBackoffDelay)
@@ -203,8 +203,7 @@ func (c *bftDeliveryClient) monitor() {
 	ticker := time.NewTicker(bftBlockCensorshipTimeout / 100)
 	for !c.shouldStop() {
 		if suspicion := c.detectBlockCensorship(); suspicion {
-			c.closeBlockReceiver()
-			c.lastBlockTime = time.Now()
+			c.closeBlockReceiver(true)
 		}
 
 		select {
@@ -359,9 +358,13 @@ func (c *bftDeliveryClient) receiveBlock() (*orderer.DeliverResponse, error) {
 	return response, err
 }
 
-func (c *bftDeliveryClient) closeBlockReceiver() {
+func (c *bftDeliveryClient) closeBlockReceiver(updateLastBlockTime bool) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
+
+	if updateLastBlockTime {
+		c.lastBlockTime = time.Now()
+	}
 
 	if c.blockReceiver != nil {
 		c.blockReceiver.Close()

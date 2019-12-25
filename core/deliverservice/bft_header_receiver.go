@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package deliverclient
 
 import (
+	"github.com/hyperledger/fabric/core/deliverservice/blocksprovider"
 	"sync"
 	"time"
 
@@ -18,25 +19,34 @@ import (
 
 const bftHeaderWrongStatusThreshold = 10
 
+//go:generate mockery -dir . -name HeaderStreamClient -case underscore -output mocks/
+
+type HeaderStreamClient interface {
+	blocksprovider.StreamClient
+	EndpointUpdater
+}
+
 type bftHeaderReceiver struct {
-	mutex             sync.Mutex
-	chainID           string
-	minBackoffDelay   time.Duration
-	maxBackoffDelay   time.Duration
-	stop              bool
-	stopChan          chan struct{}
-	started           bool
-	endpoint          string
-	client            *broadcastClient
-	msgCryptoVerifier MessageCryptoVerifier
-	lastHeader        *common.Block // a block with Header & Metadata, without Data (i.e. lastHeader.Data==nil)
-	lastHeaderTime    time.Time
+	mutex              sync.Mutex
+	chainID            string
+	minBackoffDelay    time.Duration
+	maxBackoffDelay    time.Duration
+	stop               bool
+	stopChan           chan struct{}
+	started            bool
+	endpoint           string
+	client             HeaderStreamClient
+	msgCryptoVerifier  MessageCryptoVerifier
+	lastHeader         *common.Block // a block with Header & Metadata, without Data (i.e. lastHeader.Data==nil)
+	lastHeaderTime     time.Time
+	lastHeaderVerified bool
+	lastHeaderOK       bool
 }
 
 func newBFTHeaderReceiver(
 	chainID string,
 	endpoint string,
-	client *broadcastClient,
+	client HeaderStreamClient,
 	msgVerifier MessageCryptoVerifier,
 	minBackOff time.Duration,
 	maxBackOff time.Duration,
@@ -100,12 +110,13 @@ func (hr *bftHeaderReceiver) DeliverHeaders() {
 			statusCounter = 0
 			blockNum := t.Block.Header.Number
 
-			// TODO filter out of order delivery
 			// do not verify, just save for later, in case the block-receiver is suspected of censorship
 			bftLogger.Debugf("[%s] Saving block with header & metadata, blockNum = [%d]", hr.chainID, blockNum)
 			hr.mutex.Lock()
 			hr.lastHeader = t.Block
 			hr.lastHeaderTime = time.Now()
+			hr.lastHeaderVerified = false
+			hr.lastHeaderOK = false
 			hr.mutex.Unlock()
 
 		default:
@@ -156,10 +167,21 @@ func (hr *bftHeaderReceiver) LastBlockNum() (uint64, time.Time, error) {
 		return 0, time.Unix(0, 0), errors.New("Not found")
 	}
 
-	err := hr.msgCryptoVerifier.VerifyHeader(hr.chainID, hr.lastHeader)
-	if err != nil {
-		bftLogger.Warningf("[%s] Last block verification failed: %s", hr.chainID, err)
-		return 0, time.Unix(0, 0), errors.Wrapf(err, "Last block verification failed")
+	if !hr.lastHeaderVerified {
+		hr.lastHeaderVerified = true
+		hr.lastHeaderOK = true
+
+		err := hr.msgCryptoVerifier.VerifyHeader(hr.chainID, hr.lastHeader)
+		if err != nil {
+			hr.lastHeaderOK = false
+			bftLogger.Warningf("[%s] Last block verification failed: %s", hr.chainID, err)
+			return hr.lastHeader.Header.Number, hr.lastHeaderTime, errors.Wrapf(err, "Last block verification failed")
+		}
+	}
+
+	if !hr.lastHeaderOK {
+		bftLogger.Debugf("[%s] Last block verification failed on previous invocation, cached result", hr.chainID)
+		return hr.lastHeader.Header.Number, hr.lastHeaderTime, errors.New("Last block verification failed")
 	}
 
 	return hr.lastHeader.Header.Number, hr.lastHeaderTime, nil
