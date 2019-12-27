@@ -17,7 +17,6 @@ import (
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/core/comm"
 	"github.com/hyperledger/fabric/core/deliverservice/mocks"
-	"github.com/hyperledger/fabric/gossip/api"
 	"github.com/hyperledger/fabric/gossip/util"
 	"github.com/hyperledger/fabric/protos/orderer"
 	"github.com/spf13/viper"
@@ -25,10 +24,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
 )
-
-type MsgCryptoSrv interface {
-	api.MessageCryptoService
-}
 
 var endpoints = []comm.EndpointCriteria{
 	{Endpoint: "localhost:5611", Organizations: []string{"org1"}},
@@ -478,6 +473,31 @@ func TestBFTDeliverClient_UpdateEndpoints(t *testing.T) {
 
 	for _, os := range osMap {
 		os.Shutdown()
+	}
+}
+
+func TestBFTDeliverClient_BackOffDuration(t *testing.T) {
+	minDur := 50 * time.Millisecond
+	maxDur := 10 * time.Second
+	for exp := uint(0); exp < 100000000; exp = (exp + 1) * 2 {
+		d := backOffDuration(2.0, 0, minDur, maxDur)
+		assert.True(t, d >= minDur)
+		assert.True(t, d <= maxDur)
+	}
+
+	maxDur = minDur / 2
+	for exp := uint(0); exp < 100000000; exp = (exp + 1) * 2 {
+		d := backOffDuration(2.0, 0, minDur, maxDur)
+		assert.True(t, d >= minDur)
+		assert.True(t, d <= minDur)
+	}
+
+	minDur = 0
+	maxDur = 10 * time.Second
+	for exp := uint(0); exp < 100000000; exp = (exp + 1) * 2 {
+		d := backOffDuration(2.0, 0, minDur, maxDur)
+		assert.True(t, d >= bftMinBackoffDelay)
+		assert.True(t, d <= maxDur)
 	}
 }
 
