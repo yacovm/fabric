@@ -893,6 +893,7 @@ func initGossipService(policyMgr policies.ChannelPolicyManagerGetter, metricsPro
 	)
 	secAdv := peergossip.NewSecurityAdvisor(mgmt.NewDeserializersManager())
 	bootstrap := viper.GetStringSlice("peer.gossip.bootstrap")
+	orgLeader := viper.GetBool("peer.gossip.orgLeader")
 
 	return service.InitGossipService(
 		serializedIdentity,
@@ -903,6 +904,7 @@ func initGossipService(policyMgr policies.ChannelPolicyManagerGetter, metricsPro
 		messageCryptoService,
 		secAdv,
 		secureDialOpts,
+		orgLeader,
 		bootstrap...,
 	)
 }

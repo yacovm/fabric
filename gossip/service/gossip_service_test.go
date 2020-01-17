@@ -99,7 +99,7 @@ func TestInitGossipService(t *testing.T) {
 			messageCryptoService := peergossip.NewMCS(&mocks.ChannelPolicyManagerGetter{}, &id2IdentitiesFetcherMock{}, localmsp.NewSigner(), mgmt.NewDeserializersManager())
 			secAdv := peergossip.NewSecurityAdvisor(mgmt.NewDeserializersManager())
 			err := InitGossipService(identity, &disabled.Provider{}, endpoint, grpcServer, nil,
-				messageCryptoService, secAdv, nil)
+				messageCryptoService, secAdv, nil, false)
 			assert.NoError(t, err)
 		}()
 	}
@@ -843,7 +843,7 @@ func TestInvalidInitialization(t *testing.T) {
 
 	secAdv := peergossip.NewSecurityAdvisor(mgmt.NewDeserializersManager())
 	err := InitGossipService(api.PeerIdentityType("IDENTITY"), &disabled.Provider{}, endpoint, grpcServer, nil,
-		&naiveCryptoService{}, secAdv, nil)
+		&naiveCryptoService{}, secAdv, nil, false)
 	assert.NoError(t, err)
 	gService := GetGossipService().(*gossipServiceImpl)
 	defer gService.Stop()
@@ -870,7 +870,7 @@ func TestChannelConfig(t *testing.T) {
 
 	secAdv := peergossip.NewSecurityAdvisor(mgmt.NewDeserializersManager())
 	error := InitGossipService(api.PeerIdentityType("IDENTITY"), &disabled.Provider{}, endpoint, grpcServer, nil,
-		&naiveCryptoService{}, secAdv, nil)
+		&naiveCryptoService{}, secAdv, nil, false)
 	assert.NoError(t, error)
 	gService := GetGossipService().(*gossipServiceImpl)
 	defer gService.Stop()
