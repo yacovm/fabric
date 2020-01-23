@@ -10,6 +10,8 @@ import (
 	"errors"
 	"testing"
 
+	"sync/atomic"
+
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
@@ -67,14 +69,21 @@ func TestSignProposal(t *testing.T) {
 	ledger.On("Block", uint64(10)).Return(lastConfigBlock)
 
 	logger := flogging.MustGetLogger("test")
+
 	assembler := &smartbft.Assembler{
 		VerificationSeq: func() uint64 {
 			return 0
 		},
-		Logger:             logger,
-		LastBlock:          smartbft.LastBlockFromLedgerOrPanic(ledger, logger),
-		LastConfigBlockNum: smartbft.LastConfigBlockFromLedgerOrPanic(ledger, logger).Header.Number,
+		Logger:        logger,
+		RuntimeConfig: &atomic.Value{},
 	}
+
+	rtc := smartbft.RuntimeConfig{
+		LastBlock:       smartbft.LastBlockFromLedgerOrPanic(ledger, logger),
+		LastConfigBlock: smartbft.LastConfigBlockFromLedgerOrPanic(ledger, logger),
+	}
+
+	assembler.RuntimeConfig.Store(rtc)
 
 	env := utils.MarshalOrPanic(&common.Envelope{Payload: []byte{1, 2, 3, 4, 5}})
 	prop := assembler.AssembleProposal(nil, [][]byte{env})

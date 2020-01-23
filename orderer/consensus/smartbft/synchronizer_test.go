@@ -63,11 +63,11 @@ func TestSynchronizerSync(t *testing.T) {
 				}
 				return nil
 			},
-			Logger:         l,
-			BlockPuller:    bp,
-			ClusterSize:    4,
-			Support:        fakeCS,
-			UpdateLastHash: noopUpdateLastHash,
+			Logger:      l,
+			BlockPuller: bp,
+			ClusterSize: 4,
+			Support:     fakeCS,
+			OnCommit:    noopUpdateLastHash,
 		}
 
 		d := syn.Sync()
@@ -116,11 +116,11 @@ func TestSynchronizerSync(t *testing.T) {
 				}
 				return nil
 			},
-			Logger:         flogging.NewFabricLogger(zap.NewExample()),
-			BlockPuller:    bp,
-			ClusterSize:    4,
-			Support:        fakeCS,
-			UpdateLastHash: noopUpdateLastHash,
+			Logger:      flogging.NewFabricLogger(zap.NewExample()),
+			BlockPuller: bp,
+			ClusterSize: 4,
+			Support:     fakeCS,
+			OnCommit:    noopUpdateLastHash,
 		}
 
 		d := syn.Sync()
@@ -168,11 +168,11 @@ func TestSynchronizerSync(t *testing.T) {
 				}
 				return nil
 			},
-			Logger:         flogging.NewFabricLogger(zap.NewExample()),
-			BlockPuller:    bp,
-			ClusterSize:    4,
-			Support:        fakeCS,
-			UpdateLastHash: noopUpdateLastHash,
+			Logger:      flogging.NewFabricLogger(zap.NewExample()),
+			BlockPuller: bp,
+			ClusterSize: 4,
+			Support:     fakeCS,
+			OnCommit:    noopUpdateLastHash,
 		}
 
 		d := syn.Sync()
@@ -219,11 +219,11 @@ func TestSynchronizerSync(t *testing.T) {
 				}
 				return nil
 			},
-			Logger:         flogging.NewFabricLogger(zap.NewExample()),
-			BlockPuller:    bp,
-			ClusterSize:    4,
-			Support:        fakeCS,
-			UpdateLastHash: noopUpdateLastHash,
+			Logger:      flogging.NewFabricLogger(zap.NewExample()),
+			BlockPuller: bp,
+			ClusterSize: 4,
+			Support:     fakeCS,
+			OnCommit:    noopUpdateLastHash,
 		}
 
 		d := syn.Sync()
@@ -269,11 +269,11 @@ func TestSynchronizerSync(t *testing.T) {
 				}
 				return nil
 			},
-			Logger:         flogging.NewFabricLogger(zap.NewExample()),
-			BlockPuller:    bp,
-			ClusterSize:    4,
-			Support:        fakeCS,
-			UpdateLastHash: noopUpdateLastHash,
+			Logger:      flogging.NewFabricLogger(zap.NewExample()),
+			BlockPuller: bp,
+			ClusterSize: 4,
+			Support:     fakeCS,
+			OnCommit:    noopUpdateLastHash,
 		}
 
 		d := syn.Sync()

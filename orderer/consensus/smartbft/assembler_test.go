@@ -9,6 +9,8 @@ package smartbft_test
 import (
 	"testing"
 
+	"sync/atomic"
+
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/orderer/consensus/smartbft"
@@ -73,10 +75,15 @@ func TestAssembler(t *testing.T) {
 				VerificationSeq: func() uint64 {
 					return 10
 				},
-				Logger:             logger,
-				LastBlock:          smartbft.LastBlockFromLedgerOrPanic(ledger, logger),
-				LastConfigBlockNum: smartbft.LastConfigBlockFromLedgerOrPanic(ledger, logger).Header.Number,
+				Logger:        logger,
+				RuntimeConfig: &atomic.Value{},
 			}
+
+			rtc := smartbft.RuntimeConfig{
+				LastBlock:       smartbft.LastBlockFromLedgerOrPanic(ledger, logger),
+				LastConfigBlock: smartbft.LastConfigBlockFromLedgerOrPanic(ledger, logger),
+			}
+			assembler.RuntimeConfig.Store(rtc)
 
 			if testCase.panicVal != "" {
 				assert.PanicsWithValue(t, testCase.panicVal, func() {

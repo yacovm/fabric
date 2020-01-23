@@ -13,7 +13,6 @@ import (
 	"bytes"
 	"encoding/pem"
 	"fmt"
-	"github.com/hyperledger/fabric/common/crypto"
 	"path"
 	"reflect"
 
@@ -161,37 +160,6 @@ func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *co
 	}
 	c.Logger.Infof("Local consenter id is %d", selfID)
 
-	var nodes []cluster.RemoteNode
-	id2Identies := map[uint64][]byte{}
-	for _, consenter := range m.Consenters {
-		sanitizedID, err := crypto.SanitizeIdentity(consenter.Identity)
-		if err != nil {
-			c.Logger.Panicf("Failed to sanitize identity: %v", err)
-		}
-		id2Identies[consenter.ConsenterId] = sanitizedID
-		c.Logger.Infof("%s %d ---> %s", support.ChainID(), consenter.ConsenterId, string(consenter.Identity))
-
-		// No need to know yourself
-		if selfID == consenter.ConsenterId {
-			continue
-		}
-		serverCertAsDER, err := c.pemToDER(consenter.ServerTlsCert, consenter.ConsenterId, "server")
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-		clientCertAsDER, err := c.pemToDER(consenter.ClientTlsCert, consenter.ConsenterId, "client")
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-
-		nodes = append(nodes, cluster.RemoteNode{
-			ID:            consenter.ConsenterId,
-			ClientTLSCert: clientCertAsDER,
-			ServerTLSCert: serverCertAsDER,
-			Endpoint:      fmt.Sprintf("%s:%d", consenter.Host, consenter.Port),
-		})
-	}
-
 	puller, err := newBlockPuller(support, c.ClusterDialer, c.Conf.General.Cluster)
 	if err != nil {
 		c.Logger.Panicf("Failed initializing block puller")
@@ -203,7 +171,7 @@ func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *co
 	}
 	c.Logger.Debugf("SmartBFT-Go config: %v", config)
 
-	chain, err := NewChain(config, path.Join(c.WALBaseDir, support.ChainID()), puller, c.Comm, c.SignerSerializer, c.GetPolicyManager(support.ChainID()), nodes, id2Identies, support, c.Metrics)
+	chain, err := NewChain(selfID, config, path.Join(c.WALBaseDir, support.ChainID()), puller, c.Comm, c.SignerSerializer, c.GetPolicyManager(support.ChainID()), support, c.Metrics)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed creating a new BFTChain")
 	}
@@ -211,10 +179,10 @@ func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *co
 	return chain, nil
 }
 
-func (c *Consenter) pemToDER(pemBytes []byte, id uint64, certType string) ([]byte, error) {
+func pemToDER(pemBytes []byte, id uint64, certType string, logger *flogging.FabricLogger) ([]byte, error) {
 	bl, _ := pem.Decode(pemBytes)
 	if bl == nil {
-		c.Logger.Errorf("Rejecting PEM block of %s TLS cert for node %d, offending PEM is: %s", certType, id, string(pemBytes))
+		logger.Errorf("Rejecting PEM block of %s TLS cert for node %d, offending PEM is: %s", certType, id, string(pemBytes))
 		return nil, errors.Errorf("invalid PEM block")
 	}
 	return bl.Bytes, nil
