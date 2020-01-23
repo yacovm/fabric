@@ -8,10 +8,10 @@ package smartbft
 
 import (
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
-	"sort"
 	"time"
+
+	"sync/atomic"
 
 	smartbft "github.com/SmartBFT-Go/consensus/pkg/consensus"
 	"github.com/SmartBFT-Go/consensus/pkg/types"
@@ -60,41 +60,31 @@ type signerSerializer interface {
 // BFTChain implements Chain interface to wire with
 // BFT smart library
 type BFTChain struct {
-	channel          string
+	RuntimeConfig    *atomic.Value
+	Channel          string
 	Config           smartbft.Configuration
 	BlockPuller      BlockPuller
 	Comm             cluster.Communicator
 	SignerSerializer signerSerializer
 	PolicyManager    policies.Manager
-	RemoteNodes      []cluster.RemoteNode
-	ID2Identities    NodeIdentitiesByID
 	Logger           *flogging.FabricLogger
 	WALDir           string
-
-	consensus *smartbft.Consensus
-	support   consensus.ConsenterSupport
-	verifier  *Verifier
-	assembler *Assembler
-
-	lastBlock       *common.Block
-	lastConfigBlock *common.Block
-
-	Metrics *Metrics
-
-	nodes []uint64
-	n     uint64
+	consensus        *smartbft.Consensus
+	support          consensus.ConsenterSupport
+	verifier         *Verifier
+	assembler        *Assembler
+	Metrics          *Metrics
 }
 
 // NewChain creates new BFT Smart chain
 func NewChain(
+	selfID uint64,
 	config smartbft.Configuration,
 	walDir string,
 	blockPuller BlockPuller,
 	comm cluster.Communicator,
 	signerSerializer signerSerializer,
 	policyManager policies.Manager,
-	remoteNodes []cluster.RemoteNode,
-	id2Identities NodeIdentitiesByID,
 	support consensus.ConsenterSupport,
 	metrics *Metrics,
 ) (*BFTChain, error) {
@@ -105,28 +95,17 @@ func NewChain(
 		},
 	}
 
-	var nodes []uint64
-	for _, n := range remoteNodes {
-		nodes = append(nodes, n.ID)
-	}
-	nodes = append(nodes, config.SelfID)
-	sort.Slice(nodes, func(i, j int) bool {
-		return nodes[i] < nodes[j]
-	})
-	n := uint64(len(nodes))
-
 	logger := flogging.MustGetLogger("orderer.consensus.smartbft.chain").With(zap.String("channel", support.ChainID()))
 
 	c := &BFTChain{
-		channel:          support.ChainID(),
+		RuntimeConfig:    &atomic.Value{},
+		Channel:          support.ChainID(),
 		Config:           config,
 		WALDir:           walDir,
 		Comm:             comm,
 		support:          support,
 		SignerSerializer: signerSerializer,
 		PolicyManager:    policyManager,
-		RemoteNodes:      remoteNodes,
-		ID2Identities:    id2Identities,
 		BlockPuller:      blockPuller,
 		Logger:           logger,
 		Metrics: &Metrics{
@@ -135,23 +114,31 @@ func NewChain(
 			IsLeader:             metrics.IsLeader.With("channel", support.ChainID()),
 			LeaderID:             metrics.LeaderID.With("channel", support.ChainID()),
 		},
-		nodes: nodes,
-		n:     n,
 	}
 
-	c.lastBlock = LastBlockFromLedgerOrPanic(support, c.Logger)
-	c.lastConfigBlock = LastConfigBlockFromLedgerOrPanic(support, c.Logger)
+	lastBlock := LastBlockFromLedgerOrPanic(support, c.Logger)
+	lastConfigBlock := LastConfigBlockFromLedgerOrPanic(support, c.Logger)
 
-	c.verifier = buildVerifier(c.lastConfigBlock, support, requestInspector, id2Identities, policyManager)
-
-	if c.verifier.LastCommittedBlockHash == "" {
-		c.verifier.LastCommittedBlockHash = hex.EncodeToString(c.lastBlock.Header.Hash())
+	rtc := RuntimeConfig{
+		logger: logger,
+		id:     selfID,
+	}
+	rtc, err := rtc.ConfigBlockCommitted(lastConfigBlock)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed constructing RuntimeConfig")
+	}
+	rtc, err = rtc.BlockCommitted(lastBlock)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed constructing RuntimeConfig")
 	}
 
-	c.consensus = bftSmartConsensusBuild(c, requestInspector, nodes)
+	c.RuntimeConfig.Store(rtc)
+
+	c.verifier = buildVerifier(c.RuntimeConfig, support, requestInspector, policyManager)
+	c.consensus = bftSmartConsensusBuild(c, requestInspector)
 
 	// Setup communication with list of remotes notes for the new channel
-	c.Comm.Configure(c.support.ChainID(), c.RemoteNodes)
+	c.Comm.Configure(c.support.ChainID(), rtc.RemoteNodes)
 
 	if err := c.consensus.ValidateConfiguration(); err != nil {
 		return nil, errors.Wrap(err, "failed to verify SmartBFT-Go configuration")
@@ -163,11 +150,12 @@ func NewChain(
 func bftSmartConsensusBuild(
 	c *BFTChain,
 	requestInspector *RequestInspector,
-	nodes []uint64,
 ) *smartbft.Consensus {
-
 	var err error
-	latestMetadata, err := getViewMetadataFromBlock(c.lastBlock)
+
+	rtc := c.RuntimeConfig.Load().(RuntimeConfig)
+
+	latestMetadata, err := getViewMetadataFromBlock(rtc.LastBlock)
 	if err != nil {
 		c.Logger.Panicf("Failed extracting view metadata from ledger: %v", err)
 	}
@@ -181,14 +169,14 @@ func bftSmartConsensusBuild(
 		c.Logger.Panicf("failed to initialize a WAL for chain %s, err %s", c.support.ChainID(), err)
 	}
 
-	clusterSize := uint64(len(nodes))
+	clusterSize := uint64(len(rtc.Nodes))
 
 	// report cluster size
 	c.Metrics.ClusterSize.Set(float64(clusterSize))
 
 	sync := &Synchronizer{
 		BlockToDecision: c.blockToDecision,
-		UpdateLastHash:  c.updateLastCommittedHash,
+		OnCommit:        c.updateRuntimeConfig,
 		Support:         c.support,
 		BlockPuller:     c.BlockPuller,
 		ClusterSize:     clusterSize,
@@ -199,10 +187,9 @@ func bftSmartConsensusBuild(
 	logger := flogging.MustGetLogger("orderer.consensus.smartbft.consensus").With(channelDecorator)
 
 	c.assembler = &Assembler{
-		LastBlock:          c.lastBlock,
-		LastConfigBlockNum: c.lastConfigBlock.Header.Number,
-		VerificationSeq:    c.verifier.VerificationSequence,
-		Logger:             flogging.MustGetLogger("orderer.consensus.smartbft.assembler").With(channelDecorator),
+		RuntimeConfig:   c.RuntimeConfig,
+		VerificationSeq: c.verifier.VerificationSequence,
+		Logger:          flogging.MustGetLogger("orderer.consensus.smartbft.assembler").With(channelDecorator),
 	}
 
 	consensus := &smartbft.Consensus{
@@ -210,10 +197,12 @@ func bftSmartConsensusBuild(
 		Logger:   logger,
 		Verifier: c.verifier,
 		Signer: &Signer{
-			ID:                 c.Config.SelfID,
-			Logger:             flogging.MustGetLogger("orderer.consensus.smartbft.signer").With(channelDecorator),
-			SignerSerializer:   c.SignerSerializer,
-			LastConfigBlockNum: c.verifier.lastConfigBlockNum,
+			ID:               c.Config.SelfID,
+			Logger:           flogging.MustGetLogger("orderer.consensus.smartbft.signer").With(channelDecorator),
+			SignerSerializer: c.SignerSerializer,
+			LastConfigBlockNum: func() uint64 {
+				return c.RuntimeConfig.Load().(RuntimeConfig).LastConfigBlock.Header.Number
+			},
 		},
 		Metadata:          latestMetadata,
 		WAL:               consensusWAL,
@@ -223,9 +212,9 @@ func bftSmartConsensusBuild(
 		RequestInspector:  requestInspector,
 		Synchronizer:      sync,
 		Comm: &Egress{
-			nodes:   nodes,
-			Channel: c.support.ChainID(),
-			Logger:  flogging.MustGetLogger("orderer.consensus.smartbft.egress").With(channelDecorator),
+			RuntimeConfig: c.RuntimeConfig,
+			Channel:       c.support.ChainID(),
+			Logger:        flogging.MustGetLogger("orderer.consensus.smartbft.egress").With(channelDecorator),
 			RPC: &cluster.RPC{
 				Logger:        flogging.MustGetLogger("orderer.consensus.smartbft.rpc").With(channelDecorator),
 				Channel:       c.support.ChainID(),
@@ -250,21 +239,18 @@ func bftSmartConsensusBuild(
 }
 
 func buildVerifier(
-	lastConfigBlock *common.Block,
+	runtimeConfig *atomic.Value,
 	support consensus.ConsenterSupport,
 	requestInspector *RequestInspector,
-	id2Identities NodeIdentitiesByID,
 	policyManager policies.Manager,
 ) *Verifier {
 	channelDecorator := zap.String("channel", support.ChainID())
 	logger := flogging.MustGetLogger("orderer.consensus.smartbft.verifier").With(channelDecorator)
 	return &Verifier{
-		LastConfigBlockNum:    lastConfigBlock.Header.Number,
 		VerificationSequencer: support,
 		ReqInspector:          requestInspector,
 		Logger:                logger,
-		Id2Identity:           id2Identities,
-
+		RuntimeConfig:         runtimeConfig,
 		ConsenterVerifier: &consenterVerifier{
 			logger:        logger,
 			channel:       support.ChainID(),
@@ -323,22 +309,11 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 		Signatures: sigs,
 	})
 
-	defer c.updateLastCommittedHash(block)
-	defer func() {
-		c.assembler.Lock()
-		defer c.assembler.Unlock()
-		c.assembler.LastBlock = block
-	}()
+	defer c.updateRuntimeConfig(block)
 	c.Logger.Debugf("Delivering proposal, writing block %d to the ledger, node id %d", block.Header.Number, c.Config.SelfID)
 	c.Metrics.CommittedBlockNumber.Set(float64(block.Header.Number)) // report the committed block number
 	c.reportIsLeader(&proposal)                                      // report the leader
 	if utils.IsConfigBlock(block) {
-		defer c.updateLastConfigBlockNum(block.Header.Number)
-		defer func() {
-			c.assembler.Lock()
-			defer c.assembler.Unlock()
-			c.assembler.LastConfigBlockNum = block.Header.Number
-		}()
 		c.support.WriteConfigBlock(block, nil)
 		return
 	}
@@ -357,7 +332,9 @@ func (c *BFTChain) reportIsLeader(proposal *types.Proposal) {
 		viewNum = proposalMD.ViewId
 	}
 
-	leaderID := c.nodes[viewNum%c.n] // same calculation as done in the library
+	nodes := c.RuntimeConfig.Load().(RuntimeConfig).Nodes
+	n := uint64(len(nodes))
+	leaderID := nodes[viewNum%n] // same calculation as done in the library
 
 	c.Metrics.LeaderID.Set(float64(leaderID))
 
@@ -369,17 +346,18 @@ func (c *BFTChain) reportIsLeader(proposal *types.Proposal) {
 
 }
 
-func (c *BFTChain) updateLastCommittedHash(block *common.Block) {
-	c.verifier.lock.Lock()
-	defer c.verifier.lock.Unlock()
-	c.verifier.LastCommittedBlockHash = hex.EncodeToString(block.Header.Hash())
-}
-
-func (c *BFTChain) updateLastConfigBlockNum(n uint64) {
-	c.verifier.lock.Lock()
-	defer c.verifier.lock.Unlock()
-
-	c.verifier.LastConfigBlockNum = n
+func (c *BFTChain) updateRuntimeConfig(block *common.Block) {
+	rtc := c.RuntimeConfig.Load().(RuntimeConfig)
+	newRTC, err := rtc.BlockCommitted(block)
+	if err != nil {
+		c.Logger.Errorf("Failed constructing RuntimeConfig from block %d, halting chain", block.Header.Number)
+		c.Halt()
+		return
+	}
+	c.RuntimeConfig.Store(newRTC)
+	if utils.IsConfigBlock(block) {
+		c.Comm.Configure(c.Channel, newRTC.RemoteNodes)
+	}
 }
 
 func (c *BFTChain) Order(env *common.Envelope, configSeq uint64) error {
@@ -434,7 +412,8 @@ func (c *BFTChain) Start() {
 }
 
 func (c *BFTChain) Halt() {
-
+	c.Logger.Infof("Shutting down chain")
+	c.consensus.Stop()
 }
 
 func (c *BFTChain) lastPersistedProposalAndSignatures() (*types.Proposal, []types.Signature) {
@@ -472,7 +451,8 @@ func (c *BFTChain) blockToDecision(block *common.Block) *types.Decision {
 
 	proposal.Metadata = ordererMDFromBlock.ConsenterMetadata
 
-	id2Identities := c.ID2Identities
+	rtc := c.RuntimeConfig.Load().(RuntimeConfig)
+	id2Identities := rtc.ID2Identities
 	// if this block is a config block (and not genesis block)
 	// then use the identities from the previous config block
 	if utils.IsConfigBlock(block) && block.Header.Number != 0 {

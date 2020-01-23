@@ -9,10 +9,13 @@ package smartbft
 import (
 	"bytes"
 	"encoding/hex"
-	"go.uber.org/zap/zapcore"
 	"sync"
 
+	"go.uber.org/zap/zapcore"
+
 	"encoding/base64"
+
+	"sync/atomic"
 
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
@@ -69,16 +72,13 @@ func (nibd NodeIdentitiesByID) IdentityToID(identity []byte) (uint64, bool) {
 }
 
 type Verifier struct {
-	ReqInspector           *RequestInspector
-	Id2Identity            NodeIdentitiesByID
-	ConsenterVerifier      ConsenterVerifier
-	AccessController       AccessController
-	VerificationSequencer  Sequencer
-	Ledger                 Ledger
-	LastCommittedBlockHash string
-	LastConfigBlockNum     uint64
-	Logger                 *flogging.FabricLogger
-	lock                   sync.RWMutex
+	RuntimeConfig         *atomic.Value
+	ReqInspector          *RequestInspector
+	ConsenterVerifier     ConsenterVerifier
+	AccessController      AccessController
+	VerificationSequencer Sequencer
+	Ledger                Ledger
+	Logger                *flogging.FabricLogger
 }
 
 func (v *Verifier) VerifyProposal(proposal types.Proposal) ([]types.RequestInfo, error) {
@@ -87,7 +87,8 @@ func (v *Verifier) VerifyProposal(proposal types.Proposal) ([]types.RequestInfo,
 		return nil, err
 	}
 
-	if err := verifyHashChain(block, v.lastCommittedHash()); err != nil {
+	rtc := v.RuntimeConfig.Load().(RuntimeConfig)
+	if err := verifyHashChain(block, rtc.LastCommittedBlockHash); err != nil {
 		return nil, err
 	}
 
@@ -105,7 +106,8 @@ func (v *Verifier) VerifyProposal(proposal types.Proposal) ([]types.RequestInfo,
 }
 
 func (v *Verifier) VerifySignature(signature types.Signature) error {
-	identity, exists := v.Id2Identity[signature.ID]
+	id2Identity := v.RuntimeConfig.Load().(RuntimeConfig).ID2Identities
+	identity, exists := id2Identity[signature.ID]
 	if !exists {
 		return errors.Errorf("node with id of %d doesn't exist", signature.ID)
 	}
@@ -133,7 +135,9 @@ func (v *Verifier) VerifyRequest(rawRequest []byte) (types.RequestInfo, error) {
 }
 
 func (v *Verifier) VerifyConsenterSig(signature types.Signature, prop types.Proposal) error {
-	identity, exists := v.Id2Identity[signature.ID]
+	id2Identity := v.RuntimeConfig.Load().(RuntimeConfig).ID2Identities
+
+	identity, exists := id2Identity[signature.ID]
 	if !exists {
 		return errors.Errorf("node with id of %d doesn't exist", signature.ID)
 	}
@@ -162,18 +166,6 @@ func (v *Verifier) VerifyConsenterSig(signature types.Signature, prop types.Prop
 
 func (v *Verifier) VerificationSequence() uint64 {
 	return v.VerificationSequencer.Sequence()
-}
-
-func (v *Verifier) lastCommittedHash() string {
-	v.lock.RLock()
-	defer v.lock.RUnlock()
-	return v.LastCommittedBlockHash
-}
-
-func (v *Verifier) lastConfigBlockNum() uint64 {
-	v.lock.RLock()
-	defer v.lock.RUnlock()
-	return v.LastConfigBlockNum
 }
 
 func verifyHashChain(block *common.Block, prevHeaderHash string) error {
@@ -224,8 +216,9 @@ func (v *Verifier) verifyBlockDataAndMetadata(block *common.Block, metadata []by
 		return nil, errors.Errorf("expected metadata in block to be %v but got %v", metadataFromProposal, metadataInBlock)
 	}
 
+	rtc := v.RuntimeConfig.Load().(RuntimeConfig)
+	lastConfig := rtc.LastConfigBlock.Header.Number
 	// Verify last config
-	lastConfig := v.lastConfigBlockNum()
 	if ordererMetadataFromSignature.LastConfig == nil {
 		return nil, errors.Errorf("last config is nil")
 	}

@@ -16,12 +16,16 @@ import (
 	"encoding/base64"
 	"fmt"
 
+	"crypto/x509"
+	"sort"
+
 	pkgconsensus "github.com/SmartBFT-Go/consensus/pkg/consensus"
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/channelconfig"
 	"github.com/hyperledger/fabric/common/configtx"
+	"github.com/hyperledger/fabric/common/crypto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
@@ -273,4 +277,134 @@ func (conCert ConsenterCertificate) IsConsenterOfChannel(configBlock *common.Blo
 		}
 	}
 	return cluster.ErrNotInChannel
+}
+
+func RemoteNodesFromConfigBlock(block *common.Block, selfID uint64, logger *flogging.FabricLogger) (*nodeConfig, error) {
+	env := &common.Envelope{}
+	if err := proto.Unmarshal(block.Data.Data[0], env); err != nil {
+		return nil, errors.Wrap(err, "failed unmarshaling envelope of config block")
+	}
+	bundle, err := channelconfig.NewBundleFromEnvelope(env)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed getting a new bundle from envelope of config block")
+	}
+
+	oc, ok := bundle.OrdererConfig()
+	if !ok {
+		return nil, errors.New("no orderer config in config block")
+	}
+
+	m := &smartbft.ConfigMetadata{}
+	if err := proto.Unmarshal(oc.ConsensusMetadata(), m); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal consensus metadata")
+	}
+	if m.Options == nil {
+		return nil, errors.New("failed to retrieve consensus metadata options")
+	}
+
+	var nodeIDs []uint64
+	var remoteNodes []cluster.RemoteNode
+	id2Identies := map[uint64][]byte{}
+	for _, consenter := range m.Consenters {
+		sanitizedID, err := crypto.SanitizeIdentity(consenter.Identity)
+		if err != nil {
+			logger.Panicf("Failed to sanitize identity: %v", err)
+		}
+		id2Identies[consenter.ConsenterId] = sanitizedID
+		logger.Infof("%s %d ---> %s", bundle.ConfigtxValidator().ChainID(), consenter.ConsenterId, string(consenter.Identity))
+
+		nodeIDs = append(nodeIDs, consenter.ConsenterId)
+
+		// No need to know yourself
+		if selfID == consenter.ConsenterId {
+			continue
+		}
+		serverCertAsDER, err := pemToDER(consenter.ServerTlsCert, consenter.ConsenterId, "server", logger)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		clientCertAsDER, err := pemToDER(consenter.ClientTlsCert, consenter.ConsenterId, "client", logger)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+
+		// Validate certificate structure
+		for _, cert := range [][]byte{serverCertAsDER, clientCertAsDER} {
+			if _, err := x509.ParseCertificate(cert); err != nil {
+				pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert})
+				logger.Errorf("Invalid certificate: %s", string(pemBytes))
+				return nil, err
+			}
+		}
+
+		remoteNodes = append(remoteNodes, cluster.RemoteNode{
+			ID:            consenter.ConsenterId,
+			ClientTLSCert: clientCertAsDER,
+			ServerTLSCert: serverCertAsDER,
+			Endpoint:      fmt.Sprintf("%s:%d", consenter.Host, consenter.Port),
+		})
+	}
+
+	sort.Slice(nodeIDs, func(i, j int) bool {
+		return nodeIDs[i] < nodeIDs[j]
+	})
+
+	return &nodeConfig{
+		remoteNodes:   remoteNodes,
+		id2Identities: id2Identies,
+		nodeIDs:       nodeIDs,
+	}, nil
+
+}
+
+type nodeConfig struct {
+	id2Identities NodeIdentitiesByID
+	remoteNodes   []cluster.RemoteNode
+	nodeIDs       []uint64
+}
+
+// RuntimeConfig defines the configuration of the consensus
+// that is related to runtime.
+type RuntimeConfig struct {
+	logger                 *flogging.FabricLogger
+	id                     uint64
+	LastCommittedBlockHash string
+	RemoteNodes            []cluster.RemoteNode
+	ID2Identities          NodeIdentitiesByID
+	LastBlock              *common.Block
+	LastConfigBlock        *common.Block
+	Nodes                  []uint64
+}
+
+func (rtc RuntimeConfig) BlockCommitted(block *common.Block) (RuntimeConfig, error) {
+	if _, err := cluster.ConfigFromBlock(block); err == nil {
+		return rtc.ConfigBlockCommitted(block)
+	}
+	return RuntimeConfig{
+		id:                     rtc.id,
+		logger:                 rtc.logger,
+		LastCommittedBlockHash: hex.EncodeToString(block.Header.Hash()),
+		Nodes:                  rtc.Nodes,
+		ID2Identities:          rtc.ID2Identities,
+		RemoteNodes:            rtc.RemoteNodes,
+		LastBlock:              block,
+		LastConfigBlock:        rtc.LastConfigBlock,
+	}, nil
+}
+
+func (rtc RuntimeConfig) ConfigBlockCommitted(block *common.Block) (RuntimeConfig, error) {
+	nodeConf, err := RemoteNodesFromConfigBlock(block, rtc.id, rtc.logger)
+	if err != nil {
+		return rtc, errors.Wrap(err, "remote nodes cannot be computed, rejecting config block")
+	}
+	return RuntimeConfig{
+		id:                     rtc.id,
+		logger:                 rtc.logger,
+		LastCommittedBlockHash: hex.EncodeToString(block.Header.Hash()),
+		Nodes:                  nodeConf.nodeIDs,
+		ID2Identities:          nodeConf.id2Identities,
+		RemoteNodes:            nodeConf.remoteNodes,
+		LastBlock:              block,
+		LastConfigBlock:        block,
+	}, nil
 }

@@ -9,7 +9,7 @@ package smartbft
 import (
 	"encoding/asn1"
 
-	"sync"
+	"sync/atomic"
 
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/hyperledger/fabric/common/flogging"
@@ -31,18 +31,16 @@ type Ledger interface {
 }
 
 type Assembler struct {
+	RuntimeConfig   *atomic.Value
 	Logger          *flogging.FabricLogger
 	VerificationSeq func() uint64
-	sync.RWMutex
-	LastConfigBlockNum uint64
-	LastBlock          *common.Block
 }
 
 func (a *Assembler) AssembleProposal(metadata []byte, requests [][]byte) (nextProp types.Proposal) {
-	a.RLock()
-	lastConfigBlockNum := a.LastConfigBlockNum
-	lastBlock := a.LastBlock
-	a.RUnlock()
+	rtc := a.RuntimeConfig.Load().(RuntimeConfig)
+
+	lastConfigBlockNum := rtc.LastConfigBlock.Header.Number
+	lastBlock := rtc.LastBlock
 
 	if len(requests) == 0 {
 		a.Logger.Panicf("Programming error, no requests in proposal")

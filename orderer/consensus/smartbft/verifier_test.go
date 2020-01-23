@@ -13,6 +13,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
+	"sync/atomic"
+
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
 	"github.com/golang/protobuf/proto"
@@ -68,8 +70,13 @@ func TestVerifySignature(t *testing.T) {
 	v := &smartbft.Verifier{
 		Logger:           logger,
 		AccessController: ac,
-		Id2Identity:      map[uint64][]byte{3: {0, 2, 4, 6}},
+		RuntimeConfig:    &atomic.Value{},
 	}
+
+	rtc := smartbft.RuntimeConfig{
+		ID2Identities: map[uint64][]byte{3: {0, 2, 4, 6}},
+	}
+	v.RuntimeConfig.Store(rtc)
 
 	t.Run("identity doesn't exist", func(t *testing.T) {
 		err := v.VerifySignature(types.Signature{
@@ -355,13 +362,21 @@ func TestVerifyConsenterSig(t *testing.T) {
 				ID:               3,
 			}
 
+			rtc := smartbft.RuntimeConfig{
+				ID2Identities:          testCase.id2Identity,
+				LastBlock:              testCase.lastBlock,
+				LastConfigBlock:        lastConfigBlock,
+				LastCommittedBlockHash: lastHash,
+			}
+			runtimeConfig := &atomic.Value{}
+			runtimeConfig.Store(rtc)
+
 			assembler := &smartbft.Assembler{
 				VerificationSeq: func() uint64 {
 					return testCase.verificationSequence
 				},
-				Logger:             logger,
-				LastBlock:          testCase.lastBlock,
-				LastConfigBlockNum: testCase.lastConfigBlockNum,
+				Logger:        logger,
+				RuntimeConfig: runtimeConfig,
 			}
 
 			md := utils.MarshalOrPanic(&smartbftprotos.ViewMetadata{
@@ -377,15 +392,13 @@ func TestVerifyConsenterSig(t *testing.T) {
 			}
 
 			v := &smartbft.Verifier{
-				Id2Identity:            testCase.id2Identity,
-				Logger:                 logger,
-				Ledger:                 ledger,
-				VerificationSequencer:  sequencer,
-				AccessController:       ac,
-				ConsenterVerifier:      cv,
-				ReqInspector:           reqInspector,
-				LastConfigBlockNum:     10,
-				LastCommittedBlockHash: lastHash,
+				RuntimeConfig:         runtimeConfig,
+				Logger:                logger,
+				Ledger:                ledger,
+				VerificationSequencer: sequencer,
+				AccessController:      ac,
+				ConsenterVerifier:     cv,
+				ReqInspector:          reqInspector,
 			}
 
 			if testCase.proposalMutator != nil {
@@ -430,7 +443,7 @@ func TestVerifyProposal(t *testing.T) {
 		description                 string
 		verificationSequence        uint64
 		lastBlock                   *common.Block
-		lastConfigBlockNum          uint64
+		lastConfigBlock             *common.Block
 		bftMetadataMutator          func([]byte) []byte
 		ordererBlockMetadataMutator func(metadata *common.OrdererBlockMetadata)
 		expectedErr                 string
@@ -439,33 +452,33 @@ func TestVerifyProposal(t *testing.T) {
 			description:                 "green path",
 			verificationSequence:        12,
 			lastBlock:                   lastBlock,
-			lastConfigBlockNum:          lastConfigBlock.Header.Number,
+			lastConfigBlock:             lastConfigBlock,
 			bftMetadataMutator:          noopMutator,
 			ordererBlockMetadataMutator: noopOrdererBlockMetadataMutator,
 		},
 		{
-			description:                 "wrong verification sequence",
+			description:                 "wrong verification sequence 1",
 			verificationSequence:        11,
 			lastBlock:                   lastBlock,
-			lastConfigBlockNum:          lastConfigBlock.Header.Number,
+			lastConfigBlock:             lastConfigBlock,
 			bftMetadataMutator:          noopMutator,
 			ordererBlockMetadataMutator: noopOrdererBlockMetadataMutator,
 			expectedErr:                 "expected verification sequence 12, but proposal has 11",
 		},
 		{
-			description:                 "wrong verification sequence",
+			description:                 "wrong verification sequence 2",
 			verificationSequence:        12,
 			lastBlock:                   lastBlock,
-			lastConfigBlockNum:          666,
+			lastConfigBlock:             common.NewBlock(666, nil),
 			bftMetadataMutator:          noopMutator,
 			ordererBlockMetadataMutator: noopOrdererBlockMetadataMutator,
 			expectedErr:                 "last config in block orderer metadata points to 666 but our persisted last config is 10",
 		},
 		{
-			description:                 "wrong verification sequence",
+			description:                 "wrong verification sequence 3",
 			verificationSequence:        12,
 			lastBlock:                   notLastBlock,
-			lastConfigBlockNum:          lastConfigBlock.Header.Number,
+			lastConfigBlock:             lastConfigBlock,
 			bftMetadataMutator:          noopMutator,
 			ordererBlockMetadataMutator: noopOrdererBlockMetadataMutator,
 			expectedErr: fmt.Sprintf("previous header hash is %s but expected %s",
@@ -476,7 +489,7 @@ func TestVerifyProposal(t *testing.T) {
 			description:          "corrupt metadata",
 			verificationSequence: 12,
 			lastBlock:            lastBlock,
-			lastConfigBlockNum:   lastConfigBlock.Header.Number,
+			lastConfigBlock:      lastConfigBlock,
 			bftMetadataMutator: func([]byte) []byte {
 				return []byte{1, 2, 3}
 			},
@@ -487,7 +500,7 @@ func TestVerifyProposal(t *testing.T) {
 			description:          "corrupt metadata",
 			verificationSequence: 12,
 			lastBlock:            lastBlock,
-			lastConfigBlockNum:   lastConfigBlock.Header.Number,
+			lastConfigBlock:      lastConfigBlock,
 			bftMetadataMutator: func([]byte) []byte {
 				return utils.MarshalOrPanic(&smartbftprotos.ViewMetadata{LatestSequence: 100, ViewId: 2})
 			},
@@ -498,7 +511,7 @@ func TestVerifyProposal(t *testing.T) {
 			description:          "No last config",
 			verificationSequence: 12,
 			lastBlock:            lastBlock,
-			lastConfigBlockNum:   lastConfigBlock.Header.Number,
+			lastConfigBlock:      lastConfigBlock,
 			bftMetadataMutator:   noopMutator,
 			ordererBlockMetadataMutator: func(metadata *common.OrdererBlockMetadata) {
 				metadata.LastConfig = nil
@@ -509,7 +522,7 @@ func TestVerifyProposal(t *testing.T) {
 			description:          "Mismatched last config",
 			verificationSequence: 12,
 			lastBlock:            lastBlock,
-			lastConfigBlockNum:   lastConfigBlock.Header.Number,
+			lastConfigBlock:      lastConfigBlock,
 			bftMetadataMutator:   noopMutator,
 			ordererBlockMetadataMutator: func(metadata *common.OrdererBlockMetadata) {
 				metadata.LastConfig.Index = 666
@@ -520,7 +533,7 @@ func TestVerifyProposal(t *testing.T) {
 			description:          "Corrupt inner BFT metadata",
 			verificationSequence: 12,
 			lastBlock:            lastBlock,
-			lastConfigBlockNum:   lastConfigBlock.Header.Number,
+			lastConfigBlock:      lastConfigBlock,
 			bftMetadataMutator:   noopMutator,
 			ordererBlockMetadataMutator: func(metadata *common.OrdererBlockMetadata) {
 				metadata.ConsenterMetadata = []byte{1, 2, 3}
@@ -531,7 +544,7 @@ func TestVerifyProposal(t *testing.T) {
 			description:          "Mismatching inner BFT metadata",
 			verificationSequence: 12,
 			lastBlock:            lastBlock,
-			lastConfigBlockNum:   lastConfigBlock.Header.Number,
+			lastConfigBlock:      lastConfigBlock,
 			bftMetadataMutator:   noopMutator,
 			ordererBlockMetadataMutator: func(metadata *common.OrdererBlockMetadata) {
 				metadata.ConsenterMetadata = utils.MarshalOrPanic(&smartbftprotos.ViewMetadata{LatestSequence: 666})
@@ -540,14 +553,26 @@ func TestVerifyProposal(t *testing.T) {
 		},
 	} {
 		t.Run(testCase.description, func(t *testing.T) {
+			runtimeConfig := &atomic.Value{}
+			rtc := smartbft.RuntimeConfig{
+				LastCommittedBlockHash: lastHash,
+				LastBlock:              testCase.lastBlock,
+				LastConfigBlock:        testCase.lastConfigBlock,
+			}
+
+			runtimeConfig.Store(rtc)
+
 			assembler := &smartbft.Assembler{
+				RuntimeConfig: &atomic.Value{},
 				VerificationSeq: func() uint64 {
 					return testCase.verificationSequence
 				},
-				Logger:             logger,
-				LastBlock:          testCase.lastBlock,
-				LastConfigBlockNum: testCase.lastConfigBlockNum,
+				Logger: logger,
 			}
+			assembler.RuntimeConfig.Store(smartbft.RuntimeConfig{
+				LastConfigBlock: testCase.lastConfigBlock,
+				LastBlock:       testCase.lastBlock,
+			})
 
 			md := utils.MarshalOrPanic(&smartbftprotos.ViewMetadata{
 				LatestSequence: 1,
@@ -580,15 +605,17 @@ func TestVerifyProposal(t *testing.T) {
 			tuple.B = utils.MarshalOrPanic(blockMD)
 			proposal.Payload = tuple.ToBytes()
 
+			runtimeConfig = &atomic.Value{}
+			rtc.LastConfigBlock = lastConfigBlock
+			runtimeConfig.Store(rtc)
 			v := &smartbft.Verifier{
-				Logger:                 logger,
-				Ledger:                 ledger,
-				VerificationSequencer:  sequencer,
-				AccessController:       ac,
-				ConsenterVerifier:      cv,
-				ReqInspector:           reqInspector,
-				LastConfigBlockNum:     10,
-				LastCommittedBlockHash: lastHash,
+				RuntimeConfig:         runtimeConfig,
+				Logger:                logger,
+				Ledger:                ledger,
+				VerificationSequencer: sequencer,
+				AccessController:      ac,
+				ConsenterVerifier:     cv,
+				ReqInspector:          reqInspector,
 			}
 
 			reqInfo, err := v.VerifyProposal(proposal)

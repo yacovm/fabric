@@ -19,8 +19,8 @@ import (
 )
 
 type Synchronizer struct {
-	BlockToDecision func(block *common.Block) *types.Decision
-	UpdateLastHash  func(block *common.Block)
+	BlockToDecision func(*common.Block) *types.Decision
+	OnCommit        func(*common.Block)
 	Support         consensus.ConsenterSupport
 	BlockPuller     BlockPuller
 	ClusterSize     uint64
@@ -96,7 +96,7 @@ func (s *Synchronizer) synchronize() (*types.Decision, error) {
 		}
 		s.Logger.Debugf("Fetched and committed block [%d] from cluster", seq)
 		lastPulledBlock = block
-		s.UpdateLastHash(lastPulledBlock)
+		s.OnCommit(lastPulledBlock)
 		seq++
 	}
 
