@@ -169,6 +169,7 @@ func (ri *RequestInspector) RequestID(rawReq []byte) types.RequestInfo {
 type request struct {
 	sigHdr   *common.SignatureHeader
 	envelope *common.Envelope
+	chHdr    *common.ChannelHeader
 }
 
 func (ri *RequestInspector) requestIDFromSigHeader(sigHdr *common.SignatureHeader) (types.RequestInfo, error) {
@@ -211,7 +212,17 @@ func (ri *RequestInspector) unwrapReq(req []byte) (*request, error) {
 		return nil, err
 	}
 
+	if len(payload.Header.ChannelHeader) == 0 {
+		return nil, errors.New("no channel header in payload")
+	}
+
+	chdr, err := utils2.UnmarshalChannelHeader(payload.Header.ChannelHeader)
+	if err != nil {
+		return nil, errors.WithMessage(err, "error unmarshaling channel header")
+	}
+
 	return &request{
+		chHdr:    chdr,
 		sigHdr:   sigHdr,
 		envelope: envelope,
 	}, nil

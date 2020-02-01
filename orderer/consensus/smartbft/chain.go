@@ -49,6 +49,10 @@ type WALConfig struct {
 	EvictionSuspicion string // Duration threshold that the node samples in order to suspect its eviction from the channel.
 }
 
+type ConfigValidator interface {
+	ValidateConfig(env *common.Envelope) error
+}
+
 type signerSerializer interface {
 	// Sign a message and return the signature over the digest, or error on failure
 	Sign(message []byte) ([]byte, error)
@@ -87,6 +91,7 @@ type BFTChain struct {
 
 // NewChain creates new BFT Smart chain
 func NewChain(
+	cv ConfigValidator,
 	config smartbft.Configuration,
 	walDir string,
 	blockPuller BlockPuller,
@@ -142,7 +147,7 @@ func NewChain(
 	c.lastBlock = LastBlockFromLedgerOrPanic(support, c.Logger)
 	c.lastConfigBlock = LastConfigBlockFromLedgerOrPanic(support, c.Logger)
 
-	c.verifier = buildVerifier(c.lastConfigBlock, support, requestInspector, id2Identities, policyManager)
+	c.verifier = buildVerifier(cv, c.lastConfigBlock, support, requestInspector, id2Identities, policyManager)
 
 	if c.verifier.LastCommittedBlockHash == "" {
 		c.verifier.LastCommittedBlockHash = hex.EncodeToString(c.lastBlock.Header.Hash())
@@ -250,6 +255,7 @@ func bftSmartConsensusBuild(
 }
 
 func buildVerifier(
+	cv ConfigValidator,
 	lastConfigBlock *common.Block,
 	support consensus.ConsenterSupport,
 	requestInspector *RequestInspector,
@@ -259,6 +265,7 @@ func buildVerifier(
 	channelDecorator := zap.String("channel", support.ChainID())
 	logger := flogging.MustGetLogger("orderer.consensus.smartbft.verifier").With(channelDecorator)
 	return &Verifier{
+		ConfigValidator:       cv,
 		LastConfigBlockNum:    lastConfigBlock.Header.Number,
 		VerificationSequencer: support,
 		ReqInspector:          requestInspector,
