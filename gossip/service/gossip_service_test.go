@@ -730,6 +730,7 @@ func newGossipInstance(port int, id int, gRPCServer *comm.GRPCServer, certs *gos
 		gRPCServer.Start()
 	}()
 
+	secAdv := peergossip.NewSecurityAdvisor(mgmt.NewDeserializersManager())
 	gossipService := &gossipServiceImpl{
 		mcs:             cryptoService,
 		gossipSvc:       gossip,
@@ -739,6 +740,7 @@ func newGossipInstance(port int, id int, gRPCServer *comm.GRPCServer, certs *gos
 		deliveryService: make(map[string]deliverclient.DeliverService),
 		deliveryFactory: &deliveryFactoryImpl{},
 		peerIdentity:    api.PeerIdentityType(conf.InternalEndpoint),
+		secAdv:          secAdv,
 		metrics:         metrics,
 	}
 
