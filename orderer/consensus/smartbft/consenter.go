@@ -13,12 +13,12 @@ import (
 	"bytes"
 	"encoding/pem"
 	"fmt"
-	"github.com/hyperledger/fabric/common/crypto"
 	"path"
 	"reflect"
 
 	"github.com/golang/protobuf/proto"
 	proto2 "github.com/golang/protobuf/proto"
+	"github.com/hyperledger/fabric/common/crypto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/common/metrics"
 	"github.com/hyperledger/fabric/common/policies"
@@ -84,6 +84,7 @@ func New(
 	logger.Infof("XXX WAL Directory is %s", walConfig.WALDir)
 
 	consenter := &Consenter{
+		Registrar:        r,
 		GetPolicyManager: pmr,
 		Conf:             conf,
 		ClusterDialer:    clusterDialer,
@@ -203,10 +204,19 @@ func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *co
 	}
 	c.Logger.Debugf("SmartBFT-Go config: %v", config)
 
-	chain, err := NewChain(config, path.Join(c.WALBaseDir, support.ChainID()), puller, c.Comm, c.SignerSerializer, c.GetPolicyManager(support.ChainID()), nodes, id2Identies, support, c.Metrics)
+	configValidator := &ConfigBlockValidator{
+		ChannelConfigTemplator: c.Registrar,
+		ValidatingChannel:      support.ChainID(),
+		Filters:                c.Registrar,
+		ConfigUpdateProposer:   c.Registrar,
+	}
+
+	chain, err := NewChain(configValidator, config, path.Join(c.WALBaseDir, support.ChainID()), puller, c.Comm, c.SignerSerializer, c.GetPolicyManager(support.ChainID()), nodes, id2Identies, support, c.Metrics)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed creating a new BFTChain")
 	}
+
+	configValidator.Logger = chain.Logger
 
 	return chain, nil
 }

@@ -8,11 +8,9 @@ package smartbft
 
 import (
 	"bytes"
-	"encoding/hex"
-	"go.uber.org/zap/zapcore"
-	"sync"
-
 	"encoding/base64"
+	"encoding/hex"
+	"sync"
 
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
@@ -24,6 +22,7 @@ import (
 	"github.com/hyperledger/fabric/protos/msp"
 	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/pkg/errors"
+	"go.uber.org/zap/zapcore"
 )
 
 //go:generate mockery -dir . -name Sequencer -case underscore -output mocks
@@ -49,7 +48,7 @@ type AccessController interface {
 	Evaluate(signatureSet []*common.SignedData) error
 }
 
-type requestVerifier func(req []byte) (types.RequestInfo, error)
+type requestVerifier func(req []byte, isolated bool) (types.RequestInfo, error)
 
 type NodeIdentitiesByID map[uint64][]byte
 
@@ -79,6 +78,7 @@ type Verifier struct {
 	LastConfigBlockNum     uint64
 	Logger                 *flogging.FabricLogger
 	lock                   sync.RWMutex
+	ConfigValidator        ConfigValidator
 }
 
 func (v *Verifier) VerifyProposal(proposal types.Proposal) ([]types.RequestInfo, error) {
@@ -116,6 +116,10 @@ func (v *Verifier) VerifySignature(signature types.Signature) error {
 }
 
 func (v *Verifier) VerifyRequest(rawRequest []byte) (types.RequestInfo, error) {
+	return v.verifyRequest(rawRequest, false)
+}
+
+func (v *Verifier) verifyRequest(rawRequest []byte, isolatedReq bool) (types.RequestInfo, error) {
 	req, err := v.ReqInspector.unwrapReq(rawRequest)
 	if err != nil {
 		return types.RequestInfo{}, err
@@ -127,6 +131,26 @@ func (v *Verifier) VerifyRequest(rawRequest []byte) (types.RequestInfo, error) {
 
 	if err != nil {
 		return types.RequestInfo{}, errors.Wrap(err, "access denied")
+	}
+
+	if !isolatedReq && req.chHdr.Type != int32(common.HeaderType_ENDORSER_TRANSACTION) {
+		return types.RequestInfo{}, errors.Errorf("only endorser transactions can be sent with other transactions")
+	}
+
+	switch req.chHdr.Type {
+	case int32(common.HeaderType_CONFIG):
+	case int32(common.HeaderType_ORDERER_TRANSACTION):
+	case int32(common.HeaderType_ENDORSER_TRANSACTION):
+	default:
+		return types.RequestInfo{}, errors.Errorf("transaction of type %s is not allowed to be included in blocks", common.HeaderType_name[req.chHdr.Type])
+	}
+
+	if req.chHdr.Type == int32(common.HeaderType_CONFIG) || req.chHdr.Type == int32(common.HeaderType_ORDERER_TRANSACTION) {
+		err := v.ConfigValidator.ValidateConfig(req.envelope)
+		if err != nil {
+			v.Logger.Errorf("Error verifying config update: %v", err)
+			return types.RequestInfo{}, err
+		}
 	}
 
 	return v.ReqInspector.requestIDFromSigHeader(req.sigHdr)
@@ -246,7 +270,7 @@ func (v *Verifier) verifyBlockDataAndMetadata(block *common.Block, metadata []by
 		return nil, errors.Errorf("last config in block metadata points to %d but our persisted last config is %d", ordererMetadataFromSignature.LastConfig.Index, lastConfig)
 	}
 
-	return validateTransactions(block.Data.Data, v.VerifyRequest)
+	return validateTransactions(block.Data.Data, v.verifyRequest)
 }
 
 func validateTransactions(blockData [][]byte, verifyReq requestVerifier) ([]types.RequestInfo, error) {
@@ -259,11 +283,13 @@ func validateTransactions(blockData [][]byte, verifyReq requestVerifier) ([]type
 		validationErr error
 	}
 
+	isolated := len(blockData) == 1
+
 	validations := make(chan txnValidation, len(blockData))
 	for i, payload := range blockData {
 		go func(indexInBlock int, payload []byte) {
 			defer validationFinished.Done()
-			reqInfo, err := verifyReq(payload)
+			reqInfo, err := verifyReq(payload, isolated)
 			validations <- txnValidation{
 				indexInBlock:  indexInBlock,
 				extractedInfo: reqInfo,
