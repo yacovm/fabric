@@ -673,25 +673,28 @@ func initializeMultichannelRegistrar(
 	consenters := make(map[string]consensus.Consenter)
 	consenters["solo"] = solo.New()
 	var kafkaMetrics *kafka.Metrics
-	consenters["kafka"], kafkaMetrics = kafka.New(conf.Kafka, metricsProvider, healthChecker)
+
 	// Note, we pass a 'nil' channel here, we could pass a channel that
 	// closes if we wished to cleanup this routine on exit.
 	go kafkaMetrics.PollGoMetricsUntilStop(time.Minute, nil)
 	consenterType := consensusType(genesisBlock)
+	var icr cluster.InactiveChainRegistry
 	if _, exists := clusterTypes[consenterType]; exists {
 		switch consenterType {
 		case "etcdraft":
 			{
-				initializeEtcdraftConsenter(consenters, conf, lf, clusterDialer, bootstrapBlock, ri, srvConf, srv, registrar, metricsProvider)
+				icr = initializeEtcdraftConsenter(consenters, conf, lf, clusterDialer, bootstrapBlock, ri, srvConf, srv, registrar, metricsProvider)
 			}
 		case "smartbft":
 			{
-				initializeSmartBFTConsenter(signer, dpmr, consenters, conf, lf, clusterDialer, bootstrapBlock, ri, srvConf, srv, registrar, metricsProvider)
+				icr = initializeSmartBFTConsenter(signer, dpmr, consenters, conf, lf, clusterDialer, bootstrapBlock, ri, srvConf, srv, registrar, metricsProvider)
 			}
 		default:
 			logger.Panicf("Unknown cluster type consenter")
 		}
 	}
+
+	consenters["kafka"], kafkaMetrics = kafka.New(conf.Kafka, metricsProvider, healthChecker, icr, registrar.CreateChain)
 	registrar.Initialize(consenters)
 	return registrar
 }
@@ -707,7 +710,7 @@ func initializeEtcdraftConsenter(
 	srv *comm.GRPCServer,
 	registrar *multichannel.Registrar,
 	metricsProvider metrics.Provider,
-) {
+) *etcdraft.Consenter {
 	icr := constructInactiveChainReplicator(ri, lf, conf, bootstrapBlock, ri.logger)
 	// Use the inactiveChainReplicator as a channel lister, since it has knowledge
 	// of all inactive chains.
@@ -718,6 +721,7 @@ func initializeEtcdraftConsenter(
 	go icr.run()
 	raftConsenter := etcdraft.New(clusterDialer, conf, srvConf, srv, registrar, icr, metricsProvider)
 	consenters["etcdraft"] = raftConsenter
+	return raftConsenter
 }
 
 func initializeSmartBFTConsenter(
@@ -733,7 +737,7 @@ func initializeSmartBFTConsenter(
 	srv *comm.GRPCServer,
 	registrar *multichannel.Registrar,
 	metricsProvider metrics.Provider,
-) {
+) *smartbft.Consenter {
 	icr := constructInactiveChainReplicator(ri, lf, conf, bootstrapBlock, ri.logger)
 	// Use the inactiveChainReplicator as a channel lister, since it has knowledge
 	// of all inactive chains.
@@ -742,8 +746,10 @@ func initializeSmartBFTConsenter(
 	ri.channelLister = icr
 
 	go icr.run()
+	smartBFTConsenter := smartbft.New(icr, dpmr.Registry(), signer, clusterDialer, conf, srvConf, srv, registrar, metricsProvider)
+	consenters["smartbft"] = smartBFTConsenter
 
-	consenters["smartbft"] = smartbft.New(icr, dpmr.Registry(), signer, clusterDialer, conf, srvConf, srv, registrar, metricsProvider)
+	return smartBFTConsenter
 }
 
 func constructInactiveChainReplicator(
