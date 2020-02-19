@@ -164,7 +164,7 @@ func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *co
 	if err != nil {
 		errNotServiced := fmt.Sprintf("channel %s is not serviced by me", support.ChainID())
 		c.Logger.Errorf(errNotServiced)
-		c.icr.TrackChain(support.ChainID(), support.Block(0), func() {
+		c.InactiveChainRegistry.TrackChain(support.ChainID(), support.Block(0), func() {
 			c.CreateChain(support.ChainID())
 		})
 		return &inactive.Chain{Err: errors.Errorf("channel %s is not serviced by me", support.ChainID())}, nil
