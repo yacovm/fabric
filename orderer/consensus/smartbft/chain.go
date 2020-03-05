@@ -452,15 +452,26 @@ func (c *BFTChain) lastPersistedProposalAndSignatures() (*types.Proposal, []type
 	return &decision.Proposal, decision.Signatures
 }
 
-func (c *BFTChain) blockToDecision(block *common.Block) *types.Decision {
-	proposal := types.Proposal{
-		Header: block.Header.Hash(),
+func (c *BFTChain) blockToProposalWithoutSignaturesInMetadata(block *common.Block) types.Proposal {
+	blockClone := proto.Clone(block).(*common.Block)
+	if len(blockClone.Metadata.Metadata) > int(common.BlockMetadataIndex_SIGNATURES) {
+		signatureMetadata := &common.Metadata{}
+		// Nil out signatures because we carry them around separately in the library format.
+		proto.Unmarshal(blockClone.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], signatureMetadata)
+		signatureMetadata.Signatures = nil
+		blockClone.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(signatureMetadata)
+	}
+	return types.Proposal{
+		Header: blockClone.Header.Hash(),
 		Payload: (&ByteBufferTuple{
-			A: utils.MarshalOrPanic(block.Data),
-			B: utils.MarshalOrPanic(block.Metadata),
+			A: utils.MarshalOrPanic(blockClone.Data),
+			B: utils.MarshalOrPanic(blockClone.Metadata),
 		}).ToBytes(),
 	}
+}
 
+func (c *BFTChain) blockToDecision(block *common.Block) *types.Decision {
+	proposal := c.blockToProposalWithoutSignaturesInMetadata(block)
 	if block.Header.Number == 0 {
 		return &types.Decision{
 			Proposal: proposal,

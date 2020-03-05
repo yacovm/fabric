@@ -474,11 +474,16 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 				"testchannel1":  5,
 			}, network.Orderers[:4], peer, network)
 
-			restart := func(until int) {
+			restart := func(from, until int) {
 				for i, orderer := range network.Orderers[:until] {
+					if i < from {
+						continue
+					}
 					By(fmt.Sprintf("Killing %s", orderer.Name))
 					ordererProcesses[i].Signal(syscall.SIGTERM)
 					Eventually(ordererProcesses[i].Wait(), network.EventuallyTimeout).Should(Receive())
+
+					time.Sleep(time.Second * 2)
 
 					By(fmt.Sprintf("Launching %s", orderer.Name))
 					runner := network.OrdererRunner(orderer)
@@ -490,18 +495,17 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 				}
 			}
 
-			By("Restarting all orderers")
-			restart(4)
-
-			By("Waiting for followers to see the leader")
-			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
-			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
-			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
-
 			By("Planting last config block in the orderer's file system")
 			configBlock := nwo.GetConfigBlock(network, peer, orderer, "systemchannel")
 			err = ioutil.WriteFile(filepath.Join(testDir, "systemchannel_block.pb"), utils.MarshalOrPanic(configBlock), 0644)
 			Expect(err).NotTo(HaveOccurred())
+
+			By("Killing the leader orderer")
+			ordererProcesses[0].Signal(syscall.SIGTERM)
+			Eventually(ordererProcesses[0].Wait(), network.EventuallyTimeout).Should(Receive())
+
+			By("Restarting all orderers but the first orderer")
+			restart(1, 4)
 
 			By("Launching the added orderer")
 			runner := network.OrdererRunner(orderer5)
@@ -511,10 +515,23 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			ordererProcesses = append(ordererProcesses, proc)
 			Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
 
-			By("Waiting for the added orderer to see the leader")
-			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+			By("Waiting for view change to occur")
+			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout*2, time.Second).Should(gbytes.Say("Changing to leader role"))
+			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout*2, time.Second).Should(gbytes.Say("Changing to follower role"))
+			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout*2, time.Second).Should(gbytes.Say("Changing to follower role"))
+			Eventually(ordererRunners[4].Err(), network.EventuallyTimeout*2, time.Second).Should(gbytes.Say("Changing to follower role"))
 
-			By("Exit maintenance mode")
+			By("Bringing back the old leader")
+			runner = network.OrdererRunner(orderer)
+			ordererRunners[0] = runner
+			proc = ifrit.Invoke(runner)
+			ordererProcesses[0] = proc
+			Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
+
+			By("Waiting for it to find out it's no longer the leader")
+			Eventually(ordererRunners[0].Err(), network.EventuallyTimeout*2, time.Second).Should(gbytes.Say("Changing to follower role"))
+
+			By("Exit maintenance mode through that orderer")
 			for _, channel := range []string{"systemchannel", "testchannel1"} {
 				updateConsensusState(network, peer, orderer, channel, protosorderer.ConsensusType_STATE_NORMAL)
 			}
@@ -563,15 +580,15 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			}, network.Orderers, peer, network)
 
 			By("Restarting all orderers")
-			restart(5)
+			restart(0, 5)
 
 			By("Waiting for the removed node to say the channel is not serviced by it")
 			Eventually(ordererRunners[4].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("channel systemchannel is not serviced by me"))
 
 			By("Waiting for followers to see the leader")
-			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
-			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
-			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+			Eventually(ordererRunners[0].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 2"))
+			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 2"))
+			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 2"))
 
 			By("Exit maintenance mode")
 			for _, channel := range []string{"systemchannel", "testchannel1"} {
@@ -586,9 +603,9 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			}, network.Orderers[:4], peer, network)
 
 			By("Ensuring the leader talks to existing followers")
-			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
-			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
-			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+			Eventually(ordererRunners[0].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 2"))
+			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 2"))
+			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 2"))
 
 			By("Make sure the peers get the config blocks, again")
 			waitForBlockReceptionByPeer(peer, network, "testchannel1", 12)
