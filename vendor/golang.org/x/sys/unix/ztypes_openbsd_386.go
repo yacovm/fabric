@@ -6,11 +6,11 @@
 package unix
 
 const (
-	SizeofPtr      = 0x4
-	SizeofShort    = 0x2
-	SizeofInt      = 0x4
-	SizeofLong     = 0x4
-	SizeofLongLong = 0x8
+	sizeofPtr      = 0x4
+	sizeofShort    = 0x2
+	sizeofInt      = 0x4
+	sizeofLong     = 0x4
+	sizeofLongLong = 0x8
 )
 
 type (
@@ -458,8 +458,6 @@ const (
 	POLLWRNORM = 0x4
 )
 
-type Sigset_t uint32
-
 type Utsname struct {
 	Sysname  [256]byte
 	Nodename [256]byte
@@ -557,14 +555,4 @@ type Uvmexp struct {
 	Pdrevtext          int32
 	Fpswtch            int32
 	Kmapent            int32
-}
-
-const SizeofClockinfo = 0x14
-
-type Clockinfo struct {
-	Hz      int32
-	Tick    int32
-	Tickadj int32
-	Stathz  int32
-	Profhz  int32
 }

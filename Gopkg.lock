@@ -56,12 +56,12 @@
   version = "v0.4.12"
 
 [[projects]]
-  branch = "master"
-  digest = "1:7da1a26e347165227c79dfb10b90b3b5dedb6cbae50e88cdb81f5b6259b5b951"
-  name = "github.com/Nvveen/Gotty"
-  packages = ["."]
+  digest = "1:6b6d999be55cc0e0704ed0ac4532175f1f71639fbda6d143dc86ac5a5d3bc87f"
+  name = "github.com/Microsoft/hcsshim"
+  packages = ["osversion"]
   pruneopts = "NUT"
-  revision = "cd527374f1e5bff4938207604a14f2e38a9cf512"
+  revision = "f92b8fb9c92e17da496af5a69e3ee13fbe9916e1"
+  version = "v0.8.6"
 
 [[projects]]
   digest = "1:777f5600fe3087afb3f3742efa38551a9865d4e6e1b584c0e56074ba05944181"
@@ -76,7 +76,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:6bb60b92ca4149a50d530fdb05440a37db6a63f5c5f324f43f7a1967c6d03f4c"
+  digest = "1:0a201916be87554799abc9adcb6275df91e83fcaece7473e0f0616abe85ac2ea"
   name = "github.com/SmartBFT-Go/consensus"
   packages = [
     "internal/bft",
@@ -87,7 +87,7 @@
     "smartbftprotos",
   ]
   pruneopts = "NUT"
-  revision = "f2a25450094edcb459e8e5a698c6f3ae46b866f8"
+  revision = "fce7fcacf0ac0d447b1d271d3c89152a1e8bdb69"
 
 [[projects]]
   branch = "master"
@@ -149,10 +149,18 @@
   version = "v1.1.1"
 
 [[projects]]
-  digest = "1:a79e20cafae5bc666a1503bdb6f465f5cef80977ddb5f4ab85124a4f86b8dc22"
+  digest = "1:699aca47d5af672db37b96102bb088edbf26f84f73d3dafff6fa917026eb6971"
+  name = "github.com/docker/distribution"
+  packages = ["registry/api/errcode"]
+  pruneopts = "NUT"
+  revision = "2461543d988979529609e8cb6fca9ca190dc48da"
+  version = "v2.7.1"
+
+[[projects]]
+  branch = "master"
+  digest = "1:22e00eeae30283f43e1c7b526d62376a872d3220acfba4858d59674b436f3b05"
   name = "github.com/docker/docker"
   packages = [
-    "api/types",
     "api/types/blkiodev",
     "api/types/container",
     "api/types/filters",
@@ -164,7 +172,6 @@
     "api/types/swarm/runtime",
     "api/types/versions",
     "errdefs",
-    "opts",
     "pkg/fileutils",
     "pkg/homedir",
     "pkg/idtools",
@@ -176,7 +183,7 @@
     "pkg/system",
   ]
   pruneopts = "NUT"
-  revision = "0c5f8d2b9b23ab8d23529b3effdcf53bb058298c"
+  revision = "12b837e474e2860a0d0575f42d3295aabd379ab2"
 
 [[projects]]
   digest = "1:ade935c55cd6d0367c843b109b09c9d748b1982952031414740750fdf94747eb"
@@ -193,13 +200,6 @@
   pruneopts = "NUT"
   revision = "47565b4f722fb6ceae66b95f853feed578a4a51c"
   version = "v0.3.3"
-
-[[projects]]
-  digest = "1:00d0d550a1f1d7ca03270ebc1e136f21f6b9dab37f0c37e9a90d56d2f7afcff9"
-  name = "github.com/docker/libnetwork"
-  packages = ["ipamutils"]
-  pruneopts = "NUT"
-  revision = "19279f0492417475b6bfbd0aa529f73e8f178fb5"
 
 [[projects]]
   digest = "1:b7ffca49e9cfd3dfb04a8e0a59347708c6f78f68476a32c5e0a0edca5d1b258c"
@@ -234,7 +234,7 @@
   version = "v1.1.0"
 
 [[projects]]
-  digest = "1:d0a3e7afbdc348a36faa023b59faf86a60404037f101bb4b8cc4ae63d8b94be1"
+  digest = "1:bc82e318d5e5491d31fd69d63b4768b4f83b60acd36019717d61be8c54a9192c"
   name = "github.com/fsouza/go-dockerclient"
   packages = [
     ".",
@@ -243,8 +243,8 @@
     "internal/term",
   ]
   pruneopts = "NUT"
-  revision = "1b33efcb40bef3494af8bc6a1f73600f37a3c9d1"
-  version = "v1.3.0"
+  revision = "0b6996fbacaa97246e47c8e29dc6cdf8639f19cf"
+  version = "v1.4.0"
 
 [[projects]]
   digest = "1:c244cf1dfe6a89844fd22158c361922ad1c16bd9d07e5cb98b53dff582a33d15"
@@ -354,6 +354,20 @@
   version = "v1.2.0"
 
 [[projects]]
+  digest = "1:41933d387bfa3eaa6a82647914ed7044f7b8355764c24fb920892bc8c03ef0c3"
+  name = "github.com/hpcloud/tail"
+  packages = [
+    ".",
+    "ratelimiter",
+    "util",
+    "watch",
+    "winfile",
+  ]
+  pruneopts = "NUT"
+  revision = "a30252cb686a21eb2d0b98132633053ec2f7f1e5"
+  version = "v1.0.0"
+
+[[projects]]
   branch = "master"
   digest = "1:b1c26a7393cb28a859e794f8eb364f5bae72ad9762e301325c50c7fa43544667"
   name = "github.com/hyperledger/fabric-amcl"
@@ -371,6 +385,14 @@
   pruneopts = "NUT"
   revision = "90dc96fb23ab7eb18477e4bfcf9cd8ebdb7209f0"
   version = "v1.0.0"
+
+[[projects]]
+  branch = "master"
+  digest = "1:1b532462adeb680f8526152d0bc1baa203ce6b63b13070b9f9bd5812ef74dfce"
+  name = "github.com/ijc/Gotty"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "a8b993ba6abdb0e0c12b0125c603323a71c7790c"
 
 [[projects]]
   digest = "1:406338ad39ab2e37b7f4452906442a3dbf0eb3379dd1f06aafb5c07e769a5fbb"
@@ -437,12 +459,12 @@
   version = "v1.0.1"
 
 [[projects]]
-  digest = "1:d239a90a19b0e8f2b6f4d9515a8f8e7b2ccdc61c43fe2c9f57cd3fc3d6eee939"
+  branch = "master"
+  digest = "1:e6a5a57405f5326de0413d79725f57524ce7241c71976dc02f4828eaa2c70e7b"
   name = "github.com/miekg/pkcs11"
   packages = ["."]
   pruneopts = "NUT"
-  revision = "210dc1e16747c5ba98a03bcbcf728c38086ea357"
-  version = "v1.0.3"
+  revision = "a667d056470f6e0da7facaff2466f0d2645e35d7"
 
 [[projects]]
   digest = "1:a45ae66dea4c899d79fceb116accfa1892105c251f0dcd9a217ddc276b42ec68"
@@ -453,7 +475,7 @@
   version = "v1.1.2"
 
 [[projects]]
-  digest = "1:fc96548595095e5128bb8f78609909f1f3f29a24648d8323ed623ae1f4815262"
+  digest = "1:545744762d3d6d59328a38e44f571baaeda30184b88b43a28879bedf7711afa5"
   name = "github.com/onsi/ginkgo"
   packages = [
     ".",
@@ -477,7 +499,8 @@
     "types",
   ]
   pruneopts = "NT"
-  revision = "a3b6351eb1ff8e1bfa30b2f55d7e282186ed8fee"
+  revision = "eea6ad008b96acdaa524f5b409513bf062b500ad"
+  version = "v1.8.0"
 
 [[projects]]
   digest = "1:9f353a779b8b118229dfc1541e41d72d1a3a6f2d13756f5fe66daeb0f52191ab"
@@ -487,7 +510,8 @@
     "format",
     "gbytes",
     "gexec",
-    "ghttp",
+    "gstruct",
+    "gstruct/errors",
     "internal/assertion",
     "internal/asyncassertion",
     "internal/oraclematcher",
@@ -792,14 +816,14 @@
   revision = "22d7a77e9e5f409e934ed268692e56707cd169e5"
 
 [[projects]]
-  digest = "1:a019befaac3480235e0db34bc38f5e90baefe615795eb1e5adc4633baa3f0841"
+  digest = "1:03004f72cd37290aa0cba90b66d418f3a7cfb47220207398b561e6abe7aa8f74"
   name = "golang.org/x/lint"
   packages = [
     ".",
     "golint",
   ]
   pruneopts = "NUT"
-  revision = "c67002cb31c3a748b7688c27f20d8358b4193582"
+  revision = "959b441ac422379a43da2230f62be024250818b0"
 
 [[projects]]
   branch = "master"
@@ -878,7 +902,8 @@
   version = "v0.3.2"
 
 [[projects]]
-  digest = "1:0a25e2d158566f94027c0eeb72e1d34b0cfba5b8b51dc7c5b1bb04c2d437898b"
+  branch = "release-branch.go1.12"
+  digest = "1:849e1ab274cc58121de7558d8cad12bf9dfe65d8315f3a081126c8442c66455e"
   name = "golang.org/x/tools"
   packages = [
     "cmd/goimports",
@@ -886,15 +911,17 @@
     "go/gcexportdata",
     "go/internal/cgo",
     "go/internal/gcimporter",
+    "go/internal/packagesdriver",
     "go/packages",
     "go/types/typeutil",
     "imports",
     "internal/fastwalk",
     "internal/gopathwalk",
+    "internal/module",
     "internal/semver",
   ]
   pruneopts = "NUT"
-  revision = "f60e5f99f0816fc2d9ecb338008ea420248d2943"
+  revision = "aa82965741a9fecd12b026fbb3d3c6ed3231b8f8"
 
 [[projects]]
   branch = "master"
@@ -905,24 +932,32 @@
   revision = "bb713bdc0e5239f2b68e560efbe1c701a6fe78f9"
 
 [[projects]]
-  digest = "1:5b805b8e03b29399b344655cac16873f026e54dc0a7c17b381f6f4d4c7b6d741"
+  digest = "1:6afefb3e487fbe8a9db2a4bb81cedd7670423bbfea6f82b67b44e9ea3131f502"
   name = "google.golang.org/grpc"
   packages = [
     ".",
     "balancer",
     "balancer/base",
     "balancer/roundrobin",
+    "binarylog/grpc_binarylog_v1",
     "codes",
     "connectivity",
     "credentials",
+    "credentials/internal",
     "encoding",
     "encoding/proto",
     "grpclog",
+    "health",
+    "health/grpc_health_v1",
     "internal",
     "internal/backoff",
+    "internal/balancerload",
+    "internal/binarylog",
     "internal/channelz",
     "internal/envconfig",
     "internal/grpcrand",
+    "internal/grpcsync",
+    "internal/syscall",
     "internal/transport",
     "keepalive",
     "metadata",
@@ -936,8 +971,8 @@
     "tap",
   ]
   pruneopts = "NUT"
-  revision = "8dea3dc473e90c8179e519d91302d0597c0ca1d1"
-  version = "v1.15.0"
+  revision = "25c4f928eaa6d96443009bd842389fb4fa48664e"
+  version = "v1.20.1"
 
 [[projects]]
   digest = "1:22b2dee6f30bc8601f087449a2a819df8388e54e9547349c658f14d8f8c590f2"
@@ -954,6 +989,23 @@
   pruneopts = "NUT"
   revision = "f907f6f5dd81f77c2bbc1cde92e4c5a04720cb11"
   version = "v1.0.28"
+
+[[projects]]
+  digest = "1:1b91ae0dc69a41d4c2ed23ea5cffb721ea63f5037ca4b81e6d6771fbb8f45129"
+  name = "gopkg.in/fsnotify.v1"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "c2828203cd70a50dcccfb2761f8b1f8ceef9a8e9"
+  source = "gopkg.in/fsnotify/fsnotify.v1"
+  version = "v1.4.7"
+
+[[projects]]
+  branch = "v1"
+  digest = "1:8fb1ccb16a6cfecbfdfeb84d8ea1cc7afa8f9ef16526bc2326f72d993e32cef1"
+  name = "gopkg.in/tomb.v1"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "dd632973f1e7218eb1089048e0798ec9ae7dceb8"
 
 [[projects]]
   digest = "1:18108594151654e9e696b27b181b953f9a90b16bf14d253dd1b397b025a1487f"
@@ -1003,7 +1055,7 @@
     "github.com/onsi/gomega",
     "github.com/onsi/gomega/gbytes",
     "github.com/onsi/gomega/gexec",
-    "github.com/onsi/gomega/ghttp",
+    "github.com/onsi/gomega/gstruct",
     "github.com/onsi/gomega/types",
     "github.com/op/go-logging",
     "github.com/pkg/errors",
@@ -1018,7 +1070,6 @@
     "github.com/stretchr/testify/require",
     "github.com/sykesm/zap-logfmt",
     "github.com/syndtr/goleveldb/leveldb",
-    "github.com/syndtr/goleveldb/leveldb/errors",
     "github.com/syndtr/goleveldb/leveldb/iterator",
     "github.com/syndtr/goleveldb/leveldb/opt",
     "github.com/syndtr/goleveldb/leveldb/util",
@@ -1040,7 +1091,6 @@
     "golang.org/x/crypto/sha3",
     "golang.org/x/lint/golint",
     "golang.org/x/net/context",
-    "golang.org/x/sync/semaphore",
     "golang.org/x/tools/cmd/goimports",
     "golang.org/x/tools/go/packages",
     "google.golang.org/grpc",
@@ -1050,6 +1100,8 @@
     "google.golang.org/grpc/connectivity",
     "google.golang.org/grpc/credentials",
     "google.golang.org/grpc/grpclog",
+    "google.golang.org/grpc/health",
+    "google.golang.org/grpc/health/grpc_health_v1",
     "google.golang.org/grpc/keepalive",
     "google.golang.org/grpc/metadata",
     "google.golang.org/grpc/peer",
