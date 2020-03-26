@@ -6,12 +6,13 @@ package gossip
 import (
 	context "context"
 	fmt "fmt"
+	math "math"
+
 	proto "github.com/golang/protobuf/proto"
 	peer "github.com/hyperledger/fabric-protos-go/peer"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
-	math "math"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -880,6 +881,7 @@ type ConnEstablish struct {
 	PkiId                []byte   `protobuf:"bytes,1,opt,name=pki_id,json=pkiId,proto3" json:"pki_id,omitempty"`
 	Identity             []byte   `protobuf:"bytes,2,opt,name=identity,proto3" json:"identity,omitempty"`
 	TlsCertHash          []byte   `protobuf:"bytes,3,opt,name=tls_cert_hash,json=tlsCertHash,proto3" json:"tls_cert_hash,omitempty"`
+	Probe                bool     `protobuf:"varint,4,opt,name=probe,json=probe,proto3" json:"probe,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
