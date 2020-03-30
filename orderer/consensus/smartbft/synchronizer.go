@@ -19,8 +19,11 @@ import (
 )
 
 type Synchronizer struct {
+	lastReconfig    types.Reconfig
+	selfID          uint64
+	LatestConfig    func() (types.Configuration, []uint64)
 	BlockToDecision func(*common.Block) *types.Decision
-	OnCommit        func(*common.Block)
+	OnCommit        func(*common.Block) types.Reconfig
 	Support         consensus.ConsenterSupport
 	BlockPuller     BlockPuller
 	ClusterSize     uint64
@@ -31,15 +34,34 @@ func (s *Synchronizer) Close() {
 	s.BlockPuller.Close()
 }
 
-func (s *Synchronizer) Sync() types.Decision {
+func (s *Synchronizer) Sync() types.SyncResponse {
 	decision, err := s.synchronize()
 	if err != nil {
 		s.Logger.Warnf("Could not synchronize with remote peers due to %s, returning state from local ledger", err)
 		block := s.Support.Block(s.Support.Height() - 1)
-		return *s.BlockToDecision(block)
+		config, nodes := s.LatestConfig()
+		return types.SyncResponse{
+			Latest: *s.BlockToDecision(block),
+			Reconfig: types.ReconfigSync{
+				InReplicatedDecisions: false, // If we read from ledger we do not need to reconfigure.
+				CurrentNodes:          nodes,
+				CurrentConfig:         config,
+			},
+		}
 	}
 
-	return *decision
+	// After sync has ended, reset the state of the last reconfig.
+	defer func() {
+		s.lastReconfig = types.Reconfig{}
+	}()
+	return types.SyncResponse{
+		Latest: *decision,
+		Reconfig: types.ReconfigSync{
+			InReplicatedDecisions: s.lastReconfig.InLatestDecision,
+			CurrentConfig:         s.lastReconfig.CurrentConfig,
+			CurrentNodes:          s.lastReconfig.CurrentNodes,
+		},
+	}
 }
 
 func (s *Synchronizer) getViewMetadataLastConfigSqnFromBlock(block *common.Block) (smartbftprotos.ViewMetadata, uint64) {
@@ -96,7 +118,10 @@ func (s *Synchronizer) synchronize() (*types.Decision, error) {
 		}
 		s.Logger.Debugf("Fetched and committed block [%d] from cluster", seq)
 		lastPulledBlock = block
-		s.OnCommit(lastPulledBlock)
+
+		prevInLatestDecision := s.lastReconfig.InLatestDecision
+		s.lastReconfig = s.OnCommit(lastPulledBlock)
+		s.lastReconfig.InLatestDecision = s.lastReconfig.InLatestDecision || prevInLatestDecision
 		seq++
 	}
 

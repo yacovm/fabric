@@ -19,12 +19,10 @@ import (
 	"crypto/x509"
 	"sort"
 
-	pkgconsensus "github.com/SmartBFT-Go/consensus/pkg/consensus"
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/channelconfig"
-	"github.com/hyperledger/fabric/common/configtx"
 	"github.com/hyperledger/fabric/common/crypto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
@@ -104,10 +102,10 @@ func getViewMetadataFromBlock(block *common.Block) (smartbftprotos.ViewMetadata,
 	return viewMetadata, nil
 }
 
-func configFromMetadataOptions(selfID uint64, options *smartbft.Options) (pkgconsensus.Configuration, error) {
+func configFromMetadataOptions(selfID uint64, options *smartbft.Options) (types.Configuration, error) {
 	var err error
 
-	config := pkgconsensus.DefaultConfig
+	config := types.DefaultConfig
 	config.SelfID = selfID
 
 	if options == nil {
@@ -219,25 +217,6 @@ func (ri *RequestInspector) unwrapReq(req []byte) (*request, error) {
 		sigHdr:   sigHdr,
 		envelope: envelope,
 	}, nil
-}
-
-// ConfigurationEnvelop extract configuration envelop
-func ConfigurationEnvelop(configBlock *common.Block) (*common.ConfigEnvelope, error) {
-	envelopeConfig, err := utils2.ExtractEnvelope(configBlock, 0)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to extract envelop from block")
-	}
-
-	payload, err := utils2.UnmarshalPayload(envelopeConfig.Payload)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal envelop payload")
-	}
-
-	configEnvelope, err := configtx.UnmarshalConfigEnvelope(payload.Data)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal configuration payload")
-	}
-	return configEnvelope, nil
 }
 
 // ConsenterCertificate denotes a TLS certificate of a consenter
@@ -366,6 +345,8 @@ type nodeConfig struct {
 // RuntimeConfig defines the configuration of the consensus
 // that is related to runtime.
 type RuntimeConfig struct {
+	BFTConfig              types.Configuration
+	isConfig               bool
 	logger                 *flogging.FabricLogger
 	id                     uint64
 	LastCommittedBlockHash string
@@ -378,9 +359,10 @@ type RuntimeConfig struct {
 
 func (rtc RuntimeConfig) BlockCommitted(block *common.Block) (RuntimeConfig, error) {
 	if _, err := cluster.ConfigFromBlock(block); err == nil {
-		return rtc.ConfigBlockCommitted(block)
+		return rtc.configBlockCommitted(block)
 	}
 	return RuntimeConfig{
+		BFTConfig:              rtc.BFTConfig,
 		id:                     rtc.id,
 		logger:                 rtc.logger,
 		LastCommittedBlockHash: hex.EncodeToString(block.Header.Hash()),
@@ -392,12 +374,20 @@ func (rtc RuntimeConfig) BlockCommitted(block *common.Block) (RuntimeConfig, err
 	}, nil
 }
 
-func (rtc RuntimeConfig) ConfigBlockCommitted(block *common.Block) (RuntimeConfig, error) {
+func (rtc RuntimeConfig) configBlockCommitted(block *common.Block) (RuntimeConfig, error) {
 	nodeConf, err := RemoteNodesFromConfigBlock(block, rtc.id, rtc.logger)
 	if err != nil {
 		return rtc, errors.Wrap(err, "remote nodes cannot be computed, rejecting config block")
 	}
+
+	bftConfig, err := configBlockToBFTConfig(rtc.id, block)
+	if err != nil {
+		return RuntimeConfig{}, err
+	}
+
 	return RuntimeConfig{
+		BFTConfig:              bftConfig,
+		isConfig:               true,
 		id:                     rtc.id,
 		logger:                 rtc.logger,
 		LastCommittedBlockHash: hex.EncodeToString(block.Header.Hash()),
@@ -407,4 +397,31 @@ func (rtc RuntimeConfig) ConfigBlockCommitted(block *common.Block) (RuntimeConfi
 		LastBlock:              block,
 		LastConfigBlock:        block,
 	}, nil
+}
+
+func configBlockToBFTConfig(selfID uint64, block *common.Block) (types.Configuration, error) {
+	if block == nil || block.Data == nil || len(block.Data.Data) == 0 {
+		return types.Configuration{}, errors.New("empty block")
+	}
+
+	env, err := utils2.UnmarshalEnvelope(block.Data.Data[0])
+	if err != nil {
+		return types.Configuration{}, err
+	}
+	bundle, err := channelconfig.NewBundleFromEnvelope(env)
+	if err != nil {
+		return types.Configuration{}, err
+	}
+
+	oc, ok := bundle.OrdererConfig()
+	if !ok {
+		return types.Configuration{}, errors.New("no orderer config")
+	}
+
+	consensusMD := &smartbft.ConfigMetadata{}
+	if err := proto.Unmarshal(oc.ConsensusMetadata(), consensusMD); err != nil {
+		return types.Configuration{}, err
+	}
+
+	return configFromMetadataOptions(selfID, consensusMD.Options)
 }

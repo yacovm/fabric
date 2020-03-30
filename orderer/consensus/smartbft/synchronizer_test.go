@@ -24,7 +24,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func noopUpdateLastHash(_ *common.Block) {}
+func noopUpdateLastHash(_ *common.Block) types.Reconfig { return types.Reconfig{} }
 
 func TestSynchronizerSync(t *testing.T) {
 	blockBytes, err := ioutil.ReadFile("testdata/mychannel.block")
@@ -55,11 +55,16 @@ func TestSynchronizerSync(t *testing.T) {
 
 		l := flogging.NewFabricLogger(zap.NewExample())
 
-		decision := &types.Decision{}
+		decision := &types.SyncResponse{
+			Latest: types.Decision{},
+		}
 		syn := &smartbft.Synchronizer{
+			LatestConfig: func() (types.Configuration, []uint64) {
+				return types.Configuration{}, nil
+			},
 			BlockToDecision: func(block *common.Block) *types.Decision {
 				if block == b99 {
-					return decision
+					return &decision.Latest
 				}
 				return nil
 			},
@@ -108,11 +113,13 @@ func TestSynchronizerSync(t *testing.T) {
 			return ledger[sqn]
 		})
 
-		decision := &types.Decision{}
+		decision := &types.SyncResponse{
+			Latest: types.Decision{},
+		}
 		syn := &smartbft.Synchronizer{
 			BlockToDecision: func(block *common.Block) *types.Decision {
 				if block == b102 {
-					return decision
+					return &decision.Latest
 				}
 				return nil
 			},
@@ -160,11 +167,13 @@ func TestSynchronizerSync(t *testing.T) {
 			return ledger[sqn]
 		})
 
-		decision := &types.Decision{}
+		decision := &types.SyncResponse{
+			Latest: types.Decision{},
+		}
 		syn := &smartbft.Synchronizer{
 			BlockToDecision: func(block *common.Block) *types.Decision {
 				if block == b101 {
-					return decision
+					return &decision.Latest
 				}
 				return nil
 			},
@@ -211,11 +220,13 @@ func TestSynchronizerSync(t *testing.T) {
 			return ledger[sqn]
 		})
 
-		decision := &types.Decision{}
+		decision := &types.SyncResponse{
+			Latest: types.Decision{},
+		}
 		syn := &smartbft.Synchronizer{
 			BlockToDecision: func(block *common.Block) *types.Decision {
 				if block == b100 {
-					return decision
+					return &decision.Latest
 				}
 				return nil
 			},
@@ -261,11 +272,16 @@ func TestSynchronizerSync(t *testing.T) {
 			return ledger[sqn]
 		})
 
-		decision := &types.Decision{}
+		decision := &types.SyncResponse{
+			Latest: types.Decision{},
+		}
 		syn := &smartbft.Synchronizer{
+			LatestConfig: func() (types.Configuration, []uint64) {
+				return types.Configuration{}, nil
+			},
 			BlockToDecision: func(block *common.Block) *types.Decision {
 				if block == b99 {
-					return decision
+					return &decision.Latest
 				}
 				return nil
 			},

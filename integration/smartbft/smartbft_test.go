@@ -22,13 +22,11 @@ import (
 
 	"github.com/tedsuo/ifrit/grouper"
 
-	docker "github.com/fsouza/go-dockerclient"
-	"github.com/golang/protobuf/proto"
+	"github.com/fsouza/go-dockerclient"
 	"github.com/hyperledger/fabric/integration/nwo"
 	"github.com/hyperledger/fabric/integration/nwo/commands"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/msp"
-	protosorderer "github.com/hyperledger/fabric/protos/orderer"
 	"github.com/hyperledger/fabric/protos/orderer/smartbft"
 	"github.com/hyperledger/fabric/protos/utils"
 	. "github.com/onsi/ginkgo"
@@ -343,7 +341,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1 channel=testchannel1"))
 
 			By("Waiting for follower to understand it is behind")
-			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Leader's sequence is 5 and ours is 2"))
+			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("leader's sequence is 5 and ours is 2"))
 
 			By("Waiting for follower to synchronize itself")
 			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Finished synchronizing with cluster"))
@@ -444,15 +442,6 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			ordererIdentity, err := ioutil.ReadFile(network.OrdererCert(orderer5))
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Enter maintenance mode")
-			for _, channel := range []string{"systemchannel", "testchannel1"} {
-				updateConsensusState(network, peer, orderer, channel, protosorderer.ConsensusType_STATE_MAINTENANCE)
-			}
-			assertBlockReception(map[string]int{
-				"systemchannel": 2,
-				"testchannel1":  4,
-			}, network.Orderers[:4], peer, network)
-
 			for _, channel := range []string{"systemchannel", "testchannel1"} {
 				nwo.UpdateSmartBFTMetadata(network, peer, orderer, channel, func(md *smartbft.ConfigMetadata) {
 					md.Consenters = append(md.Consenters, &smartbft.Consenter{
@@ -469,29 +458,26 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 					})
 				})
 			}
+
 			assertBlockReception(map[string]int{
-				"systemchannel": 3,
-				"testchannel1":  5,
+				"systemchannel": 2,
+				"testchannel1":  4,
 			}, network.Orderers[:4], peer, network)
 
-			restart := func(until int) {
-				for i, orderer := range network.Orderers[:until] {
-					By(fmt.Sprintf("Killing %s", orderer.Name))
-					ordererProcesses[i].Signal(syscall.SIGTERM)
-					Eventually(ordererProcesses[i].Wait(), network.EventuallyTimeout).Should(Receive())
+			restart := func(i int) {
+				orderer := network.Orderers[i]
+				By(fmt.Sprintf("Killing %s", orderer.Name))
+				ordererProcesses[i].Signal(syscall.SIGTERM)
+				Eventually(ordererProcesses[i].Wait(), network.EventuallyTimeout).Should(Receive())
 
-					By(fmt.Sprintf("Launching %s", orderer.Name))
-					runner := network.OrdererRunner(orderer)
-					runner.Command.Env = append(runner.Command.Env, "FABRIC_LOGGING_SPEC=orderer.consensus.smartbft=debug:policies.ImplicitOrderer=debug")
-					ordererRunners[i] = runner
-					proc := ifrit.Invoke(runner)
-					ordererProcesses[i] = proc
-					Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
-				}
+				By(fmt.Sprintf("Launching %s", orderer.Name))
+				runner := network.OrdererRunner(orderer)
+				runner.Command.Env = append(runner.Command.Env, "FABRIC_LOGGING_SPEC=orderer.consensus.smartbft=debug:policies.ImplicitOrderer=debug")
+				ordererRunners[i] = runner
+				proc := ifrit.Invoke(runner)
+				ordererProcesses[i] = proc
+				Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
 			}
-
-			By("Restarting all orderers")
-			restart(4)
 
 			By("Waiting for followers to see the leader")
 			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
@@ -514,21 +500,16 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			By("Waiting for the added orderer to see the leader")
 			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
 
-			By("Exit maintenance mode")
-			for _, channel := range []string{"systemchannel", "testchannel1"} {
-				updateConsensusState(network, peer, orderer, channel, protosorderer.ConsensusType_STATE_NORMAL)
-			}
-
-			time.Sleep(time.Second * 15)
-
 			By("Ensure all nodes are in sync")
 			assertBlockReception(map[string]int{
-				"systemchannel": 4,
-				"testchannel1":  6,
+				"systemchannel": 2,
+				"testchannel1":  4,
 			}, network.Orderers, peer, network)
 
 			By("Make sure the peers get the config blocks, again")
-			waitForBlockReceptionByPeer(peer, network, "testchannel1", 6)
+			waitForBlockReceptionByPeer(peer, network, "testchannel1", 4)
+
+
 
 			By("Transacting on testchannel1, again")
 			invokeQuery(network, peer, orderer, channel, 70)
@@ -536,19 +517,10 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			invokeQuery(network, peer, orderer, channel, 50)
 
 			By("Ensuring added node participates in consensus")
-			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Deciding on seq 9"))
+			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Deciding on seq 7"))
 
 			By("Ensure all nodes are in sync, again")
-			assertBlockReception(map[string]int{"testchannel1": 9}, network.Orderers, peer, network)
-
-			By("Enter maintenance mode")
-			for _, channel := range []string{"systemchannel", "testchannel1"} {
-				updateConsensusState(network, peer, orderer, channel, protosorderer.ConsensusType_STATE_MAINTENANCE)
-			}
-			assertBlockReception(map[string]int{
-				"systemchannel": 5,
-				"testchannel1":  10,
-			}, network.Orderers, peer, network)
+			assertBlockReception(map[string]int{"testchannel1": 7}, network.Orderers, peer, network)
 
 			By("Removing the added node from the channels")
 			for _, channel := range []string{"systemchannel", "testchannel1"} {
@@ -558,12 +530,12 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			}
 
 			assertBlockReception(map[string]int{
-				"systemchannel": 6,
-				"testchannel1":  11,
+				"systemchannel": 3,
+				"testchannel1":  8,
 			}, network.Orderers, peer, network)
 
-			By("Restarting all orderers")
-			restart(5)
+			By("Restarting the removed node")
+			restart(4)
 
 			By("Waiting for the removed node to say the channel is not serviced by it")
 			Eventually(ordererRunners[4].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("channel systemchannel is not serviced by me"))
@@ -573,33 +545,20 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
 			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
 
-			By("Exit maintenance mode")
-			for _, channel := range []string{"systemchannel", "testchannel1"} {
-				updateConsensusState(network, peer, orderer, channel, protosorderer.ConsensusType_STATE_NORMAL)
-			}
-
-			time.Sleep(time.Second * 15)
-
-			assertBlockReception(map[string]int{
-				"systemchannel": 7,
-				"testchannel1":  12,
-			}, network.Orderers[:4], peer, network)
-
 			By("Ensuring the leader talks to existing followers")
 			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
 			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
 			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
 
 			By("Make sure the peers get the config blocks, again")
-			waitForBlockReceptionByPeer(peer, network, "testchannel1", 12)
+			waitForBlockReceptionByPeer(peer, network, "testchannel1", 8)
 
 			By("Transact again")
 			invokeQuery(network, peer, orderer, channel, 40)
 
 			By("Ensuring the existing nodes got the block")
 			assertBlockReception(map[string]int{
-				"systemchannel": 7,
-				"testchannel1":  13,
+				"testchannel1":  9,
 			}, network.Orderers[:4], peer, network)
 		})
 
@@ -773,25 +732,6 @@ func waitForBlockReception(o *nwo.Orderer, submitter *nwo.Peer, network *nwo.Net
 	}, network.EventuallyTimeout, time.Second).Should(BeEmpty())
 }
 
-// updateConsensusState executes a config update that updates the consensus state, i.e. enters or exits maintenance mode.
-func updateConsensusState(network *nwo.Network, peer *nwo.Peer, orderer *nwo.Orderer, channel string, state protosorderer.ConsensusType_State) {
-	config := nwo.GetConfig(network, peer, orderer, channel)
-	updatedConfig := proto.Clone(config).(*common.Config)
-
-	consensusTypeConfigValue := updatedConfig.ChannelGroup.Groups["Orderer"].Values["ConsensusType"]
-	consensusTypeValue := &protosorderer.ConsensusType{}
-	err := proto.Unmarshal(consensusTypeConfigValue.Value, consensusTypeValue)
-	Expect(err).NotTo(HaveOccurred())
-
-	consensusTypeValue.State = state
-
-	updatedConfig.ChannelGroup.Groups["Orderer"].Values["ConsensusType"] = &common.ConfigValue{
-		ModPolicy: "Admins",
-		Value:     utils.MarshalOrPanic(consensusTypeValue),
-	}
-
-	nwo.UpdateOrdererConfig(network, orderer, channel, config, updatedConfig, peer, orderer)
-}
 
 func waitForBlockReceptionByPeer(peer *nwo.Peer, network *nwo.Network, channelName string, blockSeq uint64) {
 	Eventually(func() bool {

@@ -13,6 +13,8 @@ import (
 
 	"sync/atomic"
 
+	"reflect"
+
 	smartbft "github.com/SmartBFT-Go/consensus/pkg/consensus"
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/pkg/wal"
@@ -62,7 +64,7 @@ type signerSerializer interface {
 type BFTChain struct {
 	RuntimeConfig    *atomic.Value
 	Channel          string
-	Config           smartbft.Configuration
+	Config           types.Configuration
 	BlockPuller      BlockPuller
 	Comm             cluster.Communicator
 	SignerSerializer signerSerializer
@@ -79,7 +81,7 @@ type BFTChain struct {
 // NewChain creates new BFT Smart chain
 func NewChain(
 	selfID uint64,
-	config smartbft.Configuration,
+	config types.Configuration,
 	walDir string,
 	blockPuller BlockPuller,
 	comm cluster.Communicator,
@@ -123,7 +125,7 @@ func NewChain(
 		logger: logger,
 		id:     selfID,
 	}
-	rtc, err := rtc.ConfigBlockCommitted(lastConfigBlock)
+	rtc, err := rtc.BlockCommitted(lastConfigBlock)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed constructing RuntimeConfig")
 	}
@@ -140,7 +142,7 @@ func NewChain(
 	// Setup communication with list of remotes notes for the new channel
 	c.Comm.Configure(c.support.ChainID(), rtc.RemoteNodes)
 
-	if err := c.consensus.ValidateConfiguration(); err != nil {
+	if err := c.consensus.ValidateConfiguration(rtc.Nodes); err != nil {
 		return nil, errors.Wrap(err, "failed to verify SmartBFT-Go configuration")
 	}
 
@@ -175,12 +177,17 @@ func bftSmartConsensusBuild(
 	c.Metrics.ClusterSize.Set(float64(clusterSize))
 
 	sync := &Synchronizer{
+		selfID:          rtc.id,
 		BlockToDecision: c.blockToDecision,
 		OnCommit:        c.updateRuntimeConfig,
 		Support:         c.support,
 		BlockPuller:     c.BlockPuller,
 		ClusterSize:     clusterSize,
 		Logger:          c.Logger,
+		LatestConfig: func() (types.Configuration, []uint64) {
+			rtc := c.RuntimeConfig.Load().(RuntimeConfig)
+			return rtc.BFTConfig, rtc.Nodes
+		},
 	}
 
 	channelDecorator := zap.String("channel", c.support.ChainID())
@@ -275,7 +282,7 @@ func (c *BFTChain) HandleRequest(sender uint64, req []byte) {
 	c.consensus.SubmitRequest(req)
 }
 
-func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature) {
+func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature) types.Reconfig {
 	block, err := ProposalToBlock(proposal)
 	if err != nil {
 		c.Logger.Panicf("failed to read proposal, err: %s", err)
@@ -291,7 +298,7 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 			c.Logger.Errorf("Offending signature Value: %s", base64.StdEncoding.EncodeToString(s.Value))
 			c.Logger.Errorf("Halting chain.")
 			c.Halt()
-			return
+			return types.Reconfig{}
 		}
 
 		if ordererBlockMetadata == nil {
@@ -309,15 +316,18 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 		Signatures: sigs,
 	})
 
-	defer c.updateRuntimeConfig(block)
 	c.Logger.Debugf("Delivering proposal, writing block %d to the ledger, node id %d", block.Header.Number, c.Config.SelfID)
 	c.Metrics.CommittedBlockNumber.Set(float64(block.Header.Number)) // report the committed block number
 	c.reportIsLeader(&proposal)                                      // report the leader
 	if utils.IsConfigBlock(block) {
+
 		c.support.WriteConfigBlock(block, nil)
-		return
+	} else {
+		c.support.WriteBlock(block, nil)
 	}
-	c.support.WriteBlock(block, nil)
+
+	reconfig := c.updateRuntimeConfig(block)
+	return reconfig
 }
 
 func (c *BFTChain) reportIsLeader(proposal *types.Proposal) {
@@ -346,17 +356,26 @@ func (c *BFTChain) reportIsLeader(proposal *types.Proposal) {
 
 }
 
-func (c *BFTChain) updateRuntimeConfig(block *common.Block) {
-	rtc := c.RuntimeConfig.Load().(RuntimeConfig)
-	newRTC, err := rtc.BlockCommitted(block)
+func (c *BFTChain) updateRuntimeConfig(block *common.Block) types.Reconfig {
+	prevRTC := c.RuntimeConfig.Load().(RuntimeConfig)
+	newRTC, err := prevRTC.BlockCommitted(block)
 	if err != nil {
 		c.Logger.Errorf("Failed constructing RuntimeConfig from block %d, halting chain", block.Header.Number)
 		c.Halt()
-		return
+		return types.Reconfig{}
 	}
 	c.RuntimeConfig.Store(newRTC)
 	if utils.IsConfigBlock(block) {
 		c.Comm.Configure(c.Channel, newRTC.RemoteNodes)
+	}
+
+	membershipDidNotChange := reflect.DeepEqual(newRTC.Nodes, prevRTC.Nodes)
+	configDidNotChange := reflect.DeepEqual(newRTC.BFTConfig, prevRTC.BFTConfig)
+	noChangeDetected := membershipDidNotChange && configDidNotChange
+	return types.Reconfig{
+		InLatestDecision: !noChangeDetected,
+		CurrentNodes:     newRTC.Nodes,
+		CurrentConfig:    newRTC.BFTConfig,
 	}
 }
 
@@ -424,15 +443,26 @@ func (c *BFTChain) lastPersistedProposalAndSignatures() (*types.Proposal, []type
 	return &decision.Proposal, decision.Signatures
 }
 
-func (c *BFTChain) blockToDecision(block *common.Block) *types.Decision {
-	proposal := types.Proposal{
-		Header: block.Header.Hash(),
+func (c *BFTChain) blockToProposalWithoutSignaturesInMetadata(block *common.Block) types.Proposal {
+	blockClone := proto.Clone(block).(*common.Block)
+	if len(blockClone.Metadata.Metadata) > int(common.BlockMetadataIndex_SIGNATURES) {
+		signatureMetadata := &common.Metadata{}
+		// Nil out signatures because we carry them around separately in the library format.
+		proto.Unmarshal(blockClone.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], signatureMetadata)
+		signatureMetadata.Signatures = nil
+		blockClone.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(signatureMetadata)
+	}
+	return types.Proposal{
+		Header: blockClone.Header.Hash(),
 		Payload: (&ByteBufferTuple{
-			A: utils.MarshalOrPanic(block.Data),
-			B: utils.MarshalOrPanic(block.Metadata),
+			A: utils.MarshalOrPanic(blockClone.Data),
+			B: utils.MarshalOrPanic(blockClone.Metadata),
 		}).ToBytes(),
 	}
+}
 
+func (c *BFTChain) blockToDecision(block *common.Block) *types.Decision {
+	proposal := c.blockToProposalWithoutSignaturesInMetadata(block)
 	if block.Header.Number == 0 {
 		return &types.Decision{
 			Proposal: proposal,
