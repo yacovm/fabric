@@ -7,6 +7,7 @@ package consensus
 
 import (
 	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -141,7 +142,7 @@ func (c *Consensus) Start() error {
 	submittedChan := make(chan struct{}, 1)
 	pool := algorithm.NewPool(c.Logger, c.RequestInspector, c.controller, opts, submittedChan)
 	batchBuilder := algorithm.NewBatchBuilder(pool, submittedChan, c.Config.RequestBatchMaxCount, c.Config.RequestBatchMaxBytes, c.Config.RequestBatchMaxInterval)
-	leaderMonitor := algorithm.NewHeartbeatMonitor(c.Scheduler, c.Logger, c.Config.LeaderHeartbeatTimeout, c.Config.LeaderHeartbeatCount, c.controller, c.numberOfNodes, c.controller, c.controller.ViewSequences)
+	leaderMonitor := algorithm.NewHeartbeatMonitor(c.Scheduler, c.Logger, c.Config.LeaderHeartbeatTimeout, c.Config.LeaderHeartbeatCount, c.controller, c.numberOfNodes, c.controller, c.controller.ViewSequences, c.Config.NumOfTicksBehindBeforeSyncing)
 	c.controller.RequestPool = pool
 	c.controller.Batcher = batchBuilder
 	c.controller.LeaderMonitor = leaderMonitor
@@ -185,6 +186,10 @@ func (c *Consensus) Start() error {
 			seq = viewSeq.Seq
 		}
 	}
+
+	c.viewChanger.ControllerStartedWG = sync.WaitGroup{}
+	c.viewChanger.ControllerStartedWG.Add(1)
+	c.controller.StartedWG = &c.viewChanger.ControllerStartedWG
 
 	// If we delivered to the application proposal with sequence i,
 	// then we are expecting to be proposed a proposal with sequence i+1.
