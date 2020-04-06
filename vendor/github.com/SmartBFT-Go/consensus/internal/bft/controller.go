@@ -121,6 +121,8 @@ type Controller struct {
 	controllerDone sync.WaitGroup
 
 	ViewSequences *atomic.Value
+
+	StartedWG *sync.WaitGroup
 }
 
 func (c *Controller) getCurrentViewNumber() uint64 {
@@ -312,18 +314,16 @@ func (c *Controller) startView(proposalSequence uint64) {
 }
 
 func (c *Controller) changeView(newViewNumber uint64, newProposalSequence uint64) {
-	// Drain the leader token in case we held it,
-	// so we won't start proposing after view change.
-	c.relinquishLeaderToken()
 
 	latestView := c.getCurrentViewNumber()
 	if latestView > newViewNumber {
 		c.Logger.Debugf("Got view change to %d but already at %d", newViewNumber, latestView)
 		return
 	}
-	// Kill current view
-	c.Logger.Debugf("Aborting current view with number %d", latestView)
-	c.currView.Abort()
+
+	if !c.abortView(latestView) {
+		return
+	}
 
 	c.setCurrentViewNumber(newViewNumber)
 	c.startView(newProposalSequence)
@@ -335,10 +335,11 @@ func (c *Controller) changeView(newViewNumber uint64, newProposalSequence uint64
 	}
 }
 
-func (c *Controller) abortView(view uint64) {
-	if view < c.currViewNumber {
-		c.Logger.Debugf("Was asked to abort view %d but the current view with number %d", view, c.currViewNumber)
-		return
+func (c *Controller) abortView(view uint64) bool {
+	currView := c.getCurrentViewNumber()
+	if view < currView {
+		c.Logger.Debugf("Was asked to abort view %d but the current view with number %d", view, currView)
+		return false
 	}
 
 	// Drain the leader token in case we held it,
@@ -348,6 +349,8 @@ func (c *Controller) abortView(view uint64) {
 	// Kill current view
 	c.Logger.Debugf("Aborting current view with number %d", c.currViewNumber)
 	c.currView.Abort()
+
+	return true
 }
 
 // Sync initiates a synchronization
@@ -415,19 +418,7 @@ func (c *Controller) run() {
 	for {
 		select {
 		case d := <-c.decisionChan:
-			c.Application.Deliver(d.proposal, d.signatures)
-			c.Checkpoint.Set(d.proposal, d.signatures)
-			c.Logger.Debugf("Node %d delivered proposal", c.ID)
-			c.removeDeliveredFromPool(d)
-			select {
-			case c.deliverChan <- struct{}{}:
-			case <-c.stopChan:
-				return
-			}
-			c.MaybePruneRevokedRequests()
-			if iAm, _ := c.iAmTheLeader(); iAm {
-				c.acquireLeaderToken()
-			}
+			c.decide(d)
 		case newView := <-c.viewChange:
 			c.changeView(newView.viewNumber, newView.proposalSeq)
 		case view := <-c.abortViewChan:
@@ -437,13 +428,35 @@ func (c *Controller) run() {
 		case <-c.leaderToken:
 			c.propose()
 		case <-c.syncChan:
-			c.sync()
+			view, seq := c.sync()
 			c.MaybePruneRevokedRequests()
+			if view > 0 || seq > 0 {
+				c.changeView(view, seq)
+			}
 		}
 	}
 }
 
-func (c *Controller) sync() {
+func (c *Controller) decide(d decision) {
+	reconfig := c.Application.Deliver(d.proposal, d.signatures)
+	if reconfig.InLatestDecision {
+		c.close()
+	}
+	c.Checkpoint.Set(d.proposal, d.signatures)
+	c.Logger.Debugf("Node %d delivered proposal", c.ID)
+	c.removeDeliveredFromPool(d)
+	select {
+	case c.deliverChan <- struct{}{}:
+	case <-c.stopChan:
+		return
+	}
+	c.MaybePruneRevokedRequests()
+	if iAm, _ := c.iAmTheLeader(); iAm {
+		c.acquireLeaderToken()
+	}
+}
+
+func (c *Controller) sync() (viewNum uint64, seq uint64) {
 	// Block any concurrent sync attempt.
 	c.grabSyncToken()
 	// At exit, enable sync once more, but ignore
@@ -451,12 +464,17 @@ func (c *Controller) sync() {
 	// we were syncing.
 	defer c.relinquishSyncToken()
 
-	decision := c.Synchronizer.Sync()
+	syncResponse := c.Synchronizer.Sync()
+	if syncResponse.Reconfig.InReplicatedDecisions {
+		c.close()
+		c.ViewChanger.close()
+	}
+	decision := syncResponse.Latest
 	if decision.Proposal.Metadata == nil {
 		c.Logger.Infof("Synchronizer returned with proposal metadata nil")
 		response := c.fetchState()
 		if response == nil {
-			return
+			return 0, 0
 		}
 		if response.View > 0 && response.Seq == 1 {
 			c.Logger.Infof("The collected state is with view %d and sequence %d", response.View, response.Seq)
@@ -472,9 +490,9 @@ func (c *Controller) sync() {
 				c.Logger.Panicf("Failed to save message to state, error: %v", err)
 			}
 			c.ViewChanger.InformNewView(response.View, 0)
-			c.viewChange <- viewInfo{viewNumber: response.View, proposalSeq: 1}
+			return response.View, 1
 		}
-		return
+		return 0, 0
 	}
 	md := &protos.ViewMetadata{}
 	if err := proto.Unmarshal(decision.Proposal.Metadata, md); err != nil {
@@ -482,7 +500,7 @@ func (c *Controller) sync() {
 	}
 	if md.ViewId < c.currViewNumber {
 		c.Logger.Infof("Synchronizer returned with view number %d but the controller is at view number %d", md.ViewId, c.currViewNumber)
-		return
+		return 0, 0
 	}
 	c.Logger.Infof("Synchronized to view %d and sequence %d with verification sequence %d", md.ViewId, md.LatestSequence, decision.Proposal.VerificationSequence)
 
@@ -507,10 +525,12 @@ func (c *Controller) sync() {
 		}
 	}
 
+	c.Logger.Debugf("Node %d is setting the checkpoint after sync to view %d and seq %d", c.ID, md.ViewId, md.LatestSequence)
 	c.Checkpoint.Set(decision.Proposal, decision.Signatures)
 	c.verificationSequence = uint64(decision.Proposal.VerificationSequence)
+	c.Logger.Debugf("Node %d is informing the view changer after sync of view %d and seq %d", c.ID, md.ViewId, md.LatestSequence)
 	c.ViewChanger.InformNewView(view, md.LatestSequence)
-	c.viewChange <- viewInfo{viewNumber: view, proposalSeq: md.LatestSequence + 1}
+	return view, md.LatestSequence + 1
 }
 
 func (c *Controller) fetchState() *types.ViewAndSeq {
@@ -570,20 +590,18 @@ func (c *Controller) relinquishLeaderToken() {
 	}
 }
 
-func (c *Controller) syncOnStart(startViewNumber uint64, startProposalSequence uint64) viewInfo {
-	c.sync()
-	info := viewInfo{startViewNumber, startProposalSequence}
-	select {
-	case newViewSeq := <-c.viewChange:
-		if newViewSeq.viewNumber > startViewNumber {
-			info.viewNumber = newViewSeq.viewNumber
-		}
-		if newViewSeq.proposalSeq > startProposalSequence {
-			info.proposalSeq = newViewSeq.proposalSeq
-		}
-	default:
+func (c *Controller) syncOnStart(startViewNumber uint64, startProposalSequence uint64) (viewNum uint64, seq uint64) {
+	syncView, syncSeq := c.sync()
+	c.MaybePruneRevokedRequests()
+	viewNum = startViewNumber
+	seq = startProposalSequence
+	if syncView > startViewNumber {
+		viewNum = syncView
 	}
-	return info
+	if syncSeq > startProposalSequence {
+		seq = syncSeq
+	}
+	return viewNum, seq
 }
 
 // Start the controller
@@ -602,16 +620,12 @@ func (c *Controller) Start(startViewNumber uint64, startProposalSequence uint64,
 	c.Logger.Debugf("The number of nodes (N) is %d, F is %d, and the quorum size is %d", c.N, F, Q)
 	c.quorum = Q
 
-	info := viewInfo{
-		viewNumber:  startViewNumber,
-		proposalSeq: startProposalSequence,
-	}
 	if syncOnStart {
-		info = c.syncOnStart(startViewNumber, startProposalSequence)
+		startViewNumber, startProposalSequence = c.syncOnStart(startViewNumber, startProposalSequence)
 	}
 
-	c.currViewNumber = info.viewNumber
-	c.startView(info.proposalSeq)
+	c.currViewNumber = startViewNumber
+	c.startView(startProposalSequence)
 	if iAm, _ := c.iAmTheLeader(); iAm {
 		c.acquireLeaderToken()
 	}
@@ -620,6 +634,8 @@ func (c *Controller) Start(startViewNumber uint64, startProposalSequence uint64,
 		defer c.controllerDone.Done()
 		c.run()
 	}()
+
+	c.StartedWG.Done()
 }
 
 func (c *Controller) close() {
@@ -640,6 +656,23 @@ func (c *Controller) Stop() {
 	c.close()
 	c.Batcher.Close()
 	c.RequestPool.Close()
+	c.LeaderMonitor.Close()
+
+	// Drain the leader token if we hold it.
+	select {
+	case <-c.leaderToken:
+	default:
+		// Do nothing
+	}
+
+	c.controllerDone.Wait()
+}
+
+// Stop the controller but only stop the requests pool timers
+func (c *Controller) StopWithPoolPause() {
+	c.close()
+	c.Batcher.Close()
+	c.RequestPool.StopTimers()
 	c.LeaderMonitor.Close()
 
 	// Drain the leader token if we hold it.

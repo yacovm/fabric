@@ -18,6 +18,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/crypto/tlsgen"
+	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/core/comm"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
@@ -191,4 +192,83 @@ func TestRequestID(t *testing.T) {
 	info := ri.RequestID(tx)
 	assert.Equal(t, expectedTxString, info.ID)
 	assert.Equal(t, hex.EncodeToString(expectedClient[:]), info.ClientID)
+}
+
+func TestRemoteNodesFromConfigBlock(t *testing.T) {
+	b, err := ioutil.ReadFile(filepath.Join("testdata", "smartbft_genesis_block.pb"))
+	assert.NoError(t, err)
+
+	block := &common.Block{}
+	err = proto.Unmarshal(b, block)
+	assert.NoError(t, err)
+
+	config, err := RemoteNodesFromConfigBlock(block, 1, flogging.MustGetLogger("test"))
+	assert.NoError(t, err)
+
+	assert.NotNil(t, config)
+}
+
+func TestRuntimeConfig(t *testing.T) {
+	b, err := ioutil.ReadFile(filepath.Join("testdata", "smartbft_genesis_block.pb"))
+	assert.NoError(t, err)
+
+	genesisBlock := &common.Block{}
+	err = proto.Unmarshal(b, genesisBlock)
+	assert.NoError(t, err)
+
+	notConfigBlock := &common.Block{
+		Header: &common.BlockHeader{Number: 10},
+		Data: &common.BlockData{
+			Data: [][]byte{
+				makeTx(nil, nil),
+			},
+		}}
+
+	prevRTC := RuntimeConfig{
+		logger: flogging.MustGetLogger("test"),
+		id:     1,
+	}
+
+	// Commit a config block
+	prevRTC, err = prevRTC.BlockCommitted(genesisBlock)
+	assert.NoError(t, err)
+	assert.True(t, prevRTC.isConfig)
+
+	// Commit a non config block
+	newRTC, err := prevRTC.BlockCommitted(notConfigBlock)
+	assert.NoError(t, err)
+	assert.False(t, newRTC.isConfig)
+
+	assert.Equal(t, prevRTC.id, newRTC.id)
+	assert.Equal(t, prevRTC.logger, newRTC.logger)
+	assert.Equal(t, prevRTC.Nodes, newRTC.Nodes)
+	assert.Equal(t, prevRTC.RemoteNodes, newRTC.RemoteNodes)
+	assert.Equal(t, prevRTC.LastConfigBlock, newRTC.LastConfigBlock)
+	assert.Equal(t, prevRTC.ID2Identities, newRTC.ID2Identities)
+	assert.NotEqual(t, prevRTC.LastBlock, newRTC.LastBlock)
+	assert.NotEqual(t, prevRTC.LastCommittedBlockHash, newRTC.LastCommittedBlockHash)
+
+	b, err = ioutil.ReadFile(filepath.Join("testdata", "systemchannel_block.pb"))
+	assert.NoError(t, err)
+
+	configBlock := &common.Block{}
+	err = proto.Unmarshal(b, configBlock)
+	assert.NoError(t, err)
+
+	// Ensure it's not the genesis block by mistake
+	assert.Equal(t, uint64(2), configBlock.Header.Number)
+
+	prevRTC = newRTC
+	newRTC, err = newRTC.BlockCommitted(configBlock)
+	assert.NoError(t, err)
+	assert.True(t, newRTC.isConfig)
+
+	assert.Equal(t, prevRTC.id, newRTC.id)
+	assert.Equal(t, prevRTC.logger, newRTC.logger)
+	assert.NotEqual(t, prevRTC.Nodes, newRTC.Nodes)
+	assert.NotEqual(t, prevRTC.RemoteNodes, newRTC.RemoteNodes)
+	assert.NotEqual(t, prevRTC.LastConfigBlock, newRTC.LastConfigBlock)
+	assert.NotEqual(t, prevRTC.ID2Identities, newRTC.ID2Identities)
+	assert.NotEqual(t, prevRTC.LastBlock, newRTC.LastBlock)
+	assert.NotEqual(t, prevRTC.LastCommittedBlockHash, newRTC.LastCommittedBlockHash)
 }

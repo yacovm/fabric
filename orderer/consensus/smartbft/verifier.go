@@ -105,6 +105,25 @@ func (v *Verifier) VerifyProposal(proposal types.Proposal) ([]types.RequestInfo,
 	return requests, nil
 }
 
+func (v *Verifier) RequestsFromProposal(proposal types.Proposal) []types.RequestInfo {
+	block, err := ProposalToBlock(proposal)
+	if err != nil {
+		return []types.RequestInfo{}
+	}
+
+	if block.Data == nil {
+		return []types.RequestInfo{}
+	}
+
+	var res []types.RequestInfo
+	for _, txn := range block.Data.Data {
+		req := v.ReqInspector.RequestID(txn)
+		res = append(res, req)
+	}
+
+	return res
+}
+
 func (v *Verifier) VerifySignature(signature types.Signature) error {
 	id2Identity := v.RuntimeConfig.Load().(RuntimeConfig).ID2Identities
 	identity, exists := id2Identity[signature.ID]

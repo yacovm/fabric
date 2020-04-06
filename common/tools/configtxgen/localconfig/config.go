@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/SmartBFT-Go/consensus/pkg/consensus"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/common/policies"
 	"github.com/hyperledger/fabric/common/viperutil"
@@ -21,6 +20,7 @@ import (
 	"github.com/hyperledger/fabric/protos/orderer/etcdraft"
 	"github.com/hyperledger/fabric/protos/orderer/smartbft"
 	"github.com/spf13/viper"
+	"github.com/SmartBFT-Go/consensus/pkg/types"
 )
 
 const (
@@ -216,21 +216,21 @@ var genesisDefaults = TopLevel{
 		},
 		SmartBFT: &smartbft.ConfigMetadata{
 			Options: &smartbft.Options{
-				RequestBatchMaxCount:      uint64(consensus.DefaultConfig.RequestBatchMaxCount),
-				RequestBatchMaxBytes:      uint64(consensus.DefaultConfig.RequestBatchMaxBytes),
-				RequestBatchMaxInterval:   consensus.DefaultConfig.RequestBatchMaxInterval.String(),
-				IncomingMessageBufferSize: uint64(consensus.DefaultConfig.IncomingMessageBufferSize),
-				RequestPoolSize:           uint64(consensus.DefaultConfig.RequestPoolSize),
-				RequestForwardTimeout:     consensus.DefaultConfig.RequestForwardTimeout.String(),
-				RequestComplainTimeout:    consensus.DefaultConfig.RequestComplainTimeout.String(),
-				RequestAutoRemoveTimeout:  consensus.DefaultConfig.RequestAutoRemoveTimeout.String(),
-				ViewChangeResendInterval:  consensus.DefaultConfig.ViewChangeResendInterval.String(),
-				ViewChangeTimeout:         consensus.DefaultConfig.ViewChangeTimeout.String(),
-				LeaderHeartbeatTimeout:    consensus.DefaultConfig.LeaderHeartbeatTimeout.String(),
-				LeaderHeartbeatCount:      uint64(consensus.DefaultConfig.LeaderHeartbeatCount),
-				CollectTimeout:            consensus.DefaultConfig.CollectTimeout.String(),
-				SyncOnStart:               consensus.DefaultConfig.SyncOnStart,
-				SpeedUpViewChange:         consensus.DefaultConfig.SpeedUpViewChange,
+				RequestBatchMaxCount:      uint64(types.DefaultConfig.RequestBatchMaxCount),
+				RequestBatchMaxBytes:      uint64(types.DefaultConfig.RequestBatchMaxBytes),
+				RequestBatchMaxInterval:   types.DefaultConfig.RequestBatchMaxInterval.String(),
+				IncomingMessageBufferSize: uint64(types.DefaultConfig.IncomingMessageBufferSize),
+				RequestPoolSize:           uint64(types.DefaultConfig.RequestPoolSize),
+				RequestForwardTimeout:     types.DefaultConfig.RequestForwardTimeout.String(),
+				RequestComplainTimeout:    types.DefaultConfig.RequestComplainTimeout.String(),
+				RequestAutoRemoveTimeout:  types.DefaultConfig.RequestAutoRemoveTimeout.String(),
+				ViewChangeResendInterval:  types.DefaultConfig.ViewChangeResendInterval.String(),
+				ViewChangeTimeout:         types.DefaultConfig.ViewChangeTimeout.String(),
+				LeaderHeartbeatTimeout:    types.DefaultConfig.LeaderHeartbeatTimeout.String(),
+				LeaderHeartbeatCount:      uint64(types.DefaultConfig.LeaderHeartbeatCount),
+				CollectTimeout:            types.DefaultConfig.CollectTimeout.String(),
+				SyncOnStart:               types.DefaultConfig.SyncOnStart,
+				SpeedUpViewChange:         types.DefaultConfig.SpeedUpViewChange,
 			},
 		},
 	},
