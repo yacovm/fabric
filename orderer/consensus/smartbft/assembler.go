@@ -52,6 +52,11 @@ func (a *Assembler) AssembleProposal(metadata []byte, requests [][]byte) (nextPr
 	block := common.NewBlock(lastBlock.Header.Number+1, lastBlock.Header.Hash())
 	block.Data = &common.BlockData{Data: batchedRequests}
 	block.Header.DataHash = block.Data.Hash()
+
+	if isConfigBlock(block) {
+		lastConfigBlockNum = block.Header.Number
+	}
+
 	block.Metadata.Metadata[common.BlockMetadataIndex_LAST_CONFIG] = utils.MarshalOrPanic(&common.Metadata{
 		Value: utils.MarshalOrPanic(&common.LastConfig{Index: lastConfigBlockNum}),
 	})

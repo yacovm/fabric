@@ -53,17 +53,17 @@ func TestAssembler(t *testing.T) {
 		{
 			name:             "Config transaction is first in the batch",
 			requests:         [][]byte{configTx, nonConfigTx},
-			expectedProposal: proposalFromRequests(20, 10, lastHash, []byte("metadata"), configTx),
+			expectedProposal: proposalFromRequests(10, 20, 20, lastHash, []byte("metadata"), configTx),
 		},
 		{
 			name:             "Config transaction is in the middle of the batch",
 			requests:         [][]byte{nonConfigTx, configTx, nonConfigTx},
-			expectedProposal: proposalFromRequests(20, 10, lastHash, []byte("metadata"), nonConfigTx),
+			expectedProposal: proposalFromRequests(10, 20, 10, lastHash, []byte("metadata"), nonConfigTx),
 		},
 		{
 			name:             "Config transaction is at the end of the batch",
 			requests:         [][]byte{nonConfigTx, nonConfigTx, configTx},
-			expectedProposal: proposalFromRequests(20, 10, lastHash, []byte("metadata"), nonConfigTx, nonConfigTx),
+			expectedProposal: proposalFromRequests(10, 20, 10, lastHash, []byte("metadata"), nonConfigTx, nonConfigTx),
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -141,13 +141,13 @@ func makeConfigBlock(seq uint64) *common.Block {
 		Metadata: &common.BlockMetadata{
 			Metadata: [][]byte{{},
 				utils.MarshalOrPanic(&common.Metadata{
-					Value: utils.MarshalOrPanic(&common.LastConfig{Index: 666}),
+					Value: utils.MarshalOrPanic(&common.LastConfig{Index: seq}),
 				})},
 		},
 	}
 }
 
-func proposalFromRequests(seq, lastConfigSeq uint64, lastBlockHash, metadata []byte, requests ...[]byte) types.Proposal {
+func proposalFromRequests(verificationSeq, seq, lastConfigSeq uint64, lastBlockHash, metadata []byte, requests ...[]byte) types.Proposal {
 	block := common.NewBlock(seq, nil)
 	block.Data = &common.BlockData{Data: requests}
 	block.Header.DataHash = block.Data.Hash()
@@ -174,6 +174,6 @@ func proposalFromRequests(seq, lastConfigSeq uint64, lastBlockHash, metadata []b
 		Header:               block.Header.Bytes(),
 		Payload:              tuple.ToBytes(),
 		Metadata:             metadata,
-		VerificationSequence: int64(lastConfigSeq),
+		VerificationSequence: int64(verificationSeq),
 	}
 }

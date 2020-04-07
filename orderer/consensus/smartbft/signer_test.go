@@ -54,7 +54,7 @@ func TestSignProposal(t *testing.T) {
 		SignerSerializer: ss,
 		Logger:           flogging.MustGetLogger("test"),
 		ID:               3,
-		LastConfigBlockNum: func() uint64 {
+		LastConfigBlockNum: func(_ *common.Block) uint64 {
 			return 10
 		},
 	}
