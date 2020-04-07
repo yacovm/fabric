@@ -194,7 +194,10 @@ func (v *Verifier) lastCommittedHash() string {
 	return v.LastCommittedBlockHash
 }
 
-func (v *Verifier) lastConfigBlockNum() uint64 {
+func (v *Verifier) lastConfigBlockNum(block *common.Block) uint64 {
+	if isConfigBlock(block) {
+		return block.Header.Number
+	}
 	v.lock.RLock()
 	defer v.lock.RUnlock()
 	return v.LastConfigBlockNum
@@ -249,7 +252,11 @@ func (v *Verifier) verifyBlockDataAndMetadata(block *common.Block, metadata []by
 	}
 
 	// Verify last config
-	lastConfig := v.lastConfigBlockNum()
+	lastConfig := v.lastConfigBlockNum(block)
+	if isConfigBlock(block) {
+		lastConfig = block.Header.Number
+	}
+
 	if ordererMetadataFromSignature.LastConfig == nil {
 		return nil, errors.Errorf("last config is nil")
 	}

@@ -285,3 +285,27 @@ func (conCert ConsenterCertificate) IsConsenterOfChannel(configBlock *common.Blo
 	}
 	return cluster.ErrNotInChannel
 }
+
+func isConfigBlock(block *common.Block) bool {
+	if block.Data == nil || len(block.Data.Data) != 1 {
+		return false
+	}
+	env, err := utils2.UnmarshalEnvelope(block.Data.Data[0])
+	if err != nil {
+		return false
+	}
+	payload, err := utils2.GetPayload(env)
+	if err != nil {
+		return false
+	}
+
+	if payload.Header == nil {
+		return false
+	}
+
+	hdr, err := utils2.UnmarshalChannelHeader(payload.Header.ChannelHeader)
+	if err != nil {
+		return false
+	}
+	return common.HeaderType(hdr.Type) == common.HeaderType_CONFIG
+}
