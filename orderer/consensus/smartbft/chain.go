@@ -207,7 +207,11 @@ func bftSmartConsensusBuild(
 			ID:               c.Config.SelfID,
 			Logger:           flogging.MustGetLogger("orderer.consensus.smartbft.signer").With(channelDecorator),
 			SignerSerializer: c.SignerSerializer,
-			LastConfigBlockNum: func() uint64 {
+			LastConfigBlockNum: func(block *common.Block) uint64 {
+				if isConfigBlock(block) {
+					return block.Header.Number
+				}
+
 				return c.RuntimeConfig.Load().(RuntimeConfig).LastConfigBlock.Header.Number
 			},
 		},
@@ -452,13 +456,20 @@ func (c *BFTChain) blockToProposalWithoutSignaturesInMetadata(block *common.Bloc
 		signatureMetadata.Signatures = nil
 		blockClone.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(signatureMetadata)
 	}
-	return types.Proposal{
-		Header: blockClone.Header.Hash(),
+	prop := types.Proposal{
+		Header: blockClone.Header.Bytes(),
 		Payload: (&ByteBufferTuple{
 			A: utils.MarshalOrPanic(blockClone.Data),
 			B: utils.MarshalOrPanic(blockClone.Metadata),
 		}).ToBytes(),
+		VerificationSequence: int64(c.verifier.VerificationSequence()),
 	}
+
+	if isConfigBlock(block) {
+		prop.VerificationSequence--
+	}
+
+	return prop
 }
 
 func (c *BFTChain) blockToDecision(block *common.Block) *types.Decision {
@@ -485,7 +496,7 @@ func (c *BFTChain) blockToDecision(block *common.Block) *types.Decision {
 	id2Identities := rtc.ID2Identities
 	// if this block is a config block (and not genesis block)
 	// then use the identities from the previous config block
-	if utils.IsConfigBlock(block) && block.Header.Number != 0 {
+	if isConfigBlock(block) && block.Header.Number != 0 {
 		prev := PreviousConfigBlockFromLedgerOrPanic(c.support, c.Logger)
 		id2Identities = c.blockToID2Identities(prev)
 	}

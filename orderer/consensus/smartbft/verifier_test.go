@@ -7,13 +7,11 @@ SPDX-License-Identifier: Apache-2.0
 package smartbft_test
 
 import (
-	"fmt"
-	"testing"
-
 	"crypto/sha256"
 	"encoding/hex"
-
+	"fmt"
 	"sync/atomic"
+	"testing"
 
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
@@ -354,7 +352,7 @@ func TestVerifyConsenterSig(t *testing.T) {
 			ss.On("Serialize", mock.Anything).Return([]byte{0, 2, 4, 6}, nil)
 
 			s := &smartbft.Signer{
-				LastConfigBlockNum: func() uint64 {
+				LastConfigBlockNum: func(_ *common.Block) uint64 {
 					return lastConfigBlock.Header.Number
 				},
 				SignerSerializer: ss,

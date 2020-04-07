@@ -9,15 +9,13 @@ package smartbft
 import (
 	"bytes"
 	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/pem"
-	"time"
-
-	"encoding/base64"
 	"fmt"
-
-	"crypto/x509"
 	"sort"
+	"time"
 
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
@@ -424,4 +422,28 @@ func configBlockToBFTConfig(selfID uint64, block *common.Block) (types.Configura
 	}
 
 	return configFromMetadataOptions(selfID, consensusMD.Options)
+}
+
+func isConfigBlock(block *common.Block) bool {
+	if block.Data == nil || len(block.Data.Data) != 1 {
+		return false
+	}
+	env, err := utils2.UnmarshalEnvelope(block.Data.Data[0])
+	if err != nil {
+		return false
+	}
+	payload, err := utils2.GetPayload(env)
+	if err != nil {
+		return false
+	}
+
+	if payload.Header == nil {
+		return false
+	}
+
+	hdr, err := utils2.UnmarshalChannelHeader(payload.Header.ChannelHeader)
+	if err != nil {
+		return false
+	}
+	return common.HeaderType(hdr.Type) == common.HeaderType_CONFIG
 }
