@@ -22,7 +22,7 @@ import (
 
 	"github.com/tedsuo/ifrit/grouper"
 
-	"github.com/fsouza/go-dockerclient"
+	docker "github.com/fsouza/go-dockerclient"
 	"github.com/hyperledger/fabric/integration/nwo"
 	"github.com/hyperledger/fabric/integration/nwo/commands"
 	"github.com/hyperledger/fabric/protos/common"
@@ -509,7 +509,36 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			By("Make sure the peers get the config blocks, again")
 			waitForBlockReceptionByPeer(peer, network, "testchannel1", 4)
 
+			By("Killing the leader orderer")
+			ordererProcesses[0].Signal(syscall.SIGTERM)
+			Eventually(ordererProcesses[0].Wait(), network.EventuallyTimeout).Should(Receive())
 
+			By("Waiting for view change to occur")
+			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout*2, time.Second).Should(gbytes.Say("Changing to leader role"))
+			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout*2, time.Second).Should(gbytes.Say("Changing to follower role"))
+			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout*2, time.Second).Should(gbytes.Say("Changing to follower role"))
+			Eventually(ordererRunners[4].Err(), network.EventuallyTimeout*2, time.Second).Should(gbytes.Say("Changing to follower role"))
+
+			By("Bringing the previous leader back up")
+			runner = network.OrdererRunner(orderer)
+			ordererRunners[0] = runner
+			proc = ifrit.Invoke(runner)
+			ordererProcesses[0] = proc
+			Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
+
+			By("Making sure previous leader abdicates")
+			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Changing to follower role, current view: 1, current leader: 2"))
+
+			By("Making sure previous leader sees the new leader")
+			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 2"))
+
+			By("Ensure all nodes are in sync")
+			assertBlockReception(map[string]int{
+				"systemchannel": 2,
+				"testchannel1":  4,
+			}, network.Orderers, peer, network)
+
+			orderer = network.Orderers[1]
 
 			By("Transacting on testchannel1, again")
 			invokeQuery(network, peer, orderer, channel, 70)
@@ -558,7 +587,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 
 			By("Ensuring the existing nodes got the block")
 			assertBlockReception(map[string]int{
-				"testchannel1":  9,
+				"testchannel1": 9,
 			}, network.Orderers[:4], peer, network)
 		})
 
@@ -731,7 +760,6 @@ func waitForBlockReception(o *nwo.Orderer, submitter *nwo.Peer, network *nwo.Net
 		return sessErr
 	}, network.EventuallyTimeout, time.Second).Should(BeEmpty())
 }
-
 
 func waitForBlockReceptionByPeer(peer *nwo.Peer, network *nwo.Network, channelName string, blockSeq uint64) {
 	Eventually(func() bool {

@@ -8,13 +8,9 @@ package smartbft
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/hex"
 	"sync"
-
-	"go.uber.org/zap/zapcore"
-
-	"encoding/base64"
-
 	"sync/atomic"
 
 	"github.com/SmartBFT-Go/consensus/pkg/types"
@@ -27,6 +23,7 @@ import (
 	"github.com/hyperledger/fabric/protos/msp"
 	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/pkg/errors"
+	"go.uber.org/zap/zapcore"
 )
 
 //go:generate mockery -dir . -name Sequencer -case underscore -output mocks
@@ -237,6 +234,11 @@ func (v *Verifier) verifyBlockDataAndMetadata(block *common.Block, metadata []by
 
 	rtc := v.RuntimeConfig.Load().(RuntimeConfig)
 	lastConfig := rtc.LastConfigBlock.Header.Number
+
+	if isConfigBlock(block) {
+		lastConfig = block.Header.Number
+	}
+
 	// Verify last config
 	if ordererMetadataFromSignature.LastConfig == nil {
 		return nil, errors.Errorf("last config is nil")
