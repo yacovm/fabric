@@ -144,6 +144,31 @@ func NewRegistrar(
 	return r
 }
 
+func (r *Registrar) ProposeConfigUpdate(channel string, configtx *cb.Envelope) (*cb.ConfigEnvelope, error) {
+	r.lock.RLock()
+	cs, exists := r.chains[channel]
+	r.lock.RUnlock()
+
+	if !exists {
+		return nil, errors.Errorf("channel %s doesn't exist", channel)
+	}
+
+	return cs.ProposeConfigUpdate(configtx)
+}
+
+func (r *Registrar) ApplyFilters(channel string, env *cb.Envelope) error {
+	r.lock.RLock()
+	cs, exists := r.chains[channel]
+	r.lock.RUnlock()
+
+	if !exists {
+		// This is for the system channel
+		return msgprocessor.CreateSystemChannelFilters(r, r.systemChannel, r.config).Apply(env)
+	}
+
+	return msgprocessor.CreateStandardChannelFilters(cs, r.config).Apply(env)
+}
+
 func (r *Registrar) Initialize(consenters map[string]consensus.Consenter) {
 	r.consenters = consenters
 	existingChains := r.ledgerFactory.ChainIDs()

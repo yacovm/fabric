@@ -83,6 +83,7 @@ func New(
 	logger.Infof("XXX WAL Directory is %s", walConfig.WALDir)
 
 	consenter := &Consenter{
+		Registrar:        r,
 		GetPolicyManager: pmr,
 		Conf:             conf,
 		ClusterDialer:    clusterDialer,
@@ -171,7 +172,15 @@ func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *co
 	}
 	c.Logger.Debugf("SmartBFT-Go config: %v", config)
 
-	chain, err := NewChain(selfID, config, path.Join(c.WALBaseDir, support.ChainID()), puller, c.Comm, c.SignerSerializer, c.GetPolicyManager(support.ChainID()), support, c.Metrics)
+	configValidator := &ConfigBlockValidator{
+		ChannelConfigTemplator: c.Registrar,
+		ValidatingChannel:      support.ChainID(),
+		Filters:                c.Registrar,
+		ConfigUpdateProposer:   c.Registrar,
+		Logger:                 c.Logger,
+	}
+
+	chain, err := NewChain(configValidator, selfID, config, path.Join(c.WALBaseDir, support.ChainID()), puller, c.Comm, c.SignerSerializer, c.GetPolicyManager(support.ChainID()), support, c.Metrics)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed creating a new BFTChain")
 	}
