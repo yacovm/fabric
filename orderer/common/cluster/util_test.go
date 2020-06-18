@@ -177,6 +177,7 @@ func TestVerifyBlockSignature(t *testing.T) {
 	verifier := &mocks.BlockVerifier{}
 	var nilConfigEnvelope *common.ConfigEnvelope
 	verifier.On("VerifyBlockSignature", mock.Anything, nilConfigEnvelope).Return(nil)
+	verifier.On("Id2Identity", mock.Anything).Return(nil)
 
 	block := createBlockChain(3, 3)[0]
 
@@ -413,9 +414,9 @@ func TestVerifyBlocks(t *testing.T) {
 
 				assignHashes(blockSequence)
 
-				sigSet1, err = cluster.SignatureSetFromBlock(blockSequence[len(blockSequence)/4])
+				sigSet1, err = cluster.SignatureSetFromBlock(blockSequence[len(blockSequence)/4], nil)
 				assert.NoError(t, err)
-				sigSet2, err = cluster.SignatureSetFromBlock(blockSequence[len(blockSequence)/2])
+				sigSet2, err = cluster.SignatureSetFromBlock(blockSequence[len(blockSequence)/2], nil)
 				assert.NoError(t, err)
 
 				return blockSequence
@@ -444,10 +445,10 @@ func TestVerifyBlocks(t *testing.T) {
 
 				assignHashes(blockSequence)
 
-				sigSet1, err = cluster.SignatureSetFromBlock(blockSequence[len(blockSequence)/4])
+				sigSet1, err = cluster.SignatureSetFromBlock(blockSequence[len(blockSequence)/4], nil)
 				assert.NoError(t, err)
 
-				sigSet2, err = cluster.SignatureSetFromBlock(blockSequence[len(blockSequence)-1])
+				sigSet2, err = cluster.SignatureSetFromBlock(blockSequence[len(blockSequence)-1], nil)
 				assert.NoError(t, err)
 
 				return blockSequence
@@ -477,13 +478,14 @@ func TestVerifyBlocks(t *testing.T) {
 				sequenceSignatures = &seqSigs
 				var err error
 				for i := 0; i < len(blockSequence); i++ {
-					(*sequenceSignatures)[i], err = cluster.SignatureSetFromBlock(blockSequence[i])
+					(*sequenceSignatures)[i], err = cluster.SignatureSetFromBlock(blockSequence[i], nil)
 					assert.NoError(t, err)
 				}
 				return blockSequence
 			},
 			configureVerifier: func(verifier *mocks.BlockVerifier) {
 				verifier.Mock = mock.Mock{}
+				verifier.On("Id2Identity", mock.Anything).Return(nil)
 				confEnv1 := &common.ConfigEnvelope{}
 				proto.Unmarshal(utils.MarshalOrPanic(configEnvelope1), confEnv1)
 
@@ -501,6 +503,7 @@ func TestVerifyBlocks(t *testing.T) {
 			blockchain := createBlockChain(50, 100)
 			blockchain = testCase.mutateBlockSequence(blockchain)
 			verifier := &mocks.BlockVerifier{}
+			verifier.On("Id2Identity", mock.Anything).Return(nil)
 			if testCase.configureVerifier != nil {
 				testCase.configureVerifier(verifier)
 			}
@@ -975,6 +978,7 @@ func TestVerificationRegistry(t *testing.T) {
 	defer flogging.Reset()
 
 	verifier := &mocks.BlockVerifier{}
+	verifier.On("Id2Identity", mock.Anything).Return(nil)
 
 	for _, testCase := range []struct {
 		description           string

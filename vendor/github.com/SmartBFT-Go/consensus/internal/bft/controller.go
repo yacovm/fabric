@@ -570,6 +570,9 @@ func (c *Controller) MaybePruneRevokedRequests() {
 	c.Logger.Infof("Verification sequence changed: %d --> %d", oldVerSqn, newVerSqn)
 	c.RequestPool.Prune(func(req []byte) error {
 		_, err := c.Verifier.VerifyRequest(req)
+		if err != nil {
+			c.Logger.Warnf("Pruning request of %d bytes: %v", len(req), err)
+		}
 		return err
 	})
 }

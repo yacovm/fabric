@@ -16,7 +16,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -591,6 +590,163 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			}, network.Orderers[:4], peer, network)
 		})
 
+		It("smartbft iterated addition and iterated removal", func() {
+			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, StartPort(), components)
+			network.GenerateConfigTree()
+			network.Bootstrap()
+
+			var ordererRunners []*ginkgomon.Runner
+			for _, orderer := range network.Orderers {
+				runner := network.OrdererRunner(orderer)
+				runner.Command.Env = append(runner.Command.Env, "FABRIC_LOGGING_SPEC=orderer.consensus.smartbft=debug:policies.ImplicitOrderer=debug")
+				ordererRunners = append(ordererRunners, runner)
+				proc := ifrit.Invoke(runner)
+				ordererProcesses = append(ordererProcesses, proc)
+				Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
+			}
+
+			peerRunner := network.PeerGroupRunner()
+			peerProcesses = ifrit.Invoke(peerRunner)
+
+			Eventually(peerProcesses.Ready(), network.EventuallyTimeout).Should(BeClosed())
+
+			peer := network.Peer("Org1", "peer0")
+
+			assertBlockReception(map[string]int{"systemchannel": 0}, network.Orderers, peer, network)
+			By("check block validation policy on sys channel")
+			assertBlockValidationPolicy(network, peer, network.Orderers[0], "systemchannel", common.Policy_IMPLICIT_ORDERER)
+
+			By("Waiting for followers to see the leader")
+			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+
+			channel := "testchannel1"
+
+			orderer := network.Orderers[0]
+			network.CreateAndJoinChannel(orderer, channel)
+
+			assertBlockReception(map[string]int{"systemchannel": 1, channel: 0}, network.Orderers, peer, network)
+
+			By("check block validation policy on app channel")
+			assertBlockValidationPolicy(network, peer, network.Orderers[0], channel, common.Policy_IMPLICIT_ORDERER)
+
+			for i := 0; i < 6; i++ {
+				fmt.Fprintf(GinkgoWriter, "adding orderer %d", i+5)
+
+				name := fmt.Sprintf("orderer%d", i+5)
+
+				newOrderer := &nwo.Orderer{
+					Name:         name,
+					Organization: "OrdererOrg",
+				}
+				network.Orderers = append(network.Orderers, newOrderer)
+
+				ports := nwo.Ports{}
+				for _, portName := range nwo.OrdererPortNames() {
+					ports[portName] = network.ReservePort()
+				}
+				network.PortsByOrdererID[newOrderer.ID()] = ports
+
+				network.GenerateCryptoConfig()
+				network.GenerateOrdererConfig(newOrderer)
+
+				sess, err := network.Cryptogen(commands.Extend{
+					Config: network.CryptoConfigPath(),
+					Input:  network.CryptoPath(),
+				})
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(sess, network.EventuallyTimeout).Should(gexec.Exit(0))
+
+				ordererCertificatePath := filepath.Join(network.OrdererLocalTLSDir(newOrderer), "server.crt")
+				ordererCertificate, err := ioutil.ReadFile(ordererCertificatePath)
+				Expect(err).NotTo(HaveOccurred())
+
+				ordererIdentity, err := ioutil.ReadFile(network.OrdererCert(newOrderer))
+				Expect(err).NotTo(HaveOccurred())
+
+				for _, channel := range []string{"systemchannel", "testchannel1"} {
+					nwo.UpdateSmartBFTMetadata(network, peer, orderer, channel, func(md *smartbft.ConfigMetadata) {
+						md.Consenters = append(md.Consenters, &smartbft.Consenter{
+							MspId:       "OrdererMSP",
+							ConsenterId: uint64(5 + i),
+							Identity: utils.MarshalOrPanic(&msp.SerializedIdentity{
+								Mspid:   "OrdererMSP",
+								IdBytes: ordererIdentity,
+							}),
+							ServerTlsCert: ordererCertificate,
+							ClientTlsCert: ordererCertificate,
+							Host:          "127.0.0.1",
+							Port:          uint32(network.OrdererPort(newOrderer, nwo.ClusterPort)),
+						})
+					})
+				}
+
+				assertBlockReception(map[string]int{
+					"systemchannel": 2 + i,
+					"testchannel1":  1 + i,
+				}, network.Orderers[:4], peer, network)
+
+				By("Planting last config block in the orderer's file system")
+				configBlock := nwo.GetConfigBlock(network, peer, orderer, "systemchannel")
+				err = ioutil.WriteFile(filepath.Join(testDir, "systemchannel_block.pb"), utils.MarshalOrPanic(configBlock), 0644)
+				Expect(err).NotTo(HaveOccurred())
+
+				fmt.Fprintf(GinkgoWriter, "Launching orderer %d", 5+i)
+				runner := network.OrdererRunner(newOrderer)
+				runner.Command.Env = append(runner.Command.Env, "FABRIC_LOGGING_SPEC=orderer.consensus.smartbft=debug:policies.ImplicitOrderer=debug")
+				ordererRunners = append(ordererRunners, runner)
+				proc := ifrit.Invoke(runner)
+				ordererRunners = append(ordererRunners, runner)
+				ordererProcesses = append(ordererProcesses, proc)
+				Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
+
+				By("Waiting for the added orderer to see the leader")
+				Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+
+				By("Ensure all orderers are in sync")
+				assertBlockReception(map[string]int{
+					"systemchannel": 2 + i,
+					"testchannel1":  1 + i,
+				}, network.Orderers, peer, network)
+
+				By(fmt.Sprintf("Make sure the peers are up to date with the orderers and have height of %d", 1+i))
+				waitForBlockReceptionByPeer(peer, network, "testchannel1", uint64(1+i))
+
+			} // for loop that adds orderers
+
+			lastOrdererRunner := ordererRunners[len(ordererRunners)-1]
+			lastOrderer := network.Orderers[len(network.Orderers)-1]
+			// Put the endpoint of the last 4 orderers instead of the first 4
+			var lastOrdererEndpoints []string
+			for i := 1; i <= 4; i++ {
+				o := network.Orderers[len(network.Orderers)-i]
+				ordererEndpoint := fmt.Sprintf("127.0.0.1:%d", network.OrdererPort(o, nwo.ListenPort))
+				lastOrdererEndpoints = append(lastOrdererEndpoints, ordererEndpoint)
+			}
+
+			By(fmt.Sprintf("Updating the addresses of the orderers to be %s", lastOrdererEndpoints))
+			nwo.UpdateOrdererEndpoints(network, peer, lastOrderer, channel, lastOrdererEndpoints...)
+
+			By("Shrinking the cluster back")
+			for i := 0; i < 6; i++ {
+				By(fmt.Sprintf("Waiting for the added orderer to see the leader %d", i+1))
+				Eventually(lastOrdererRunner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say(fmt.Sprintf("Message from %d", 1+i)))
+				By(fmt.Sprintf("Removing the added node from the application channel (block %d)", 8+i))
+				nwo.UpdateSmartBFTMetadata(network, peer, lastOrderer, channel, func(md *smartbft.ConfigMetadata) {
+					md.Consenters = md.Consenters[1:]
+				})
+
+				assertBlockReception(map[string]int{
+					"systemchannel": 7,
+					"testchannel1":  8 + i,
+				}, network.Orderers[i+1:], peer, network)
+
+				By(fmt.Sprintf("Make sure the peers are up to date with the orderers and have height of %d", 8+i))
+				waitForBlockReceptionByPeer(peer, network, channel, uint64(8+i))
+			}
+		})
+
 		It("smartbft multiple nodes view change", func() {
 			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, StartPort(), components)
 			network.GenerateConfigTree()
@@ -711,31 +867,17 @@ func queryExpect(network *nwo.Network, peer *nwo.Peer, channel string, key strin
 }
 
 // assertBlockReception asserts that the given orderers have expected heights for the given channel--> height mapping
-func assertBlockReception(expectedHeightsPerChannel map[string]int, orderers []*nwo.Orderer, p *nwo.Peer, n *nwo.Network) {
+func assertBlockReception(expectedSequencesPerChannel map[string]int, orderers []*nwo.Orderer, p *nwo.Peer, n *nwo.Network) {
+	defer GinkgoRecover()
 	assertReception := func(channelName string, blockSeq int) {
-		var wg sync.WaitGroup
-		wg.Add(len(orderers))
 		for _, orderer := range orderers {
-			go func(orderer *nwo.Orderer) {
-				defer GinkgoRecover()
-				defer wg.Done()
-				waitForBlockReception(orderer, p, n, channelName, blockSeq)
-			}(orderer)
+			waitForBlockReception(orderer, p, n, channelName, blockSeq)
 		}
-		wg.Wait()
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(len(expectedHeightsPerChannel))
-
-	for channelName, blockSeq := range expectedHeightsPerChannel {
-		go func(channelName string, blockSeq int) {
-			defer GinkgoRecover()
-			defer wg.Done()
-			assertReception(channelName, blockSeq)
-		}(channelName, blockSeq)
+	for channelName, blockSeq := range expectedSequencesPerChannel {
+		assertReception(channelName, blockSeq)
 	}
-	wg.Wait()
 }
 
 func waitForBlockReception(o *nwo.Orderer, submitter *nwo.Peer, network *nwo.Network, channelName string, blockSeq int) {

@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package multichannel
 
 import (
+	"github.com/gogo/protobuf/proto"
 	"github.com/hyperledger/fabric/common/channelconfig"
 	"github.com/hyperledger/fabric/common/crypto"
 	"github.com/hyperledger/fabric/common/ledger/blockledger"
@@ -15,6 +16,8 @@ import (
 	"github.com/hyperledger/fabric/orderer/common/msgprocessor"
 	"github.com/hyperledger/fabric/orderer/consensus"
 	cb "github.com/hyperledger/fabric/protos/common"
+	"github.com/hyperledger/fabric/protos/orderer"
+	"github.com/hyperledger/fabric/protos/orderer/smartbft"
 	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/pkg/errors"
 )
@@ -182,4 +185,30 @@ func (cs *ChainSupport) VerifyBlockSignature(sd []*cb.SignedData, envelope *cb.C
 		return errors.Wrap(err, "block verification failed")
 	}
 	return nil
+}
+
+func (cs *ChainSupport) Id2Identity(envelope *cb.ConfigEnvelope) map[uint64][]byte {
+	consensusMD := cs.SharedConfig().ConsensusMetadata()
+	if envelope != nil {
+		consensusMD = envelope.Config.ChannelGroup.Groups[channelconfig.OrdererGroupKey].Values[channelconfig.ConsensusTypeKey].Value
+		ct := &orderer.ConsensusType{}
+		err := proto.Unmarshal(consensusMD, ct)
+		if err != nil {
+			logger.Panicf("Failed unmarshaling ConsensusType from consensusType: %v", err)
+		}
+		consensusMD = ct.Metadata
+	}
+
+	m := &smartbft.ConfigMetadata{}
+	err := proto.Unmarshal(consensusMD, m)
+	if err != nil {
+		logger.Panicf("Failed unmarshaling ConfigMetadata from metadata: %v", err)
+	}
+
+	res := make(map[uint64][]byte)
+	for _, consenter := range m.Consenters {
+		res[consenter.ConsenterId] = consenter.Identity
+	}
+
+	return res
 }

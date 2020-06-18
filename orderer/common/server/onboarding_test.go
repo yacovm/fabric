@@ -256,6 +256,7 @@ func TestOnboardingChannelUnavailable(t *testing.T) {
 	}
 
 	verifier := &mocks.BlockVerifier{}
+	verifier.On("Id2Identity", mock.Anything).Return(nil)
 	verifier.On("VerifyBlockSignature", mock.Anything, mock.Anything).Return(nil)
 	vr := &mocks.VerifierRetriever{}
 	vr.On("RetrieveVerifier", mock.Anything).Return(verifier)
@@ -683,6 +684,7 @@ func TestReplicate(t *testing.T) {
 			lf.On("Close")
 
 			verifier := &mocks.BlockVerifier{}
+			verifier.On("Id2Identity", mock.Anything).Return(nil)
 			verifier.On("VerifyBlockSignature", mock.Anything, mock.Anything).Return(nil)
 			vr := &mocks.VerifierRetriever{}
 			vr.On("RetrieveVerifier", mock.Anything).Return(verifier)

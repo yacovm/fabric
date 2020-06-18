@@ -7,9 +7,10 @@ SPDX-License-Identifier: Apache-2.0
 package deliverclient
 
 import (
-	"github.com/hyperledger/fabric/core/deliverservice/blocksprovider"
 	"sync"
 	"time"
+
+	"github.com/hyperledger/fabric/core/deliverservice/blocksprovider"
 
 	"github.com/pkg/errors"
 
@@ -174,13 +175,13 @@ func (hr *bftHeaderReceiver) LastBlockNum() (uint64, time.Time, error) {
 		err := hr.msgCryptoVerifier.VerifyHeader(hr.chainID, hr.lastHeader)
 		if err != nil {
 			hr.lastHeaderOK = false
-			bftLogger.Warningf("[%s] Last block verification failed: %s", hr.chainID, err)
+			bftLogger.Warningf("[%s][%s] Last block verification failed: %s", hr.chainID, hr.endpoint, err)
 			return hr.lastHeader.Header.Number, hr.lastHeaderTime, errors.Wrapf(err, "Last block verification failed")
 		}
 	}
 
 	if !hr.lastHeaderOK {
-		bftLogger.Debugf("[%s] Last block verification failed on previous invocation, cached result", hr.chainID)
+		bftLogger.Debugf("[%s][%s] Last block verification failed on previous invocation, cached result", hr.chainID, hr.endpoint)
 		return hr.lastHeader.Header.Number, hr.lastHeaderTime, errors.New("Last block verification failed")
 	}
 

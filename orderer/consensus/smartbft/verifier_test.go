@@ -189,32 +189,15 @@ func TestVerifyConsenterSig(t *testing.T) {
 			},
 		},
 		{
-			description:        "signature header doesn't match proposal",
-			expectedErr:        "identity in signature header does not match expected identity",
+			description:        "nonce different than what was used for signing",
+			expectedErr:        "bad signature",
 			lastBlock:          lastBlock,
 			lastConfigBlockNum: lastConfigBlock.Header.Number,
 			id2Identity:        map[uint64][]byte{3: {0, 2, 4, 6}},
 			signatureMutator: func(signature types.Signature) types.Signature {
 				sig := smartbft.Signature{}
 				sig.Unmarshal(signature.Msg)
-				sig.SignatureHeader = nil
-				return types.Signature{
-					ID:    signature.ID,
-					Value: signature.Value,
-					Msg:   sig.Marshal(),
-				}
-			},
-		},
-		{
-			description:        "signature header is malformed",
-			expectedErr:        "malformed signature header: proto: common.SignatureHeader: illegal tag 0 (wire type 1)",
-			lastBlock:          lastBlock,
-			lastConfigBlockNum: lastConfigBlock.Header.Number,
-			id2Identity:        map[uint64][]byte{3: {0, 2, 4, 6}},
-			signatureMutator: func(signature types.Signature) types.Signature {
-				sig := smartbft.Signature{}
-				sig.Unmarshal(signature.Msg)
-				sig.SignatureHeader = []byte{1, 2, 3}
+				sig.Nonce = nil
 				return types.Signature{
 					ID:    signature.ID,
 					Value: signature.Value,
