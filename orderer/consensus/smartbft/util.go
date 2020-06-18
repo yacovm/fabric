@@ -21,6 +21,7 @@ import (
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/channelconfig"
+	"github.com/hyperledger/fabric/common/configtx"
 	"github.com/hyperledger/fabric/common/crypto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
@@ -169,6 +170,7 @@ func (ri *RequestInspector) RequestID(rawReq []byte) types.RequestInfo {
 type request struct {
 	sigHdr   *common.SignatureHeader
 	envelope *common.Envelope
+	chHdr    *common.ChannelHeader
 }
 
 func (ri *RequestInspector) requestIDFromSigHeader(sigHdr *common.SignatureHeader) (types.RequestInfo, error) {
@@ -211,10 +213,39 @@ func (ri *RequestInspector) unwrapReq(req []byte) (*request, error) {
 		return nil, err
 	}
 
+	if len(payload.Header.ChannelHeader) == 0 {
+		return nil, errors.New("no channel header in payload")
+	}
+
+	chdr, err := utils2.UnmarshalChannelHeader(payload.Header.ChannelHeader)
+	if err != nil {
+		return nil, errors.WithMessage(err, "error unmarshaling channel header")
+	}
+
 	return &request{
+		chHdr:    chdr,
 		sigHdr:   sigHdr,
 		envelope: envelope,
 	}, nil
+}
+
+// ConfigurationEnvelop extract configuration envelop
+func ConfigurationEnvelop(configBlock *common.Block) (*common.ConfigEnvelope, error) {
+	envelopeConfig, err := utils2.ExtractEnvelope(configBlock, 0)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to extract envelop from block")
+	}
+
+	payload, err := utils2.UnmarshalPayload(envelopeConfig.Payload)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal envelop payload")
+	}
+
+	configEnvelope, err := configtx.UnmarshalConfigEnvelope(payload.Data)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal configuration payload")
+	}
+	return configEnvelope, nil
 }
 
 // ConsenterCertificate denotes a TLS certificate of a consenter
