@@ -18,6 +18,7 @@ import (
 )
 
 type Signature struct {
+	Nonce                []byte
 	SignatureHeader      []byte
 	BlockHeader          []byte
 	OrdererBlockMetadata []byte

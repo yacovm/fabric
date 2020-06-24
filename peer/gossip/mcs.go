@@ -38,9 +38,14 @@ var mcsLogger = flogging.MustGetLogger("peer.gossip.mcs")
 // A similar mechanism needs to be in place to update the local MSP, as well.
 // This implementation assumes that these mechanisms are all in place and working.
 type MSPMessageCryptoService struct {
+	id2IdentitiesFetcher       Id2IdentitiesFetcher
 	channelPolicyManagerGetter policies.ChannelPolicyManagerGetter
 	localSigner                crypto.LocalSigner
 	deserializer               mgmt.DeserializersManager
+}
+
+type Id2IdentitiesFetcher interface {
+	Id2Identities(cid string) map[uint64][]byte
 }
 
 // NewMCS creates a new instance of MSPMessageCryptoService
@@ -49,8 +54,14 @@ type MSPMessageCryptoService struct {
 // 1. a policies.ChannelPolicyManagerGetter that gives access to the policy manager of a given channel via the Manager method.
 // 2. an instance of crypto.LocalSigner
 // 3. an identity deserializer manager
-func NewMCS(channelPolicyManagerGetter policies.ChannelPolicyManagerGetter, localSigner crypto.LocalSigner, deserializer mgmt.DeserializersManager) *MSPMessageCryptoService {
-	return &MSPMessageCryptoService{channelPolicyManagerGetter: channelPolicyManagerGetter, localSigner: localSigner, deserializer: deserializer}
+func NewMCS(channelPolicyManagerGetter policies.ChannelPolicyManagerGetter,
+	id2IdentitiesFetcher Id2IdentitiesFetcher,
+	localSigner crypto.LocalSigner,
+	deserializer mgmt.DeserializersManager) *MSPMessageCryptoService {
+	return &MSPMessageCryptoService{channelPolicyManagerGetter: channelPolicyManagerGetter,
+		id2IdentitiesFetcher: id2IdentitiesFetcher,
+		localSigner:          localSigner,
+		deserializer:         deserializer}
 }
 
 // ValidateIdentity validates the identity of a remote peer.
@@ -166,9 +177,19 @@ func (s *MSPMessageCryptoService) verifyHeaderWithMetadata(channelID string, hea
 	// ok is true if it was the policy requested, or false if it is the default policy
 	mcsLogger.Debugf("Got block validation policy for channel [%s] with flag [%t]", channelID, ok)
 
+	id2identities := s.id2IdentitiesFetcher.Id2Identities(channelID)
+
 	// - Prepare SignedData
 	signatureSet := []*pcommon.SignedData{}
 	for _, metadataSignature := range metadata.Signatures {
+		identity, ok := id2identities[metadataSignature.SignerId]
+		if !ok {
+			return fmt.Errorf("identity for id %d was not found", metadataSignature.SignerId)
+		}
+		metadataSignature.SignatureHeader = utils.MarshalOrPanic(&pcommon.SignatureHeader{
+			Nonce:   metadataSignature.Nonce,
+			Creator: identity,
+		})
 		shdr, err := utils.GetSignatureHeader(metadataSignature.SignatureHeader)
 		if err != nil {
 			return fmt.Errorf("Failed unmarshalling signature header for block with id [%d] on channel [%s]: [%s]", header.Number, channelID, err)

@@ -301,6 +301,9 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 
 	var sigs []*common.MetadataSignature
 	var ordererBlockMetadata []byte
+
+	var signers []uint64
+
 	for _, s := range signatures {
 		sig := &Signature{}
 		if err := sig.Unmarshal(s.Msg); err != nil {
@@ -317,9 +320,16 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 		}
 
 		sigs = append(sigs, &common.MetadataSignature{
-			Signature:       s.Value,
-			SignatureHeader: sig.SignatureHeader,
+			Signature: s.Value,
+			// We do not put a signature header when we commit the block.
+			// Instead, we put the nonce and the identifier and at validation
+			// we reconstruct the signature header at runtime.
+			// SignatureHeader: sig.SignatureHeader,
+			Nonce:    sig.Nonce,
+			SignerId: s.ID,
 		})
+
+		signers = append(signers, s.ID)
 	}
 
 	block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(&common.Metadata{
@@ -327,7 +337,17 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 		Signatures: sigs,
 	})
 
-	c.Logger.Debugf("Delivering proposal, writing block %d to the ledger, node id %d", block.Header.Number, c.Config.SelfID)
+	var mdTotalSize int
+	for _, md := range block.Metadata.Metadata {
+		mdTotalSize += len(md)
+	}
+
+	c.Logger.Infof("Delivering proposal, writing block %d with %d transactions and metadata of total size %d with signatures from %v to the ledger, node id %d",
+		block.Header.Number,
+		len(block.Data.Data),
+		mdTotalSize,
+		signers,
+		c.Config.SelfID)
 	c.Metrics.CommittedBlockNumber.Set(float64(block.Header.Number)) // report the committed block number
 	c.reportIsLeader(&proposal)                                      // report the leader
 	if utils.IsConfigBlock(block) {
@@ -499,27 +519,11 @@ func (c *BFTChain) blockToDecision(block *common.Block) *types.Decision {
 
 	proposal.Metadata = ordererMDFromBlock.ConsenterMetadata
 
-	rtc := c.RuntimeConfig.Load().(RuntimeConfig)
-	id2Identities := rtc.ID2Identities
-	// if this block is a config block (and not genesis block)
-	// then use the identities from the previous config block
-	if isConfigBlock(block) && block.Header.Number != 0 {
-		prev := PreviousConfigBlockFromLedgerOrPanic(c.support, c.Logger)
-		id2Identities = c.blockToID2Identities(prev)
-	}
-
 	var signatures []types.Signature
 	for _, sigMD := range signatureMetadata.Signatures {
-		sigHdr := &common.SignatureHeader{}
-		if err := proto.Unmarshal(sigMD.SignatureHeader, sigHdr); err != nil {
-			c.Logger.Panicf("Failed unmarshaling signature header: %v", err)
-		}
-		id, found := id2Identities.IdentityToID(sigHdr.Creator)
-		if !found {
-			c.Logger.Panicf("Didn't find identity corresponding to %s", string(sigHdr.Creator))
-		}
+		id := sigMD.SignerId
 		sig := &Signature{
-			SignatureHeader:      sigMD.SignatureHeader,
+			Nonce:                sigMD.Nonce,
 			BlockHeader:          block.Header.Bytes(),
 			OrdererBlockMetadata: signatureMetadata.Value,
 		}

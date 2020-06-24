@@ -40,9 +40,13 @@ func (s *Signer) SignProposal(proposal types.Proposal) *types.Signature {
 	if err != nil {
 		s.Logger.Panicf("Tried to sign bad proposal: %v", err)
 	}
+
+	nonce := randomNonceOrPanic()
+
 	sig := Signature{
+		Nonce:           nonce,
 		BlockHeader:     block.Header.Bytes(),
-		SignatureHeader: utils.MarshalOrPanic(s.newSignatureHeaderOrPanic()),
+		SignatureHeader: utils.MarshalOrPanic(s.newSignatureHeaderOrPanic(nonce)),
 		OrdererBlockMetadata: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
 			LastConfig:        &common.LastConfig{Index: uint64(s.LastConfigBlockNum(block))},
 			ConsenterMetadata: proposal.Metadata,
@@ -50,6 +54,10 @@ func (s *Signer) SignProposal(proposal types.Proposal) *types.Signature {
 	}
 
 	signature := utils.SignOrPanic(s.SignerSerializer, sig.AsBytes())
+
+	// Nil out the signature header after creating the signature
+	sig.SignatureHeader = nil
+
 	return &types.Signature{
 		ID:    s.ID,
 		Value: signature,
@@ -58,12 +66,8 @@ func (s *Signer) SignProposal(proposal types.Proposal) *types.Signature {
 }
 
 // NewSignatureHeader creates a SignatureHeader with the correct signing identity and a valid nonce
-func (s *Signer) newSignatureHeaderOrPanic() *common.SignatureHeader {
+func (s *Signer) newSignatureHeaderOrPanic(nonce []byte) *common.SignatureHeader {
 	creator, err := s.SignerSerializer.Serialize()
-	if err != nil {
-		panic(err)
-	}
-	nonce, err := crypto.GetRandomNonce()
 	if err != nil {
 		panic(err)
 	}
@@ -72,4 +76,12 @@ func (s *Signer) newSignatureHeaderOrPanic() *common.SignatureHeader {
 		Creator: creator,
 		Nonce:   nonce,
 	}
+}
+
+func randomNonceOrPanic() []byte {
+	nonce, err := crypto.GetRandomNonce()
+	if err != nil {
+		panic(err)
+	}
+	return nonce
 }

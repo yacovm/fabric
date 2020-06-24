@@ -138,7 +138,7 @@ func (v *Verifier) VerifyRequest(rawRequest []byte) (types.RequestInfo, error) {
 	return v.verifyRequest(rawRequest, false)
 }
 
-func (v *Verifier) verifyRequest(rawRequest []byte, isolatedReq bool) (types.RequestInfo, error) {
+func (v *Verifier) verifyRequest(rawRequest []byte, noConfigAllowed bool) (types.RequestInfo, error) {
 	req, err := v.ReqInspector.unwrapReq(rawRequest)
 	if err != nil {
 		return types.RequestInfo{}, err
@@ -152,7 +152,7 @@ func (v *Verifier) verifyRequest(rawRequest []byte, isolatedReq bool) (types.Req
 		return types.RequestInfo{}, errors.Wrap(err, "access denied")
 	}
 
-	if !isolatedReq && req.chHdr.Type != int32(common.HeaderType_ENDORSER_TRANSACTION) {
+	if noConfigAllowed && req.chHdr.Type != int32(common.HeaderType_ENDORSER_TRANSACTION) {
 		return types.RequestInfo{}, errors.Errorf("only endorser transactions can be sent with other transactions")
 	}
 
@@ -190,6 +190,12 @@ func (v *Verifier) VerifyConsenterSig(signature types.Signature, prop types.Prop
 		v.Logger.Errorf("Offending signature Value: %s", base64.StdEncoding.EncodeToString(signature.Value))
 		return errors.Wrap(err, "malformed signature format")
 	}
+
+	// Reconstruct the signature header
+	sig.SignatureHeader = utils.MarshalOrPanic(&common.SignatureHeader{
+		Nonce:   sig.Nonce,
+		Creator: identity,
+	})
 
 	if err := v.verifySignatureIsBoundToProposal(sig, identity, prop); err != nil {
 		return err
@@ -298,13 +304,13 @@ func validateTransactions(blockData [][]byte, verifyReq requestVerifier) ([]type
 		validationErr error
 	}
 
-	isolated := len(blockData) == 1
+	noConfigAllowed := len(blockData) > 1
 
 	validations := make(chan txnValidation, len(blockData))
 	for i, payload := range blockData {
 		go func(indexInBlock int, payload []byte) {
 			defer validationFinished.Done()
-			reqInfo, err := verifyReq(payload, isolated)
+			reqInfo, err := verifyReq(payload, noConfigAllowed)
 			validations <- txnValidation{
 				indexInBlock:  indexInBlock,
 				extractedInfo: reqInfo,

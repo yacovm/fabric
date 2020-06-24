@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"sync"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/channelconfig"
 	cc "github.com/hyperledger/fabric/common/config"
 	"github.com/hyperledger/fabric/common/configtx"
@@ -38,6 +39,7 @@ import (
 	"github.com/hyperledger/fabric/msp"
 	mspmgmt "github.com/hyperledger/fabric/msp/mgmt"
 	"github.com/hyperledger/fabric/protos/common"
+	"github.com/hyperledger/fabric/protos/orderer/smartbft"
 	pb "github.com/hyperledger/fabric/protos/peer"
 	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/hyperledger/fabric/token/tms/manager"
@@ -567,6 +569,31 @@ func GetPolicyManager(cid string) policies.Manager {
 	return nil
 }
 
+func SmartBFTId2Identities(cid string) map[uint64][]byte {
+	chains.RLock()
+	defer chains.RUnlock()
+
+	c, ok := chains.list[cid]
+	if !ok {
+		return nil
+	}
+
+	oc, ok := c.cs.OrdererConfig()
+	if !ok {
+		return nil
+	}
+
+	m := &smartbft.ConfigMetadata{}
+	proto.Unmarshal(oc.ConsensusMetadata(), m)
+
+	res := make(map[uint64][]byte)
+	for _, consenter := range m.Consenters {
+		res[consenter.ConsenterId] = consenter.Identity
+	}
+
+	return res
+}
+
 // GetCurrConfigBlock returns the cached config block of the specified chain.
 // Note that this call returns nil if chain cid has not been created.
 func GetCurrConfigBlock(cid string) *common.Block {
@@ -785,6 +812,13 @@ func NewPeerServer(listenAddress string, serverConfig comm.ServerConfig) (*comm.
 	}
 	peerServers = append(peerServers, peerServer)
 	return peerServer, nil
+}
+
+type IdentityFethcer struct {
+}
+
+func (*IdentityFethcer) Id2Identities(cid string) map[uint64][]byte {
+	return SmartBFTId2Identities(cid)
 }
 
 // TODO: Remove CollectionSupport and respective methonds on them.
