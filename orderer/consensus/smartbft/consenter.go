@@ -80,7 +80,7 @@ func New(
 		logger.Panicf("Failed to decode consensus configuration: %s", err)
 	}
 
-	logger.Infof("XXX WAL Directory is %s", walConfig.WALDir)
+	logger.Infof("WAL Directory is %s", walConfig.WALDir)
 
 	consenter := &Consenter{
 		Registrar:        r,
