@@ -25,9 +25,11 @@ import (
 	_ "github.com/hyperledger/fabric/protos/msp"
 	_ "github.com/hyperledger/fabric/protos/orderer"
 	_ "github.com/hyperledger/fabric/protos/orderer/etcdraft"
+	_ "github.com/hyperledger/fabric/protos/orderer/smartbft"
 	_ "github.com/hyperledger/fabric/protos/peer"
 
 	"github.com/gorilla/handlers"
+	"github.com/hyperledger/fabric/protos/orderer"
 	"github.com/pkg/errors"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
@@ -138,6 +140,12 @@ func encodeProto(msgName string, input, output *os.File) error {
 		return errors.Wrapf(err, "error decoding input")
 	}
 
+	for _, hooks := range orderer.EncodeHooks {
+		for _, hook := range hooks {
+			msg = hook(msg)
+		}
+	}
+
 	out, err := proto.Marshal(msg)
 	if err != nil {
 		return errors.Wrapf(err, "error marshaling")
@@ -166,6 +174,12 @@ func decodeProto(msgName string, input, output *os.File) error {
 	err = proto.Unmarshal(in, msg)
 	if err != nil {
 		return errors.Wrapf(err, "error unmarshaling")
+	}
+
+	for _, hooks := range orderer.DecodeHooks {
+		for _, hook := range hooks {
+			msg = hook(msg)
+		}
 	}
 
 	err = protolator.DeepMarshalJSON(output, msg)

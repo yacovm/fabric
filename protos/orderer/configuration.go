@@ -60,6 +60,10 @@ type ConsensusTypeMetadataFactory interface {
 	NewMessage() proto.Message
 }
 
+var DecodeHooks = map[string][]func(proto.Message) proto.Message{}
+
+var EncodeHooks = map[string][]func(proto.Message) proto.Message{}
+
 // ConsensuTypeMetadataMap should have consensus implementations register their metadata message factories
 var ConsensusTypeMetadataMap = map[string]ConsensusTypeMetadataFactory{}
 
