@@ -151,6 +151,8 @@ func NewChain(
 		return nil, errors.Wrap(err, "failed to verify SmartBFT-Go configuration")
 	}
 
+	logger.Infof("SmartBFT-v2 is now servicing chain %s", support.ChainID())
+
 	return c, nil
 }
 

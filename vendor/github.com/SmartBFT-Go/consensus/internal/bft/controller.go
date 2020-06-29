@@ -432,6 +432,12 @@ func (c *Controller) run() {
 			c.MaybePruneRevokedRequests()
 			if view > 0 || seq > 0 {
 				c.changeView(view, seq)
+			} else {
+				vs := c.ViewSequences.Load()
+				if vs == nil {
+					c.Logger.Panicf("ViewSequences is nil")
+				}
+				c.changeView(c.getCurrentViewNumber(), vs.(ViewSequence).ProposalSeq)
 			}
 		}
 	}
@@ -570,9 +576,6 @@ func (c *Controller) MaybePruneRevokedRequests() {
 	c.Logger.Infof("Verification sequence changed: %d --> %d", oldVerSqn, newVerSqn)
 	c.RequestPool.Prune(func(req []byte) error {
 		_, err := c.Verifier.VerifyRequest(req)
-		if err != nil {
-			c.Logger.Warnf("Pruning request of %d bytes: %v", len(req), err)
-		}
 		return err
 	})
 }

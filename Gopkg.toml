@@ -196,5 +196,5 @@ noverify = [
 
 
 [[constraint]]
-  branch = "master"
+  branch = "dynamic_config"
   name = "github.com/SmartBFT-Go/consensus"
