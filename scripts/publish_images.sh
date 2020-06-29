@@ -1,7 +1,7 @@
 #!/usr/bin/env bash -e
 
 echo "Building docker images..."
-git checkout origin/release-1.4-BFT
+git checkout origin/release-1.4-BFT-2
 
 echo "Building on top of $(git branch | sed -n '/\* /s///p')"
 
