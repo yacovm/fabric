@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	etcdraft "github.com/hyperledger/fabric/orderer/consensus/etcdraft"
+	cluster "github.com/hyperledger/fabric/orderer/common/cluster"
 	common "github.com/hyperledger/fabric/protos/common"
 
 	mock "github.com/stretchr/testify/mock"
@@ -15,6 +15,6 @@ type InactiveChainRegistry struct {
 }
 
 // TrackChain provides a mock function with given fields: chainName, genesisBlock, createChain
-func (_m *InactiveChainRegistry) TrackChain(chainName string, genesisBlock *common.Block, createChain etcdraft.CreateChainCallback) {
+func (_m *InactiveChainRegistry) TrackChain(chainName string, genesisBlock *common.Block, createChain cluster.CreateChainCallback) {
 	_m.Called(chainName, genesisBlock, createChain)
 }

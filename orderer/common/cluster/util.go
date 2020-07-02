@@ -709,3 +709,6 @@ func (exp *certificateExpirationCheck) checkExpiration(currentTime time.Time, ch
 		exp.nodeName, exp.endpoint, channel, timeLeft)
 	exp.lastWarning = currentTime
 }
+
+// CreateChainCallback creates a new chain
+type CreateChainCallback func()

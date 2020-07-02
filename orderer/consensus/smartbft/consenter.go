@@ -12,9 +12,10 @@ package smartbft
 import (
 	"bytes"
 	"encoding/pem"
-	"fmt"
 	"path"
 	"reflect"
+
+	"fmt"
 
 	"github.com/golang/protobuf/proto"
 	proto2 "github.com/golang/protobuf/proto"
@@ -34,6 +35,18 @@ import (
 	"github.com/pkg/errors"
 )
 
+// CreateChainCallback creates a new chain
+type CreateChainCallback func()
+
+//go:generate mockery -dir . -name InactiveChainRegistry -case underscore -output mocks
+
+// InactiveChainRegistry registers chains that are inactive
+type InactiveChainRegistry interface {
+	// TrackChain tracks a chain with the given name, and calls the given callback
+	// when this chain should be created.
+	TrackChain(chainName string, genesisBlock *common.Block, createChain cluster.CreateChainCallback)
+}
+
 // ChainGetter obtains instances of ChainSupport for the given channel
 type ChainGetter interface {
 	// GetChain obtains the ChainSupport for the given channel.
@@ -46,6 +59,8 @@ type PolicyManagerRetriever func(channel string) policies.Manager
 
 // Consenter implementation of the BFT smart based consenter
 type Consenter struct {
+	CreateChain      func(chainName string)
+	icr              InactiveChainRegistry
 	GetPolicyManager PolicyManagerRetriever
 	Logger           *flogging.FabricLogger
 	Cert             []byte
@@ -61,6 +76,7 @@ type Consenter struct {
 
 // New creates Consenter of type smart bft
 func New(
+	icr InactiveChainRegistry,
 	pmr PolicyManagerRetriever,
 	signerSerializer signerSerializer,
 	clusterDialer *cluster.PredicateDialer,
@@ -83,6 +99,7 @@ func New(
 	logger.Infof("WAL Directory is %s", walConfig.WALDir)
 
 	consenter := &Consenter{
+		icr:              icr,
 		Registrar:        r,
 		GetPolicyManager: pmr,
 		Conf:             conf,
@@ -93,6 +110,7 @@ func New(
 		SignerSerializer: signerSerializer,
 		WALBaseDir:       walConfig.WALDir,
 		Metrics:          NewMetrics(metricsProvider),
+		CreateChain:      r.CreateChain,
 	}
 
 	consenter.Comm = &cluster.Comm{
@@ -154,10 +172,12 @@ func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *co
 
 	selfID, err := c.detectSelfID(m.Consenters)
 	if err != nil {
-		// TODO: Add inactive channel tracker
 		errNotServiced := fmt.Sprintf("channel %s is not serviced by me", support.ChainID())
 		c.Logger.Errorf(errNotServiced)
-		return &inactive.Chain{Err: errors.Errorf(errNotServiced)}, nil
+		c.icr.TrackChain(support.ChainID(), support.Block(0), func() {
+			c.CreateChain(support.ChainID())
+		})
+		return &inactive.Chain{Err: errors.Errorf("channel %s is not serviced by me", support.ChainID())}, nil
 	}
 	c.Logger.Infof("Local consenter id is %d", selfID)
 

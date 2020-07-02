@@ -668,9 +668,7 @@ func initializeMultichannelRegistrar(
 			}
 		case "smartbft":
 			{
-				// TODO: Add full initialization with required parameters. Consider to abstract out common pieces of Etcd Raft and
-				// BFT Smart to reuse them.
-				consenters["smartbft"] = smartbft.New(dpmr.Registry(), signer, clusterDialer, conf, srvConf, srv, registrar, metricsProvider)
+				initializeSmartBFTConsenter(signer, dpmr, consenters, conf, lf, clusterDialer, bootstrapBlock, ri, srvConf, srv, registrar, metricsProvider)
 			}
 		default:
 			logger.Panicf("Unknown cluster type consenter")
@@ -692,6 +690,51 @@ func initializeEtcdraftConsenter(
 	registrar *multichannel.Registrar,
 	metricsProvider metrics.Provider,
 ) {
+	icr := constructInactiveChainReplicator(ri, lf, conf, bootstrapBlock, ri.logger)
+	// Use the inactiveChainReplicator as a channel lister, since it has knowledge
+	// of all inactive chains.
+	// This is to prevent us pulling the entire system chain when attempting to enumerate
+	// the channels in the system.
+	ri.channelLister = icr
+
+	go icr.run()
+	raftConsenter := etcdraft.New(clusterDialer, conf, srvConf, srv, registrar, icr, metricsProvider)
+	consenters["etcdraft"] = raftConsenter
+}
+
+func initializeSmartBFTConsenter(
+	signer crypto.SignerSupport,
+	dpmr *DynamicPolicyManagerRegistry,
+	consenters map[string]consensus.Consenter,
+	conf *localconfig.TopLevel,
+	lf blockledger.Factory,
+	clusterDialer *cluster.PredicateDialer,
+	bootstrapBlock *cb.Block,
+	ri *replicationInitiator,
+	srvConf comm.ServerConfig,
+	srv *comm.GRPCServer,
+	registrar *multichannel.Registrar,
+	metricsProvider metrics.Provider,
+) {
+	icr := constructInactiveChainReplicator(ri, lf, conf, bootstrapBlock, ri.logger)
+	// Use the inactiveChainReplicator as a channel lister, since it has knowledge
+	// of all inactive chains.
+	// This is to prevent us pulling the entire system chain when attempting to enumerate
+	// the channels in the system.
+	ri.channelLister = icr
+
+	go icr.run()
+
+	consenters["smartbft"] = smartbft.New(icr, dpmr.Registry(), signer, clusterDialer, conf, srvConf, srv, registrar, metricsProvider)
+}
+
+func constructInactiveChainReplicator(
+	ri *replicationInitiator,
+	lf blockledger.Factory,
+	conf *localconfig.TopLevel,
+	bootstrapBlock *cb.Block,
+	logger *flogging.FabricLogger,
+) *inactiveChainReplicator {
 	replicationRefreshInterval := conf.General.Cluster.ReplicationBackgroundRefreshInterval
 	if replicationRefreshInterval == 0 {
 		replicationRefreshInterval = defaultReplicationBackgroundRefreshInterval
@@ -699,11 +742,11 @@ func initializeEtcdraftConsenter(
 
 	systemChannelName, err := utils.GetChainIDFromBlock(bootstrapBlock)
 	if err != nil {
-		ri.logger.Panicf("Failed extracting system channel name from bootstrap block: %v", err)
+		logger.Panicf("Failed extracting system channel name from bootstrap block: %v", err)
 	}
 	systemLedger, err := lf.GetOrCreate(systemChannelName)
 	if err != nil {
-		ri.logger.Panicf("Failed obtaining system channel (%s) ledger: %v", systemChannelName, err)
+		logger.Panicf("Failed obtaining system channel (%s) ledger: %v", systemChannelName, err)
 	}
 	getConfigBlock := func() *cb.Block {
 		return multichannel.ConfigBlock(systemLedger)
@@ -722,15 +765,7 @@ func initializeEtcdraftConsenter(
 		registerChain:                     ri.registerChain,
 	}
 
-	// Use the inactiveChainReplicator as a channel lister, since it has knowledge
-	// of all inactive chains.
-	// This is to prevent us pulling the entire system chain when attempting to enumerate
-	// the channels in the system.
-	ri.channelLister = icr
-
-	go icr.run()
-	raftConsenter := etcdraft.New(clusterDialer, conf, srvConf, srv, registrar, icr, metricsProvider)
-	consenters["etcdraft"] = raftConsenter
+	return icr
 }
 
 func newOperationsSystem(ops localconfig.Operations, metrics localconfig.Metrics) *operations.System {
