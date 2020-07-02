@@ -588,6 +588,33 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			assertBlockReception(map[string]int{
 				"testchannel1": 9,
 			}, network.Orderers[:4], peer, network)
+
+			By("Adding back the node to the application channel")
+			nwo.UpdateSmartBFTMetadata(network, peer, orderer, channel, func(md *smartbft.ConfigMetadata) {
+				md.Consenters = append(md.Consenters, &smartbft.Consenter{
+					MspId:       "OrdererMSP",
+					ConsenterId: 5,
+					Identity: utils.MarshalOrPanic(&msp.SerializedIdentity{
+						Mspid:   "OrdererMSP",
+						IdBytes: ordererIdentity,
+					}),
+					ServerTlsCert: ordererCertificate,
+					ClientTlsCert: ordererCertificate,
+					Host:          "127.0.0.1",
+					Port:          uint32(network.OrdererPort(orderer5, nwo.ClusterPort)),
+				})
+			})
+
+			By("Ensuring all nodes got the block that adds the consenter to the application channel")
+			assertBlockReception(map[string]int{
+				"testchannel1": 10,
+			}, network.Orderers, peer, network)
+
+			By("Transact again")
+			invokeQuery(network, peer, orderer, channel, 30)
+
+			By("Ensuring re-added node participates in consensus")
+			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Deciding on seq 11"))
 		})
 
 		It("smartbft iterated addition and iterated removal", func() {
