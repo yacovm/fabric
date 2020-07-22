@@ -170,7 +170,7 @@ github.com/hyperledger/fabric-config/protolator/protoext/peerext
 # github.com/hyperledger/fabric-lib-go v1.0.0
 ## explicit
 github.com/hyperledger/fabric-lib-go/healthz
-# github.com/hyperledger/fabric-protos-go v0.0.0-20200506201313-25f6564b9ac4
+# github.com/hyperledger/fabric-protos-go v0.0.0-20200707132912-fee30f3ccd23 => github.com/FabricGDPR/fabric-protos-go v0.0.0-20200722110528-19324fd48fc2
 ## explicit
 github.com/hyperledger/fabric-protos-go/common
 github.com/hyperledger/fabric-protos-go/discovery
@@ -471,3 +471,4 @@ gopkg.in/tomb.v1
 ## explicit
 gopkg.in/yaml.v2
 # golang.org/x/sys => golang.org/x/sys v0.0.0-20190920190810-ef0ce1748380
+# github.com/hyperledger/fabric-protos-go => github.com/FabricGDPR/fabric-protos-go v0.0.0-20200722110528-19324fd48fc2
