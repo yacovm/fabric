@@ -193,6 +193,9 @@ func (txmgr *LockBasedTxMgr) ValidateAndPrepare(blockAndPvtdata *ledger.BlockAnd
 
 	block := blockAndPvtdata.Block
 	logger.Debugf("Validating new block with num trans = [%d]", len(block.Data.Data))
+	// Yacov: This is where the batch is built from the block given as input.
+	// For now, we'll focus on value writes in the RW-set, so inside the ValidateAndPrepareBatch method we would ensure that
+	// the pre-images are used as value writes.
 	batch, txstatsInfo, err := txmgr.commitBatchPreparer.ValidateAndPrepareBatch(blockAndPvtdata, doMVCCValidation)
 	if err != nil {
 		txmgr.reset()
@@ -549,6 +552,7 @@ func (txmgr *LockBasedTxMgr) Commit() error {
 	commitHeight := version.NewHeight(txmgr.current.blockNum(), txmgr.current.maxTxNumber())
 	txmgr.commitRWLock.Lock()
 	logger.Debugf("Write lock acquired for committing updates to state database")
+	// Yacov: Observe that txmgr.current.batch is what is being applied to the state DB
 	if err := txmgr.db.ApplyPrivacyAwareUpdates(txmgr.current.batch, commitHeight); err != nil {
 		txmgr.commitRWLock.Unlock()
 		return err

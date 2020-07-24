@@ -22,6 +22,19 @@ type blockCreator struct {
 	logger *flogging.FabricLogger
 }
 
+// Yacov: This is whre the block is created by the Raft orderer leader
+// before it passes consensus.
+// Each transaction should contain its own pre-image space, however,
+// the block's data hash computation is over the aggregated form of all bytes of all
+// transactions.
+// Since we need to preserve the hash integrity of the block,
+// we need to carve out the pre-image space out of each transaction,
+// and move all pre-images into a unified pre-image space inside the block.
+// The block data (BlockData) struct contains a single field- Data, of type [][]byte.
+// We can add an additional field which will be a pre-image space: PreImages [][]byte
+// and it will be ignored during block data hash computation, but will still be carried along
+// in the subsequent flow of the system (unless someone is copying it manually and then we'll need to chase down
+// why it was stripped out...)
 func (bc *blockCreator) createNextBlock(envs []*cb.Envelope) *cb.Block {
 	data := &cb.BlockData{
 		Data: make([][]byte, len(envs)),

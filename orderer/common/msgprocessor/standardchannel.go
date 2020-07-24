@@ -68,6 +68,7 @@ func CreateStandardChannelFilters(filterSupport channelconfig.Resources, config 
 		EmptyRejectRule,
 		NewSizeFilter(filterSupport),
 		NewSigFilter(policies.ChannelWriters, policies.ChannelOrdererWriters, filterSupport),
+		// Yacov: Add here a new filter.
 	}
 
 	if !config.General.Authentication.NoExpirationChecks {

@@ -357,6 +357,14 @@ func (v *TxValidator) validateTx(req *blockValidationRequest, results chan<- *bl
 			return
 		}
 
+		// Yacov: Below is a big, ugly and bloated "if-else" that satisfies:
+		// If regular transaction: ...
+		// Else, if it's a configuration transaction: ...
+		// Else, it's an unknown transaction type.
+		// In our paper, since orderers also check these kind of transactions,
+		// there cannot be a block with an invalid redact transaction.
+		// Nevertheless, we need to add handling for the new type (REDACT_TRANSACTION)
+		// and blindly mark it valid (because we trust the orderers).
 		if common.HeaderType(chdr.Type) == common.HeaderType_ENDORSER_TRANSACTION {
 
 			txID = chdr.TxId

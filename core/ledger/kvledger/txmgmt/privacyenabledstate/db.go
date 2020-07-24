@@ -252,6 +252,7 @@ func (s *DB) ApplyPrivacyAwareUpdates(updates *UpdateBatch, height *version.Heig
 	addPvtUpdates(combinedUpdates, updates.PvtUpdates)
 	addHashedUpdates(combinedUpdates, updates.HashUpdates, !s.BytesKeySupported())
 	s.metadataHint.setMetadataUsedFlag(updates)
+	// Yacov: Below, the world state is being updated.
 	return s.VersionedDB.ApplyUpdates(combinedUpdates.UpdateBatch, height)
 }
 
