@@ -237,6 +237,8 @@ func (e *Endorser) SimulateProposal(txParams *ccprovider.TransactionParams, chai
 		}
 	}
 
+	// Yacov: This is where the writes that appear on the blockchain are assembled,
+	// right before they are passed to EndorseWithPlugin (line 451).
 	pubSimResBytes, err := simResult.GetPubSimulationBytes()
 	if err != nil {
 		e.Metrics.SimulationFailure.With(meterLabels...).Add(1)
@@ -393,6 +395,10 @@ func (e *Endorser) ProcessProposalSuccessfullyOrError(up *UnpackedProposal) (*pb
 		return nil, errors.WithMessagef(err, "make sure the chaincode %s has been successfully defined on channel %s and try again", up.ChaincodeName, up.ChannelID())
 	}
 
+	// Yacov: This is where the transaction is executed (simulated) in the peer.
+	// We receive back the simulationResult (2nd return value) which is the RW-set.
+	// We need to strip out the value writes, replace them with hashes, and then
+	// construct a pre-image space which we will plant inside the ProposalResponse.
 	// 1 -- simulate
 	res, simulationResult, ccevent, err := e.SimulateProposal(txParams, up.ChaincodeName, up.Input)
 	if err != nil {

@@ -501,6 +501,7 @@ func (l *kvLedger) CommitLegacy(pvtdataAndBlock *ledger.BlockAndPvtData, commitO
 	}
 	elapsedCommitState := time.Since(startCommitState)
 
+	// Yacov: We might want to disable history database or just purge the keys upon redaction
 	// History database could be written in parallel with state and/or async as a future optimization,
 	// although it has not been a bottleneck...no need to clutter the log with elapsed duration.
 	if l.historyDB != nil {
@@ -554,6 +555,7 @@ func (l *kvLedger) commitToPvtAndBlockStore(blockAndPvtdata *ledger.BlockAndPvtD
 		logger.Debugf("Skipping writing pvtData to pvt block store as it ahead of the block store")
 	}
 
+	// Yacov: This is where the block is written to the ledger in the peer
 	if err := l.blockStore.AddBlock(blockAndPvtdata.Block); err != nil {
 		return err
 	}

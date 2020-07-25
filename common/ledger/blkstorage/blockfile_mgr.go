@@ -268,7 +268,39 @@ func (mgr *blockfileMgr) moveToNextFile() {
 	mgr.updateBlockfilesInfo(blkfilesInfo)
 }
 
+// Yacov: This is where the block is appended in the ledger, both in the peer
+// and in the orderer.
+// This is a perfect place to plant our redaction operation:
+// 1) Both peers and orderers execute this code
+// 2) We have access to the ledger internals from here.
+//
+//   The ledger has recovery mechanisms in case the node crashes while
+//   it commits a block.
+//   We want to take advantage of them, so i suggest that we implement
+//   the redaction right in the beginning, so that if the node crashes
+//   during redaction, it will need to append the block again
+//   since it didn't start appending the block, and will perform
+//   the redaction again, which is idempotent.
 func (mgr *blockfileMgr) addBlock(block *common.Block) error {
+	// Yacov: Here be the redaction of all redaction transactions of
+	// this block.
+	// I think we should assume that the redaction transaction
+	// has knowledge of the transaction ID.
+
+	// We retrieve the transaction from the ledger
+	// tx, err := mgr.retrieveTransactionByID("txID")
+	// Nil out its pre-image space...
+	// Overwrite it.
+	// Keep in mind, we might be redacting the current file
+	// or redacting an older file (ledger files are 64MB files).
+	// If we're redacting the current file, then the file is already
+	// open by us!
+	// otherwise we need to open the file by locating it via
+	// loc := mgr.index.getTxLoc("txID")
+	// and then via:
+	// mgr.fetchTransactionEnvelope(loc)
+
+
 	bcInfo := mgr.getBlockchainInfo()
 	if block.Header.Number != bcInfo.Height {
 		return errors.Errorf(

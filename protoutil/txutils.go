@@ -192,6 +192,9 @@ func CreateSignedTx(
 	}
 
 	// create ChaincodeEndorsedAction
+	// Yacov: the resps[0].Payload is the ProposalResponsePayload returned from the first peer.
+	// In Fabric vanilla, it contains the read-write sets, but in our paper it contains just hashes.
+	// Therefore we need to build a pre-image space from the first response of the peer to be put into the transaction.
 	cea := &peer.ChaincodeEndorsedAction{ProposalResponsePayload: resps[0].Payload, Endorsements: endorsements}
 
 	// obtain the bytes of the proposal payload that will go to the transaction
@@ -233,6 +236,10 @@ func CreateSignedTx(
 	}
 
 	// here's the envelope
+	// Yacov: This is how the transaction looks like when it is sent from a client to the orderer.
+	// We need to add another field here that will hold the pre-images.
+	// This is mandatory because the payload below is signed by the signature, and when redaction
+	// occurs, the signature still needs to be verifiable.
 	return &common.Envelope{Payload: paylBytes, Signature: sig}, nil
 }
 
