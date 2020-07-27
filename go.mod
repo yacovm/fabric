@@ -71,4 +71,4 @@ require (
 	gopkg.in/yaml.v2 v2.2.8
 )
 
-replace github.com/hyperledger/fabric-protos-go => github.com/FabricGDPR/fabric-protos-go v0.0.0-20200722110528-19324fd48fc2
+replace github.com/hyperledger/fabric-protos-go => github.com/FabricGDPR/fabric-protos-go v0.0.0-20200727141022-6a53efe75957
