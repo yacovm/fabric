@@ -17,14 +17,11 @@ docker pull hyperledger/fabric-ccenv:2.2.0
 echo "Pulling docker images"
 make docker-thirdparty
 
-cd integration/e2e
+cd integration/lifecycle
 
 echo "Installing Ginkgo :( "
 go get github.com/onsi/ginkgo/ginkgo
 go get github.com/onsi/gomega/...
 
 echo "running integration test"
-ginkgo --focus "basic etcdraft network without a system channel"
-
-
-
+ginkgo --focus "deploys and executes chaincode using _lifecycle and upgrades it"
