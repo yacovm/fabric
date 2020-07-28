@@ -1,0 +1,21 @@
+#
+## SPDX-License-Identifier: Apache-2.0
+#
+
+language: go
+
+go:
+- 1.14.6
+
+go_import_path: github.com/hyperledger/fabric
+
+script: bash ./scripts/build_checks.sh
+
+jobs:
+  include:
+    - stage: basic_checks
+      script: make basic-checks
+    - stage: integration
+      script: bash scripts/run-integration-tests.sh
+    - stage: UT
+      script: ./ci/scripts/setup_hsm.sh && make unit-test

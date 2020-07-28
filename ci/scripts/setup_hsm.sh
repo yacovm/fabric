@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 set -euo pipefail
 
+sudo apt-get update -y
 sudo apt-get install -y softhsm2
 sudo mkdir -p /var/lib/softhsm/tokens
 sudo softhsm2-util --init-token --slot 0 --label "ForFabric" --so-pin 1234 --pin 98765432

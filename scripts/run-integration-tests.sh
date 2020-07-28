@@ -10,24 +10,21 @@
 
 set -eu
 
-fabric_dir="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$fabric_dir"
+docker pull hyperledger/fabric-ccenv:latest
+docker pull hyperledger/fabric-ccenv:2.2
+docker pull hyperledger/fabric-ccenv:2.2.0
 
-declare -a test_dirs
-while IFS='' read -r line; do test_dirs+=("$line"); done < <(
-  go list -f '{{ if or (len .TestGoFiles | ne 0) (len .XTestGoFiles | ne 0) }}{{ println .Dir }}{{ end }}' ./... | \
-    grep integration | \
-    sed s,"${fabric_dir}",.,g
-)
+echo "Pulling docker images"
+make docker-thirdparty
 
-total_agents=${SYSTEM_TOTALJOBSINPHASE:-1}   # standard VSTS variables available using parallel execution; total number of parallel jobs running
-agent_number=${SYSTEM_JOBPOSITIONINPHASE:-1} # current job position
+cd integration/e2e
 
-declare -a dirs
-for ((i = "$agent_number"; i <= "${#test_dirs[@]}"; )); do
-  dirs+=("${test_dirs[$i - 1]}")
-  i=$((i + total_agents))
-done
+echo "Installing Ginkgo :( "
+go get github.com/onsi/ginkgo/ginkgo
+go get github.com/onsi/gomega/...
 
-printf "\nRunning the following test suites:\n\n%s\n\nStarting tests...\n\n" "$(echo "${dirs[@]}" | tr -s ' ' '\n')"
-ginkgo -keepGoing --slowSpecThreshold 60 "${dirs[@]}"
+echo "running integration test"
+ginkgo --focus "basic etcdraft network without a system channel"
+
+
+

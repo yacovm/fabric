@@ -300,7 +300,6 @@ func (mgr *blockfileMgr) addBlock(block *common.Block) error {
 	// and then via:
 	// mgr.fetchTransactionEnvelope(loc)
 
-
 	bcInfo := mgr.getBlockchainInfo()
 	if block.Header.Number != bcInfo.Height {
 		return errors.Errorf(
