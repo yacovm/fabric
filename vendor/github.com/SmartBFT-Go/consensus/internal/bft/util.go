@@ -73,12 +73,8 @@ func MarshalOrPanic(msg proto.Message) []byte {
 	return b
 }
 
-func getLeaderID(view uint64, N uint64, nodes []uint64, leaderRotation bool, decisionsInView uint64, decisionsPerLeader uint64) uint64 {
-	// assuming nodes are sorted
-	if leaderRotation {
-		return nodes[(view+(decisionsInView/decisionsPerLeader))%N]
-	}
-	return nodes[view%N]
+func getLeaderID(view uint64, N uint64, nodes []uint64) uint64 {
+	return nodes[view%N] // assuming this is sorted
 }
 
 type vote struct {
@@ -204,7 +200,7 @@ type ProposalMaker struct {
 }
 
 // NewProposer returns a new view
-func (pm *ProposalMaker) NewProposer(leader, proposalSequence, viewNum, decisionsInView uint64, quorumSize int) Proposer {
+func (pm *ProposalMaker) NewProposer(leader, proposalSequence, viewNum uint64, quorumSize int) Proposer {
 	view := &View{
 		N:                pm.N,
 		LeaderID:         leader,
@@ -219,7 +215,6 @@ func (pm *ProposalMaker) NewProposer(leader, proposalSequence, viewNum, decision
 		Verifier:         pm.Verifier,
 		Signer:           pm.Signer,
 		ProposalSequence: proposalSequence,
-		DecisionsInView:  decisionsInView,
 		State:            pm.State,
 		InMsgQSize:       pm.InMsqQSize,
 		ViewSequences:    pm.ViewSequences,
@@ -239,12 +234,10 @@ func (pm *ProposalMaker) NewProposer(leader, proposalSequence, viewNum, decision
 
 	if proposalSequence > view.ProposalSequence {
 		view.ProposalSequence = proposalSequence
-		view.DecisionsInView = decisionsInView
 	}
 
 	if viewNum > view.Number {
 		view.Number = viewNum
-		view.DecisionsInView = decisionsInView
 	}
 
 	return view

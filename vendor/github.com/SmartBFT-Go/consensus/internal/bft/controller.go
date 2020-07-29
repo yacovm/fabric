@@ -71,35 +71,33 @@ type Proposer interface {
 // ProposerBuilder builds a new Proposer
 //go:generate mockery -dir . -name ProposerBuilder -case underscore -output ./mocks/
 type ProposerBuilder interface {
-	NewProposer(leader, proposalSequence, viewNum, decisionsInView uint64, quorumSize int) Proposer
+	NewProposer(leader, proposalSequence, viewNum uint64, quorumSize int) Proposer
 }
 
 // Controller controls the entire flow of the consensus
 type Controller struct {
 	api.Comm
 	// configuration
-	ID                 uint64
-	N                  uint64
-	NodesList          []uint64
-	LeaderRotation     bool
-	DecisionsPerLeader uint64
-	RequestPool        RequestPool
-	Batcher            Batcher
-	LeaderMonitor      LeaderMonitor
-	Verifier           api.Verifier
-	Logger             api.Logger
-	Assembler          api.Assembler
-	Application        api.Application
-	FailureDetector    FailureDetector
-	Synchronizer       api.Synchronizer
-	Signer             api.Signer
-	RequestInspector   api.RequestInspector
-	WAL                api.WriteAheadLog
-	ProposerBuilder    ProposerBuilder
-	Checkpoint         *types.Checkpoint
-	ViewChanger        *ViewChanger
-	Collector          *StateCollector
-	State              State
+	ID               uint64
+	N                uint64
+	NodesList        []uint64
+	RequestPool      RequestPool
+	Batcher          Batcher
+	LeaderMonitor    LeaderMonitor
+	Verifier         api.Verifier
+	Logger           api.Logger
+	Assembler        api.Assembler
+	Application      api.Application
+	FailureDetector  FailureDetector
+	Synchronizer     api.Synchronizer
+	Signer           api.Signer
+	RequestInspector api.RequestInspector
+	WAL              api.WriteAheadLog
+	ProposerBuilder  ProposerBuilder
+	Checkpoint       *types.Checkpoint
+	ViewChanger      *ViewChanger
+	Collector        *StateCollector
+	State            State
 
 	quorum int
 
@@ -107,9 +105,6 @@ type Controller struct {
 
 	currViewLock   sync.RWMutex
 	currViewNumber uint64
-
-	currDecisionsInViewLock sync.RWMutex
-	currDecisionsInView     uint64
 
 	viewChange    chan viewInfo
 	abortViewChan chan uint64
@@ -144,27 +139,6 @@ func (c *Controller) setCurrentViewNumber(viewNumber uint64) {
 	c.currViewNumber = viewNumber
 }
 
-func (c *Controller) getCurrentDecisionsInView() uint64 {
-	c.currDecisionsInViewLock.RLock()
-	defer c.currDecisionsInViewLock.RUnlock()
-
-	return c.currDecisionsInView
-}
-
-func (c *Controller) incrementCurrentDecisionsInView() {
-	c.currDecisionsInViewLock.Lock()
-	defer c.currDecisionsInViewLock.Unlock()
-
-	c.currDecisionsInView++
-}
-
-func (c *Controller) setCurrentDecisionsInView(decisions uint64) {
-	c.currDecisionsInViewLock.Lock()
-	defer c.currDecisionsInViewLock.Unlock()
-
-	c.currDecisionsInView = decisions
-}
-
 // thread safe
 func (c *Controller) iAmTheLeader() (bool, uint64) {
 	leader := c.leaderID()
@@ -173,7 +147,7 @@ func (c *Controller) iAmTheLeader() (bool, uint64) {
 
 // thread safe
 func (c *Controller) leaderID() uint64 {
-	return getLeaderID(c.getCurrentViewNumber(), c.N, c.NodesList, c.LeaderRotation, c.getCurrentDecisionsInView(), c.DecisionsPerLeader)
+	return getLeaderID(c.getCurrentViewNumber(), c.N, c.NodesList)
 }
 
 // HandleRequest handles a request from the client
@@ -323,7 +297,7 @@ func (c *Controller) convertViewMessageToHeartbeat(m *protos.Message) *protos.Me
 }
 
 func (c *Controller) startView(proposalSequence uint64) {
-	view := c.ProposerBuilder.NewProposer(c.leaderID(), proposalSequence, c.currViewNumber, c.currDecisionsInView, c.quorum)
+	view := c.ProposerBuilder.NewProposer(c.leaderID(), proposalSequence, c.currViewNumber, c.quorum)
 
 	c.currViewLock.Lock()
 	c.currView = view
@@ -336,10 +310,10 @@ func (c *Controller) startView(proposalSequence uint64) {
 		role = Leader
 	}
 	c.LeaderMonitor.ChangeRole(role, c.currViewNumber, c.leaderID())
-	c.Logger.Infof("Starting view with number %d, sequence %d, and decisions %d", c.currViewNumber, proposalSequence, c.currDecisionsInView)
+	c.Logger.Infof("Starting view with number %d and sequence %d", c.currViewNumber, proposalSequence)
 }
 
-func (c *Controller) changeView(newViewNumber uint64, newProposalSequence uint64, newDecisionsInView uint64) {
+func (c *Controller) changeView(newViewNumber uint64, newProposalSequence uint64) {
 
 	latestView := c.getCurrentViewNumber()
 	if latestView > newViewNumber {
@@ -352,8 +326,6 @@ func (c *Controller) changeView(newViewNumber uint64, newProposalSequence uint64
 	}
 
 	c.setCurrentViewNumber(newViewNumber)
-	c.setCurrentDecisionsInView(newDecisionsInView)
-	c.Logger.Debugf("Starting view after setting decisions in view to %d", newDecisionsInView)
 	c.startView(newProposalSequence)
 
 	// If I'm the leader, I can claim the leader token.
@@ -448,7 +420,7 @@ func (c *Controller) run() {
 		case d := <-c.decisionChan:
 			c.decide(d)
 		case newView := <-c.viewChange:
-			c.changeView(newView.viewNumber, newView.proposalSeq, 0)
+			c.changeView(newView.viewNumber, newView.proposalSeq)
 		case view := <-c.abortViewChan:
 			c.abortView(view)
 		case <-c.stopChan:
@@ -456,16 +428,16 @@ func (c *Controller) run() {
 		case <-c.leaderToken:
 			c.propose()
 		case <-c.syncChan:
-			view, seq, dec := c.sync()
+			view, seq := c.sync()
 			c.MaybePruneRevokedRequests()
 			if view > 0 || seq > 0 {
-				c.changeView(view, seq, dec)
+				c.changeView(view, seq)
 			} else {
 				vs := c.ViewSequences.Load()
 				if vs == nil {
 					c.Logger.Panicf("ViewSequences is nil")
 				}
-				c.changeView(c.getCurrentViewNumber(), vs.(ViewSequence).ProposalSeq, c.getCurrentDecisionsInView())
+				c.changeView(c.getCurrentViewNumber(), vs.(ViewSequence).ProposalSeq)
 			}
 		}
 	}
@@ -484,29 +456,13 @@ func (c *Controller) decide(d decision) {
 	case <-c.stopChan:
 		return
 	}
-	c.incrementCurrentDecisionsInView()
-	if c.checkIfRotate() {
-		md := &protos.ViewMetadata{}
-		if err := proto.Unmarshal(d.proposal.Metadata, md); err != nil {
-			c.Logger.Panicf("Failed to unmarshal proposal metadata, error: %v", err)
-		}
-		c.Logger.Debugf("Restarting view to rotate the leader")
-		c.changeView(c.getCurrentViewNumber(), md.LatestSequence+1, c.getCurrentDecisionsInView())
-	}
 	c.MaybePruneRevokedRequests()
 	if iAm, _ := c.iAmTheLeader(); iAm {
 		c.acquireLeaderToken()
 	}
 }
 
-func (c *Controller) checkIfRotate() bool {
-	// called after increment
-	currLeader := getLeaderID(c.getCurrentViewNumber(), c.N, c.NodesList, c.LeaderRotation, c.getCurrentDecisionsInView()-1, c.DecisionsPerLeader)
-	nextLeader := getLeaderID(c.getCurrentViewNumber(), c.N, c.NodesList, c.LeaderRotation, c.getCurrentDecisionsInView(), c.DecisionsPerLeader)
-	return currLeader != nextLeader
-}
-
-func (c *Controller) sync() (viewNum uint64, seq uint64, decisions uint64) {
+func (c *Controller) sync() (viewNum uint64, seq uint64) {
 	// Block any concurrent sync attempt.
 	c.grabSyncToken()
 	// At exit, enable sync once more, but ignore
@@ -524,26 +480,25 @@ func (c *Controller) sync() (viewNum uint64, seq uint64, decisions uint64) {
 		c.Logger.Infof("Synchronizer returned with proposal metadata nil")
 		response := c.fetchState()
 		if response == nil {
-			return 0, 0, 0
+			return 0, 0
 		}
 		if response.View > 0 && response.Seq == 1 {
 			c.Logger.Infof("The collected state is with view %d and sequence %d", response.View, response.Seq)
 			newViewToSave := &protos.SavedMessage{
 				Content: &protos.SavedMessage_NewView{
 					NewView: &protos.ViewMetadata{
-						ViewId:          response.View,
-						LatestSequence:  0,
-						DecisionsInView: 0,
+						ViewId:         response.View,
+						LatestSequence: 0,
 					},
 				},
 			}
 			if err := c.State.Save(newViewToSave); err != nil {
 				c.Logger.Panicf("Failed to save message to state, error: %v", err)
 			}
-			c.ViewChanger.InformNewView(response.View)
-			return response.View, 1, 0
+			c.ViewChanger.InformNewView(response.View, 0)
+			return response.View, 1
 		}
-		return 0, 0, 0
+		return 0, 0
 	}
 	md := &protos.ViewMetadata{}
 	if err := proto.Unmarshal(decision.Proposal.Metadata, md); err != nil {
@@ -551,12 +506,11 @@ func (c *Controller) sync() (viewNum uint64, seq uint64, decisions uint64) {
 	}
 	if md.ViewId < c.currViewNumber {
 		c.Logger.Infof("Synchronizer returned with view number %d but the controller is at view number %d", md.ViewId, c.currViewNumber)
-		return 0, 0, 0
+		return 0, 0
 	}
 	c.Logger.Infof("Synchronized to view %d and sequence %d with verification sequence %d", md.ViewId, md.LatestSequence, decision.Proposal.VerificationSequence)
 
 	view := md.ViewId
-	newView := false
 
 	response := c.fetchState()
 	if response != nil {
@@ -566,16 +520,14 @@ func (c *Controller) sync() (viewNum uint64, seq uint64, decisions uint64) {
 			newViewToSave := &protos.SavedMessage{
 				Content: &protos.SavedMessage_NewView{
 					NewView: &protos.ViewMetadata{
-						ViewId:          view,
-						LatestSequence:  md.LatestSequence,
-						DecisionsInView: 0,
+						ViewId:         view,
+						LatestSequence: md.LatestSequence,
 					},
 				},
 			}
 			if err := c.State.Save(newViewToSave); err != nil {
 				c.Logger.Panicf("Failed to save message to state, error: %v", err)
 			}
-			newView = true
 		}
 	}
 
@@ -583,11 +535,8 @@ func (c *Controller) sync() (viewNum uint64, seq uint64, decisions uint64) {
 	c.Checkpoint.Set(decision.Proposal, decision.Signatures)
 	c.verificationSequence = uint64(decision.Proposal.VerificationSequence)
 	c.Logger.Debugf("Node %d is informing the view changer after sync of view %d and seq %d", c.ID, md.ViewId, md.LatestSequence)
-	c.ViewChanger.InformNewView(view)
-	if md.LatestSequence == 0 || newView {
-		return view, md.LatestSequence + 1, 0
-	}
-	return view, md.LatestSequence + 1, md.DecisionsInView + 1
+	c.ViewChanger.InformNewView(view, md.LatestSequence)
+	return view, md.LatestSequence + 1
 }
 
 func (c *Controller) fetchState() *types.ViewAndSeq {
@@ -647,26 +596,22 @@ func (c *Controller) relinquishLeaderToken() {
 	}
 }
 
-func (c *Controller) syncOnStart(startViewNumber uint64, startProposalSequence uint64, startDecisionsInView uint64) (viewNum uint64, seq uint64, decisions uint64) {
-	syncView, syncSeq, syncDecsions := c.sync()
+func (c *Controller) syncOnStart(startViewNumber uint64, startProposalSequence uint64) (viewNum uint64, seq uint64) {
+	syncView, syncSeq := c.sync()
 	c.MaybePruneRevokedRequests()
 	viewNum = startViewNumber
 	seq = startProposalSequence
-	decisions = startDecisionsInView
 	if syncView > startViewNumber {
 		viewNum = syncView
-		decisions = syncDecsions
 	}
 	if syncSeq > startProposalSequence {
 		seq = syncSeq
-		decisions = syncDecsions
 	}
-	return viewNum, seq, decisions
+	return viewNum, seq
 }
 
 // Start the controller
-func (c *Controller) Start(startViewNumber uint64, startProposalSequence uint64, startDecisionsInView uint64, syncOnStart bool) {
-	c.Logger.Debugf("Starting controller with view %d, sequence %d, and decisions %d", startViewNumber, startProposalSequence, startDecisionsInView)
+func (c *Controller) Start(startViewNumber uint64, startProposalSequence uint64, syncOnStart bool) {
 	c.controllerDone.Add(1)
 	c.stopOnce = sync.Once{}
 	c.syncChan = make(chan struct{}, 1)
@@ -681,15 +626,11 @@ func (c *Controller) Start(startViewNumber uint64, startProposalSequence uint64,
 	c.Logger.Debugf("The number of nodes (N) is %d, F is %d, and the quorum size is %d", c.N, F, Q)
 	c.quorum = Q
 
-	c.verificationSequence = c.Verifier.VerificationSequence()
-
 	if syncOnStart {
-		startViewNumber, startProposalSequence, startDecisionsInView = c.syncOnStart(startViewNumber, startProposalSequence, startDecisionsInView)
-		c.Logger.Debugf("After sync starting controller with view %d, sequence %d, and decisions %d", startViewNumber, startProposalSequence, startDecisionsInView)
+		startViewNumber, startProposalSequence = c.syncOnStart(startViewNumber, startProposalSequence)
 	}
 
 	c.currViewNumber = startViewNumber
-	c.currDecisionsInView = startDecisionsInView
 	c.startView(startProposalSequence)
 	if iAm, _ := c.iAmTheLeader(); iAm {
 		c.acquireLeaderToken()
