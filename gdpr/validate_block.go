@@ -1,49 +1,61 @@
 package gdpr
 
 import (
+	"bytes"
+	"github.com/gogo/protobuf/proto"
+
+	//"crypto"
+	"crypto/sha256"
 	"github.com/hyperledger/fabric-protos-go/common"
-	"github.com/hyperledger/fabric-protos-go/ledger/queryresult"
 	"github.com/hyperledger/fabric/core/ledger/kvledger/txmgmt/rwsetutil"
 	"github.com/hyperledger/fabric/protoutil"
+	//"hash"
 )
 
-func validate( data common.BlockData) error {
+func /*(block *common.Block)*/ validate(block *common.Block) (*common.Block , error) {
 
 	//byte
-	preimages := data.GetPreimageSpace()
-	var writes [][]byte
+	preImages := block.GetData().GetPreimageSpace()
+	retBlock := common.Block{} // TODO: Does this actually create a block?
 
+	retBlock.Data = block.GetData()
+	retBlock.Header = block.GetHeader()
+	retBlock.Metadata = block.GetMetadata()
+
+
+	retBlock.GetData().PreimageSpace = [][]byte{} //TODO: Is this the way to replace the data there?
+
+	//retBlock.GetData().Data = preImages
+
+	var writes [][]byte
+	h := sha256.New()
 	var hashes [][]byte
-	for _, im := range preimages{
-		hashes = append(hashes, Sha2(im))
+	for _, im := range preImages {
+		hashes = append(hashes, h.Sum(im))
 	}
 	//hashes is the set if hashes on the preimage space
+	var success = true
+	//preImages[][] = block.GetPreimageSpace()
 
-	//preimages[][] = data.GetPreimageSpace()
-
-	for seqInBlock, envBytes := range data {
+	for _ , envBytes := range block.Data.Data {
 
 		env, err := protoutil.GetEnvelopeFromBlock(envBytes)
 		if err != nil {
-			logger.Warning("Invalid envelope:", err)
+			//logger.Warning("Invalid envelope:", err)
 			continue
 		}
 
 		// GAL: upto here - all good. need to extract pld now - find reference in other places in fabric
 		payload, err := protoutil.UnmarshalPayload(env.Payload) //protoutil.GetBytesPayload()
 		if err != nil {
-			logger.Warning("Invalid payload:", err)
+			//logger.Warning("Invalid payload:", err)
 			continue
 		}
-
-
 
 		tx, err := protoutil.UnmarshalTransaction(payload.Data)
 
 		_, respPayload, err := protoutil.GetPayloads(tx.Actions[0])
-		//if err != nil {
-		//	return nil, err
-		//}
+
 
 		txRWSet := &rwsetutil.TxRwSet{}
 		txRWSet.FromProtoBytes(respPayload.Results)
@@ -51,41 +63,31 @@ func validate( data common.BlockData) error {
 		for _, nsRWSet := range txRWSet.NsRwSets {
 			//nsRWSet.KvRwSet
 			for _, kvWrite := range nsRWSet.KvRwSet.Writes {
-				writes = append(writes, kvWrite.GetValue())
+				var a = kvWrite.GetValueHash()
+				if memberOf(a,hashes) == false{
+					success = false
+				}
+				writes = append(writes,a) // kvWrite.GetValueHash())
+
 			}
-			/*if nsRWSet.NameSpace == namespace {
-				// got the correct namespace, now find the key write
-				for _, kvWrite := range nsRWSet.KvRwSet.Writes {
-					if kvWrite.Key == key {
-					}
-				} // end keys loop
-			} */// end if
+
 		}
-
-
-		cap, err := protoutil.UnmarshalChaincodeActionPayload(tx.Actions[0].Payload)
-
-		tx2.GetActions()
-
-
-
-		// ASSUMING hashes is a set of hashes on preimages, and assuming we have kvh the hash value foreach kvwrite,
-		// all we need to do is to check that {kvh \in hashes} holds
-
-		//cap.Action.ProposalResponsePayload
-		//
-		//prp, err := protoutil.UnmarshalProposalResponsePayload(cap.Action.ProposalResponsePayload)
-		//
-		//ca, err := protoutil.UnmarshalChaincodeAction(prp.Extension)
-		//
-		//ca.Response.Payload
-
-
 	}
-		return nil
-	//data.D
+	if success == false {
+		return nil, proto.ErrNil // TODO: Other error!
+	} else {
+		return nil, nil
+	}
 
-	// foreach transaction tx in preImage space (Envelope.preimage)
-	// Compare hashed data on block to hash(tx) -> data.data.
+
+}
+
+func memberOf(a []byte, b [][]byte) bool{
+	for _,hashVal := range b{
+		if bytes.Compare(a,hashVal) == 0 {
+			return true
+		}
+	}
+	return false
 
 }
