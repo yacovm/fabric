@@ -8,8 +8,6 @@ package gdpr
 
 import (
 	"errors"
-	"fmt"
-
 	"github.com/golang/protobuf/proto"
 
 	"crypto/sha256"
@@ -66,12 +64,9 @@ func validate(block *common.Block) (*common.Block, error) {
 
 		for _, nsRWSet := range txRWSet.NsRwSets {
 			for _, kvWrite := range nsRWSet.KvRwSet.Writes {
-				var a = kvWrite.GetValueHash()
-				if a != nil {
-					fmt.Printf("that's odd")
-				}
-				var b = getHash(kvWrite.GetValue())
-				if memberOf((string)(b), m) == false {
+				var hashVal = getHash(kvWrite.GetValue()) // TODO: should be kvWrite.GetValueHash() when there are actual values
+
+				if memberOf((string)(hashVal), m) == false {
 					return nil, ErrVal
 				}
 
@@ -126,7 +121,7 @@ func getVanillaBlock(block *common.Block) (*common.Block, error) {
 		for _, nsRWSet := range txRWSet.NsRwSets {
 			for _, kvWrite := range nsRWSet.KvRwSet.Writes {
 				var a = kvWrite.GetValueHash()
-				temp := getKVWrite(preImages, a)
+				temp := findKVWrite(preImages, a)
 				if temp != nil {
 					kvWrite.Value = temp
 				}
@@ -139,7 +134,7 @@ func getVanillaBlock(block *common.Block) (*common.Block, error) {
 
 }
 
-func getKVWrite(preimages [][]byte, hashVal []byte) []byte {
+func findKVWrite(preimages [][]byte, hashVal []byte) []byte {
 	strVal := (string)(hashVal)
 	for _, pi := range preimages {
 		temp := (string)(getHash(pi))
@@ -150,48 +145,6 @@ func getKVWrite(preimages [][]byte, hashVal []byte) []byte {
 	return nil
 }
 
-func extractPreimages(block *common.Block) [][]byte {
-
-	var preimages [][]byte
-
-	for _, envBytes := range block.Data.Data {
-		env, err := protoutil.GetEnvelopeFromBlock(envBytes)
-		if err != nil {
-			continue
-		}
-
-		payload, err := protoutil.UnmarshalPayload(env.Payload)
-		if err != nil {
-			continue
-		}
-
-		tx, err := protoutil.UnmarshalTransaction(payload.Data)
-		if err != nil {
-			return nil
-		}
-
-		_, respPayload, err := protoutil.GetPayloads(tx.Actions[0])
-		if err != nil {
-			return nil
-		}
-
-		txRWSet := &rwsetutil.TxRwSet{}
-
-		if err = txRWSet.FromProtoBytes(respPayload.Results); err != nil {
-			return nil
-		}
-		for _, nsRWSet := range txRWSet.NsRwSets {
-			for _, kvWrite := range nsRWSet.KvRwSet.Writes {
-				var a = kvWrite.GetValue()
-				preimages = append(preimages, a)
-			}
-
-		}
-
-	}
-
-	return preimages
-}
 
 func clearKVWrites(block *common.Block) {
 	for _, envBytes := range block.Data.Data {

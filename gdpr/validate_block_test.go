@@ -27,7 +27,7 @@ func TestValidateBlock(t *testing.T) {
 
 	assert.NoError(t, proto.Unmarshal(blockBytes, &block))
 	preImages := extractPreimages(&block)
-	//preImages[0] = ([]byte)("123456")
+
 	block.Data.PreimageSpace = preImages
 	newBlock, err := validate(&block)
 	require.NoError(t, err, "adsfadsfasdf")
@@ -107,3 +107,48 @@ func checkKvExist(preimages [][]byte, block *common.Block) error {
 	return nil
 
 }
+
+
+func extractPreimages(block *common.Block) [][]byte {
+
+	var preimages [][]byte
+
+	for _, envBytes := range block.Data.Data {
+		env, err := protoutil.GetEnvelopeFromBlock(envBytes)
+		if err != nil {
+			continue
+		}
+
+		payload, err := protoutil.UnmarshalPayload(env.Payload)
+		if err != nil {
+			continue
+		}
+
+		tx, err := protoutil.UnmarshalTransaction(payload.Data)
+		if err != nil {
+			return nil
+		}
+
+		_, respPayload, err := protoutil.GetPayloads(tx.Actions[0])
+		if err != nil {
+			return nil
+		}
+
+		txRWSet := &rwsetutil.TxRwSet{}
+
+		if err = txRWSet.FromProtoBytes(respPayload.Results); err != nil {
+			return nil
+		}
+		for _, nsRWSet := range txRWSet.NsRwSets {
+			for _, kvWrite := range nsRWSet.KvRwSet.Writes {
+				var a = kvWrite.GetValue()
+				preimages = append(preimages, a)
+			}
+
+		}
+
+	}
+
+	return preimages
+}
+
