@@ -1,10 +1,9 @@
 package gdpr
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"github.com/gogo/protobuf/proto"
+	"github.com/golang/protobuf/proto"
 
 	//"crypto"
 	"crypto/sha256"
@@ -26,36 +25,22 @@ func getHash(preimage []byte) []byte{
 func validate (block *common.Block) (*common.Block , error){
 	preImages := block.GetData().GetPreimageSpace()
 
-	//TODO: DBG ----------------
-	preImages = extractPreimages(block)
-
-	//TODO: DBG ----------------
-	//var writes [][]byte
-	var success = true
-
-	//m :=
-	m := map[string]bool{}
-	var hashes [][]byte
-
+	m := map[string]struct{}{}
 
 	for _, im := range preImages {
-		//im[0] = 0 TODO: toggle to fail test
 		temp := getHash(im)
-		hashes = append(hashes, temp )
-		m[(string(temp))] = true
+		m[(string(temp))] = struct{}{}
 	}
 
 	for _ , envBytes := range block.Data.Data {
 		env, err := protoutil.GetEnvelopeFromBlock(envBytes)
 		if err != nil {
-			//logger.Warning("Invalid envelope:", err)
-			continue
+			return nil, err
 		}
 
 		payload, err := protoutil.UnmarshalPayload(env.Payload) //protoutil.GetBytesPayload()
 		if err != nil {
-			//logger.Warning("Invalid payload:", err)
-			continue
+			return nil, err
 		}
 
 		tx, err := protoutil.UnmarshalTransaction(payload.Data)
@@ -85,23 +70,97 @@ func validate (block *common.Block) (*common.Block , error){
 				var b = getHash(kvWrite.GetValue())
 				//kvWrite.ValueHash = []byte("Gal")
 				if memberOf((string)(b),m) == false{
-					success = false
+					return nil,  ErrVal
 				}
 
 			}
 
 		}
 	}
-	//TODO: if(!success, throw new error
-	if !success{
-		return nil, ErrVal
-	}
-	return nil, nil
+
+	return getVanillaBlock(block)
+
+	//return nil, nil
 }
+
+
+
+
+func memberOf(a string, m map[string]struct{}) bool {
+	_ , exists := m[a]
+	return exists
+
+}
+
+func getVanillaBlock(block *common.Block) (*common.Block , error) {
+	newBlock := proto.Clone(block).(*common.Block)
+	newBlock.Data.PreimageSpace = nil
+
+	clearKVWrites(newBlock) // TODO: remove when blocks are generated without KVWrite values.
+	//preImages := block.GetData().GetPreimageSpace() // TODO: to be used in real world
+	preImages := extractPreimages(block)
+
+	for _, envBytes := range newBlock.Data.Data {
+		env, err := protoutil.GetEnvelopeFromBlock(envBytes)
+		if err != nil {
+			//logger.Warning("Invalid envelope:", err)
+			return nil,err
+		}
+
+		payload, err := protoutil.UnmarshalPayload(env.Payload) //protoutil.GetBytesPayload()
+		if err != nil {
+			//logger.Warning("Invalid payload:", err)
+			return nil,err
+		}
+
+		tx, err := protoutil.UnmarshalTransaction(payload.Data)
+		if err != nil {
+			return nil,err
+		}
+
+		_, respPayload, err := protoutil.GetPayloads(tx.Actions[0])
+		if err != nil {
+			return nil,err
+		}
+
+		txRWSet := &rwsetutil.TxRwSet{}
+
+		if err = txRWSet.FromProtoBytes(respPayload.Results); err != nil {
+			return nil,err
+		}
+		for _, nsRWSet := range txRWSet.NsRwSets {
+			for _, kvWrite := range nsRWSet.KvRwSet.Writes {
+				var a = kvWrite.GetValueHash()
+				//TODO: kvWrite.ValueHash := nil ??
+				temp := getKVWrite(preImages, a)
+				if temp != nil {
+					kvWrite.Value = temp
+				}
+			}
+
+		}
+	}
+
+	return newBlock,nil
+
+
+}
+
+func getKVWrite(preimages [][]byte , hashVal []byte ) []byte {
+	strVal := (string)(hashVal)
+	for _, pi := range preimages {
+		temp := (string)(getHash(pi))
+		if temp == strVal{
+			return pi
+		}
+	}
+	return nil
+}
+
 
 func extractPreimages(block *common.Block) [][]byte {
 
-	preimages := [][]byte{}
+	var preimages [][]byte
 
 	for _, envBytes := range block.Data.Data {
 		env, err := protoutil.GetEnvelopeFromBlock(envBytes)
@@ -127,20 +186,15 @@ func extractPreimages(block *common.Block) [][]byte {
 		}
 
 		txRWSet := &rwsetutil.TxRwSet{}
-		//txRWSet.FromProtoBytes(respPayload.Results)
 
 		if err = txRWSet.FromProtoBytes(respPayload.Results); err != nil {
 			return nil
 		}
-
 		for _, nsRWSet := range txRWSet.NsRwSets {
 			//nsRWSet.KvRwSet
 			for _, kvWrite := range nsRWSet.KvRwSet.Writes {
 				var a = kvWrite.GetValue()
 				preimages = append(preimages, a)
-
-				//kvWrite.ValueHash = []byte("Gal")
-
 			}
 
 		}
@@ -151,103 +205,43 @@ func extractPreimages(block *common.Block) [][]byte {
 }
 
 
-func memberOf(a string, m map[string]bool) bool {
-	if m[a] == true {
-		return true
-	}
-	return false
-
-}
-
-
-func /*(block *common.Block)*/ validate_old(block *common.Block) (*common.Block , error) { //TODO: remove!
-
-	//byte
-	preImages := block.GetData().GetPreimageSpace()
-	retBlock := common.Block{} // TODO: Does this actually create a block?
-
-	retBlock.Data = block.GetData()
-	retBlock.Header = block.GetHeader()
-	retBlock.Metadata = block.GetMetadata()
-
-
-	retBlock.GetData().PreimageSpace = [][]byte{} //TODO: Is this the way to replace the data there?
-
-	//retBlock.GetData().Data = preImages
-
-	var writes [][]byte
-	h := sha256.New()
-
-	var hashes [][]byte
-	for _, im := range preImages {
-		hashes = append(hashes, h.Sum(im))
-	}
-	//hashes is the set if hashes on the preimage space
-	var success = true
-	//preImages[][] = block.GetPreimageSpace()
-
-	for _ , envBytes := range block.Data.Data {
-
+func clearKVWrites(block *common.Block){
+	//clone := proto.Clone(block).(*common.Block)
+	for _, envBytes := range block.Data.Data {
 		env, err := protoutil.GetEnvelopeFromBlock(envBytes)
 		if err != nil {
 			//logger.Warning("Invalid envelope:", err)
-			//continue
-			return nil, err
+			return
 		}
 
-		// GAL: upto here - all good. need to extract pld now - find reference in other places in fabric
 		payload, err := protoutil.UnmarshalPayload(env.Payload) //protoutil.GetBytesPayload()
 		if err != nil {
-			return nil, err
+			//logger.Warning("Invalid payload:", err)
+			return
 		}
 
 		tx, err := protoutil.UnmarshalTransaction(payload.Data)
 		if err != nil {
-			return nil, err
+			return
 		}
 
 		_, respPayload, err := protoutil.GetPayloads(tx.Actions[0])
 		if err != nil {
-			return nil, err
+			return
 		}
-
 
 		txRWSet := &rwsetutil.TxRwSet{}
-		//txRWSet.FromProtoBytes(respPayload.Results)
 
 		if err = txRWSet.FromProtoBytes(respPayload.Results); err != nil {
-			return nil, err
-		}
-
+			return		}
 		for _, nsRWSet := range txRWSet.NsRwSets {
 			//nsRWSet.KvRwSet
 			for _, kvWrite := range nsRWSet.KvRwSet.Writes {
-				var a = kvWrite.GetValueHash()
-				kvWrite.ValueHash = []byte("Gal")
-				if memberOf_old(a,hashes) == false{
-					success = false
-				}
-				writes = append(writes,a) // kvWrite.GetValueHash())
-
+				kvWrite.Value = nil
 			}
-
 		}
 	}
-	if success == false {
-		return nil, proto.ErrNil // TODO: Other error!
-	} else {
-		return nil, nil
-	}
-
 
 }
 
-func memberOf_old(a []byte, b [][]byte) bool{
-	for _,hashVal := range b{
-		if bytes.Compare(a,hashVal) == 0 {
-			return true
-		}
-	}
-	return false
 
-}
