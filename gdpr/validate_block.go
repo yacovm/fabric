@@ -28,11 +28,11 @@ func getHash(preimage []byte) []byte {
 func validate(block *common.Block) (*common.Block, error) {
 	preImages := block.GetData().GetPreimageSpace()
 
-	m := map[string]struct{}{}
+	hashesOfPreimages := map[string]struct{}{}
 
 	for _, im := range preImages {
 		temp := getHash(im)
-		m[(string(temp))] = struct{}{}
+		hashesOfPreimages[(string(temp))] = struct{}{}
 	}
 
 	for _, envBytes := range block.Data.Data {
@@ -65,8 +65,8 @@ func validate(block *common.Block) (*common.Block, error) {
 		for _, nsRWSet := range txRWSet.NsRwSets {
 			for _, kvWrite := range nsRWSet.KvRwSet.Writes {
 				var hashVal = getHash(kvWrite.GetValue()) // TODO: should be kvWrite.GetValueHash() when there are actual values
-
-				if memberOf((string)(hashVal), m) == false {
+				//var hashVal = kvWrite.GetValueHash()
+				if memberOf((string)(hashVal), hashesOfPreimages) == false {
 					return nil, ErrVal
 				}
 
@@ -88,9 +88,7 @@ func getVanillaBlock(block *common.Block) (*common.Block, error) {
 	newBlock := proto.Clone(block).(*common.Block)
 	newBlock.Data.PreimageSpace = nil
 
-	clearKVWrites(newBlock) // TODO: remove when blocks are generated without KVWrite values.
-	//preImages := block.GetData().GetPreimageSpace() // TODO: to be used in real world
-	preImages := extractPreimages(block)
+	preImages := block.GetData().GetPreimageSpace()
 
 	for _, envBytes := range newBlock.Data.Data {
 		env, err := protoutil.GetEnvelopeFromBlock(envBytes)
@@ -146,38 +144,5 @@ func findKVWrite(preimages [][]byte, hashVal []byte) []byte {
 }
 
 
-func clearKVWrites(block *common.Block) {
-	for _, envBytes := range block.Data.Data {
-		env, err := protoutil.GetEnvelopeFromBlock(envBytes)
-		if err != nil {
-			return
-		}
 
-		payload, err := protoutil.UnmarshalPayload(env.Payload)
-		if err != nil {
-			return
-		}
 
-		tx, err := protoutil.UnmarshalTransaction(payload.Data)
-		if err != nil {
-			return
-		}
-
-		_, respPayload, err := protoutil.GetPayloads(tx.Actions[0])
-		if err != nil {
-			return
-		}
-
-		txRWSet := &rwsetutil.TxRwSet{}
-
-		if err = txRWSet.FromProtoBytes(respPayload.Results); err != nil {
-			return
-		}
-		for _, nsRWSet := range txRWSet.NsRwSets {
-			for _, kvWrite := range nsRWSet.KvRwSet.Writes {
-				kvWrite.Value = nil
-			}
-		}
-	}
-
-}
