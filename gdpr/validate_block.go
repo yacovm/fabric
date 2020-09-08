@@ -7,142 +7,153 @@ SPDX-License-Identifier: Apache-2.0
 package gdpr
 
 import (
-	"errors"
-	"github.com/golang/protobuf/proto"
-
 	"crypto/sha256"
+	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
 
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric/core/ledger/kvledger/txmgmt/rwsetutil"
 	"github.com/hyperledger/fabric/protoutil"
 )
 
-var ErrVal = errors.New("gdpr: block validation failed")
-
-func getHash(preimage []byte) []byte {
+func hash(preimage []byte) []byte {
 	h := sha256.New()
-	return h.Sum(preimage)
-
+	h.Write(preimage)
+	return h.Sum(nil)
 }
 
-func validate(block *common.Block) (*common.Block, error) {
-	preImages := block.GetData().GetPreimageSpace()
+type set map[string]struct{}
 
-	hashesOfPreimages := map[string]struct{}{}
+func (s set) exists(element string) bool {
+	_, ok := s[element]
+	return ok
+}
 
-	for _, im := range preImages {
-		temp := getHash(im)
-		hashesOfPreimages[(string(temp))] = struct{}{}
+func hashedPreImages(block *common.Block) set {
+	hashesOfPreimages := make(set)
+	for _, preimage := range block.GetData().GetPreimageSpace() {
+		hashesOfPreimages[(string(hash(preimage)))] = struct{}{}
 	}
+	return hashesOfPreimages
+}
 
-	for _, envBytes := range block.Data.Data {
-		env, err := protoutil.GetEnvelopeFromBlock(envBytes)
-		if err != nil {
-			return nil, err
-		}
+type transactionValidation struct {
+	err                   atomic.Value
+	hashesInPreImageSpace set
+}
 
-		payload, err := protoutil.UnmarshalPayload(env.Payload)
-		if err != nil {
-			return nil, err
-		}
-
-		tx, err := protoutil.UnmarshalTransaction(payload.Data)
-		if err != nil {
-			return nil, err
-		}
-
-		_, respPayload, err := protoutil.GetPayloads(tx.Actions[0])
-		if err != nil {
-			return nil, err
-		}
-
-		txRWSet := &rwsetutil.TxRwSet{}
-
-		if err = txRWSet.FromProtoBytes(respPayload.Results); err != nil {
-			return nil, err
-		}
-
-		for _, nsRWSet := range txRWSet.NsRwSets {
-			for _, kvWrite := range nsRWSet.KvRwSet.Writes {
-				var hashVal = getHash(kvWrite.GetValue()) // TODO: should be kvWrite.GetValueHash() when there are actual values
-				//var hashVal = kvWrite.GetValueHash()
-				if memberOf((string)(hashVal), hashesOfPreimages) == false {
-					return nil, ErrVal
-				}
-
+func (tv *transactionValidation) validateHashesOfTxRWS(_ *common.Block, _ int, rws *rwsetutil.TxRwSet) {
+	for _, nsrws := range rws.NsRwSets {
+		for _, kvWrite := range nsrws.KvRwSet.Writes {
+			fmt.Println("validateHashesOfTxRWS:", kvWrite.Key, kvWrite.Value)
+			if !tv.hashesInPreImageSpace.exists(string(kvWrite.ValueHash)) {
+				err := fmt.Errorf("key %s write wasn't found in pre-image space", kvWrite.Key)
+				tv.err.Store(err)
+			} else {
+				fmt.Println("key", kvWrite.Key, "write was found in pre-image space")
 			}
-
 		}
 	}
-
-	return getVanillaBlock(block)
 }
 
-func memberOf(a string, m map[string]struct{}) bool {
-	_, exists := m[a]
-	return exists
-
+func (tv *transactionValidation) onErr(err error) {
+	tv.err.Store(err)
 }
 
-func getVanillaBlock(block *common.Block) (*common.Block, error) {
-	newBlock := proto.Clone(block).(*common.Block)
-	newBlock.Data.PreimageSpace = nil
+func (tv *transactionValidation) error() error {
+	errVal := tv.err.Load()
+	if errVal == nil {
+		return nil
+	}
+	return errVal.(error)
+}
 
-	preImages := block.GetData().GetPreimageSpace()
-
-	for _, envBytes := range newBlock.Data.Data {
-		env, err := protoutil.GetEnvelopeFromBlock(envBytes)
-		if err != nil {
-			return nil, err
-		}
-
-		payload, err := protoutil.UnmarshalPayload(env.Payload)
-		if err != nil {
-			return nil, err
-		}
-
-		tx, err := protoutil.UnmarshalTransaction(payload.Data)
-		if err != nil {
-			return nil, err
-		}
-
-		_, respPayload, err := protoutil.GetPayloads(tx.Actions[0])
-		if err != nil {
-			return nil, err
-		}
-
-		txRWSet := &rwsetutil.TxRwSet{}
-
-		if err = txRWSet.FromProtoBytes(respPayload.Results); err != nil {
-			return nil, err
-		}
-		for _, nsRWSet := range txRWSet.NsRwSets {
-			for _, kvWrite := range nsRWSet.KvRwSet.Writes {
-				var a = kvWrite.GetValueHash()
-				temp := findKVWrite(preImages, a)
-				if temp != nil {
-					kvWrite.Value = temp
-				}
-			}
-
-		}
+func Validate(block *common.Block) error {
+	txValidation := transactionValidation{
+		hashesInPreImageSpace: hashedPreImages(block),
 	}
 
-	return newBlock, nil
+	forEachTransaction(block, txValidation.validateHashesOfTxRWS, txValidation.onErr)
 
+	return txValidation.error()
 }
 
-func findKVWrite(preimages [][]byte, hashVal []byte) []byte {
-	strVal := (string)(hashVal)
-	for _, pi := range preimages {
-		temp := (string)(getHash(pi))
-		if temp == strVal {
-			return pi
-		}
+func forEachTransaction(block *common.Block, f func(block *common.Block, i int, rws *rwsetutil.TxRwSet), onErr func(err error)) {
+	var workers sync.WaitGroup
+	workers.Add(len(block.Data.Data))
+
+	for i, envBytes := range block.Data.Data {
+		go func(i int, envBytes []byte) {
+			defer workers.Done()
+			processEnvelope(envBytes, block, i, f, onErr)
+		}(i, envBytes)
 	}
-	return nil
+
+	workers.Wait()
 }
 
+func processEnvelope(envBytes []byte, block *common.Block, i int, f func(block *common.Block, i int, rws *rwsetutil.TxRwSet), onErr func(err error)) {
+	originalEnvelope, err := protoutil.GetEnvelopeFromBlock(envBytes)
+	if err != nil {
+		onErr(err)
+		return
+	}
 
+	payload, err := protoutil.UnmarshalPayload(originalEnvelope.Payload)
+	if err != nil {
+		onErr(err)
+		return
+	}
 
+	chdr, err := protoutil.ChannelHeader(originalEnvelope)
+	if err != nil {
+		onErr(err)
+		return
+	}
 
+	if common.HeaderType(chdr.Type) != common.HeaderType_ENDORSER_TRANSACTION {
+		return
+	}
+
+	tx, err := protoutil.UnmarshalTransaction(payload.Data)
+	if err != nil {
+		onErr(err)
+		return
+	}
+
+	ccPayload, err := protoutil.UnmarshalChaincodeActionPayload(tx.Actions[0].Payload)
+	if err != nil {
+		onErr(err)
+		return
+	}
+
+	if ccPayload.Action == nil || ccPayload.Action.ProposalResponsePayload == nil {
+		onErr(fmt.Errorf("no payload in ChaincodeActionPayload"))
+	}
+	pRespPayload, err := protoutil.UnmarshalProposalResponsePayload(ccPayload.Action.ProposalResponsePayload)
+	if err != nil {
+		onErr(err)
+		return
+	}
+
+	if pRespPayload.Extension == nil {
+		onErr(errors.New("response payload is missing extension"))
+	}
+
+	ccAction, err := protoutil.UnmarshalChaincodeAction(pRespPayload.Extension)
+	if err != nil {
+		onErr(err)
+		return
+	}
+
+	txRWSet := &rwsetutil.TxRwSet{}
+
+	if err = txRWSet.FromProtoBytes(ccAction.Results); err != nil {
+		onErr(err)
+		return
+	}
+
+	f(block, i, txRWSet)
+}
