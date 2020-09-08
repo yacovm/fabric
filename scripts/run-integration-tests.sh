@@ -10,12 +10,11 @@
 
 set -eu
 
-docker pull hyperledger/fabric-ccenv:latest
-docker pull hyperledger/fabric-ccenv:2.2
-docker pull hyperledger/fabric-ccenv:2.2.0
 
 echo "Pulling docker images"
 make docker-thirdparty
+
+make docker
 
 cd integration/lifecycle
 
