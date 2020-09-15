@@ -34,7 +34,6 @@ type InactiveChainRegistry interface {
 	TrackChain(chainName string, genesisBlock *common.Block, createChain func())
 }
 
-
 // ChannelPredicate accepts channels according to their names.
 type ChannelPredicate func(channelName string) bool
 

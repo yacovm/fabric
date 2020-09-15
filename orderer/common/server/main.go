@@ -672,11 +672,6 @@ func initializeMultichannelRegistrar(
 
 	consenters := make(map[string]consensus.Consenter)
 	consenters["solo"] = solo.New()
-	var kafkaMetrics *kafka.Metrics
-
-	// Note, we pass a 'nil' channel here, we could pass a channel that
-	// closes if we wished to cleanup this routine on exit.
-	go kafkaMetrics.PollGoMetricsUntilStop(time.Minute, nil)
 	consenterType := consensusType(genesisBlock)
 	var icr cluster.InactiveChainRegistry
 	if _, exists := clusterTypes[consenterType]; exists {
@@ -693,8 +688,12 @@ func initializeMultichannelRegistrar(
 			logger.Panicf("Unknown cluster type consenter")
 		}
 	}
+	var kafkaMetrics *kafka.Metrics
 
 	consenters["kafka"], kafkaMetrics = kafka.New(conf.Kafka, metricsProvider, healthChecker, icr, registrar.CreateChain)
+	// Note, we pass a 'nil' channel here, we could pass a channel that
+	// closes if we wished to cleanup this routine on exit.
+	go kafkaMetrics.PollGoMetricsUntilStop(time.Minute, nil)
 	registrar.Initialize(consenters)
 	return registrar
 }
