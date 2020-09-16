@@ -513,6 +513,8 @@ func TestVerifyBlocks(t *testing.T) {
 			err := testCase.verifyFunc(blockchain, verifier)
 			if testCase.expectedError != "" {
 				assert.EqualError(t, err, testCase.expectedError)
+			} else {
+				assert.NoError(t, err)
 			}
 			verifier.AssertNumberOfCalls(t, "VerifyBlockSignature", testCase.expectedVerificationCalls)
 		})

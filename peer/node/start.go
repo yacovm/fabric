@@ -139,6 +139,8 @@ func serve(args []string) error {
 		panic("Unsupported msp type " + msp.ProviderTypeToString(mspType))
 	}
 
+	mspID := viper.GetString("peer.localMspId")
+
 	// Trace RPCs with the golang.org/x/net/trace package. This was moved out of
 	// the deliver service connection factory as it has process wide implications
 	// and was racy with respect to initialization of gRPC clients and servers.
@@ -176,7 +178,7 @@ func serve(args []string) error {
 	logObserver := floggingmetrics.NewObserver(metricsProvider)
 	flogging.Global.SetObserver(logObserver)
 
-	membershipInfoProvider := privdata.NewMembershipInfoProvider(createSelfSignedData(), identityDeserializerFactory)
+	membershipInfoProvider := privdata.NewMembershipInfoProvider(mspID, createSelfSignedData(), identityDeserializerFactory)
 	//initialize resource management exit
 	ledgermgmt.Initialize(
 		&ledgermgmt.Initializer{
@@ -893,6 +895,7 @@ func initGossipService(policyMgr policies.ChannelPolicyManagerGetter, metricsPro
 	)
 	secAdv := peergossip.NewSecurityAdvisor(mgmt.NewDeserializersManager())
 	bootstrap := viper.GetStringSlice("peer.gossip.bootstrap")
+	orgLeader := viper.GetBool("peer.gossip.orgLeader")
 
 	return service.InitGossipService(
 		serializedIdentity,
@@ -903,6 +906,7 @@ func initGossipService(policyMgr policies.ChannelPolicyManagerGetter, metricsPro
 		messageCryptoService,
 		secAdv,
 		secureDialOpts,
+		orgLeader,
 		bootstrap...,
 	)
 }

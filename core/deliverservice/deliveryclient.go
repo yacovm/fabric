@@ -29,7 +29,7 @@ var logger = flogging.MustGetLogger("deliveryClient")
 const (
 	defaultReConnectTotalTimeThreshold = time.Second * 60 * 60
 	defaultConnectionTimeout           = time.Second * 3
-	defaultReConnectBackoffThreshold   = float64(time.Hour)
+	defaultReConnectBackoffThreshold   = time.Hour
 )
 
 func getReConnectTotalTimeThreshold() time.Duration {
@@ -40,8 +40,8 @@ func getConnectionTimeout() time.Duration {
 	return util.GetDurationOrDefault("peer.deliveryclient.connTimeout", defaultConnectionTimeout)
 }
 
-func getReConnectBackoffThreshold() float64 {
-	return util.GetFloat64OrDefault("peer.deliveryclient.reConnectBackoffThreshold", defaultReConnectBackoffThreshold)
+func getReConnectBackoffThreshold() time.Duration {
+	return util.GetDurationOrDefault("peer.deliveryclient.reConnectBackoffThreshold", defaultReConnectBackoffThreshold)
 }
 
 func staticRootsEnabled() bool {
@@ -101,6 +101,7 @@ type deliverClient struct {
 // how it verifies messages received from it,
 // and how it disseminates the messages to other peers
 type Config struct {
+	IsStaticLeader bool
 	// ConnFactory returns a function that creates a connection to an endpoint
 	ConnFactory func(channelID string, endpointOverrides map[string]*comm.OrdererEndpoint) func(endpointCriteria comm.EndpointCriteria) (*grpc.ClientConn, error)
 	// ABCFactory creates an AtomicBroadcastClient out of a connection
@@ -324,11 +325,14 @@ func (d *deliverServiceImpl) newClient(chainID string, ledgerInfoProvider blocks
 	}
 	backoffPolicy := func(attemptNum int, elapsedTime time.Duration) (time.Duration, bool) {
 		if elapsedTime >= reconnectTotalTimeThreshold {
-			return 0, false
+			if !d.conf.IsStaticLeader {
+				return 0, false
+			}
+			logger.Warning("peer is a static leader, ignoring peer.deliveryclient.reconnectTotalTimeThreshold")
 		}
 		sleepIncrement := float64(time.Millisecond * 500)
 		attempt := float64(attemptNum)
-		return time.Duration(math.Min(math.Pow(2, attempt)*sleepIncrement, reconnectBackoffThreshold)), true
+		return time.Duration(math.Min(math.Pow(2, attempt)*sleepIncrement, float64(reconnectBackoffThreshold))), true
 	}
 	connProd := comm.NewConnectionProducer(d.conf.ConnFactory(chainID, d.connConfig.OrdererEndpointOverrides), d.connConfig.toEndpointCriteria())
 	bClient := NewBroadcastClient(connProd, d.conf.ABCFactory, broadcastSetup, backoffPolicy)

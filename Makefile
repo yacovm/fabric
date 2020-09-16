@@ -44,10 +44,10 @@
 #   - docker-tag-stable - re-tags the images made by 'make docker' with the :stable tag
 #   - help-docs - generate the command reference docs
 
-BASE_VERSION = 1.4.5
-PREV_VERSION = 1.4.4
+BASE_VERSION = 1.4.7
+PREV_VERSION = 1.4.6
 CHAINTOOL_RELEASE=1.1.3
-BASEIMAGE_RELEASE=0.4.18
+BASEIMAGE_RELEASE=0.4.20
 
 # Allow to build as a submodule setting the main project to
 # the PROJECT_NAME env variable, for example,
@@ -59,7 +59,6 @@ PROJECT_NAME = hyperledger/fabric
 endif
 
 BUILD_DIR ?= .build
-NEXUS_REPO = nexus3.hyperledger.org:10001/hyperledger
 
 EXTRA_VERSION ?= $(shell git rev-parse --short HEAD)
 PROJECT_VERSION=$(BASE_VERSION)-snapshot-$(EXTRA_VERSION)
@@ -81,7 +80,7 @@ GO_LDFLAGS = $(patsubst %,-X $(PKGNAME)/common/metadata.%,$(METADATA_VAR))
 
 GO_TAGS ?=
 
-CHAINTOOL_URL ?= https://nexus.hyperledger.org/content/repositories/releases/org/hyperledger/fabric/hyperledger-fabric/chaintool-$(CHAINTOOL_RELEASE)/hyperledger-fabric-chaintool-$(CHAINTOOL_RELEASE).jar
+CHAINTOOL_URL ?= https://hyperledger.jfrog.io/hyperledger/fabric-maven/org/hyperledger/fabric-chaintool/$(CHAINTOOL_RELEASE)/fabric-chaintool-$(CHAINTOOL_RELEASE).jar
 
 export GO_LDFLAGS GO_TAGS
 

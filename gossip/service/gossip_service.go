@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package service
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/hyperledger/fabric/common/metrics"
@@ -62,15 +63,17 @@ type DeliveryServiceFactory interface {
 }
 
 type deliveryFactoryImpl struct {
+	isStaticLeader bool
 }
 
 // Returns an instance of delivery client
-func (*deliveryFactoryImpl) Service(g GossipService, ec OrdererAddressConfig, mcs api.MessageCryptoService) (deliverclient.DeliverService, error) {
+func (d *deliveryFactoryImpl) Service(g GossipService, ec OrdererAddressConfig, mcs api.MessageCryptoService) (deliverclient.DeliverService, error) {
 	return deliverclient.NewDeliverService(&deliverclient.Config{
-		CryptoSvc:   mcs,
-		Gossip:      g,
-		ConnFactory: deliverclient.DefaultConnectionFactory,
-		ABCFactory:  deliverclient.DefaultABCFactory,
+		IsStaticLeader: d.isStaticLeader,
+		CryptoSvc:      mcs,
+		Gossip:         g,
+		ConnFactory:    deliverclient.DefaultConnectionFactory,
+		ABCFactory:     deliverclient.DefaultABCFactory,
 	}, deliverclient.ConnectionCriteria{
 		OrdererEndpointsByOrg:    ec.AddressesByOrg,
 		Organizations:            ec.Organizations,
@@ -150,6 +153,7 @@ func InitGossipService(
 	mcs api.MessageCryptoService,
 	secAdv api.SecurityAdvisor,
 	secureDialOpts api.PeerSecureDialOpts,
+	orgLeader bool,
 	bootPeers ...string,
 ) error {
 	// TODO: Remove this.
@@ -162,7 +166,7 @@ func InitGossipService(
 		endpoint,
 		s,
 		certs,
-		&deliveryFactoryImpl{},
+		&deliveryFactoryImpl{isStaticLeader: orgLeader},
 		mcs,
 		secAdv,
 		secureDialOpts,
@@ -229,7 +233,8 @@ func (g *gossipServiceImpl) DistributePrivateData(chainID string, txID string, p
 	}
 
 	if err := handler.distributor.Distribute(txID, privData, blkHt); err != nil {
-		logger.Error("Failed to distributed private collection, txID", txID, "channel", chainID, "due to", err)
+		err := errors.WithMessage(err, fmt.Sprint("failed to distribute private collection, txID ", txID, ", channel %s", chainID))
+		logger.Error(err)
 		return err
 	}
 
@@ -291,7 +296,9 @@ func (g *gossipServiceImpl) InitializeChannel(chainID string, oac OrdererAddress
 		SkipPullingInvalidTransactions: viper.GetBool("peer.gossip.pvtData.skipPullingInvalidTransactionsDuringCommit"),
 	}
 
-	coordinator := privdata2.NewCoordinator(privdata2.Support{
+	selfSignedData := g.createSelfSignedData()
+	mspID := string(g.secAdv.OrgByPeerIdentity(selfSignedData.Identity))
+	coordinator := privdata2.NewCoordinator(mspID, privdata2.Support{
 		ChainID:            chainID,
 		CollectionStore:    support.Cs,
 		Validator:          support.Validator,
@@ -299,7 +306,7 @@ func (g *gossipServiceImpl) InitializeChannel(chainID string, oac OrdererAddress
 		Committer:          support.Committer,
 		Fetcher:            fetcher,
 		CapabilityProvider: support.CapabilityProvider,
-	}, g.createSelfSignedData(), g.metrics.PrivdataMetrics, coordinatorConfig)
+	}, selfSignedData, g.metrics.PrivdataMetrics, coordinatorConfig)
 
 	reconcilerConfig := privdata2.GetReconcilerConfig()
 	var reconciler privdata2.PvtDataReconciler

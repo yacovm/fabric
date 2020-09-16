@@ -27,6 +27,13 @@ const (
 	RetryTimeout = time.Second * 10
 )
 
+// InactiveChainRegistry registers chains that are inactive
+type InactiveChainRegistry interface {
+	// TrackChain tracks a chain with the given name, and calls the given callback
+	// when this chain should be created.
+	TrackChain(chainName string, genesisBlock *common.Block, createChain CreateChainCallback)
+}
+
 // ChannelPredicate accepts channels according to their names.
 type ChannelPredicate func(channelName string) bool
 

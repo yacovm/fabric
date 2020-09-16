@@ -7,11 +7,12 @@
 
 type=$1
 
+
+make docker
+
 echo "Running $type tests"
 
-echo "Pulling hyperledger/fabric-ccenv:latest"
-docker pull hyperledger/fabric-ccenv:latest
-docker tag hyperledger/fabric-ccenv hyperledger/fabric-ccenv:amd64-latest
+
 
 echo "Pulling hyperledger/fabric-couchdb"
 docker pull hyperledger/fabric-couchdb:latest
