@@ -300,6 +300,10 @@ func (mgr *blockfileMgr) addBlock(block *common.Block) error {
 	// and then via:
 	// mgr.fetchTransactionEnvelope(loc)
 
+	// Gal: how do we access files?
+	// (afterwards - invade blocks and nil out preimages)
+	// Gal: leave this to the end
+
 	bcInfo := mgr.getBlockchainInfo()
 	if block.Header.Number != bcInfo.Height {
 		return errors.Errorf(

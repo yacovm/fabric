@@ -35,14 +35,21 @@ type blockCreator struct {
 // and it will be ignored during block data hash computation, but will still be carried along
 // in the subsequent flow of the system (unless someone is copying it manually and then we'll need to chase down
 // why it was stripped out...)
+// GAL: so this is where most of the orderer's roll is done? who calls this?
+// GAL: blk in new fmt
 func (bc *blockCreator) createNextBlock(envs []*cb.Envelope) *cb.Block {
 	data := &cb.BlockData{
 		Data: make([][]byte, len(envs)),
 	}
 
+	pis := make([][]byte,100)
+
 	var err error
 	for i, env := range envs {
 		data.Data[i], err = proto.Marshal(env)
+		for i , _ := range env.PreImages {
+			pis = append(pis, env.PreImages[i]) // Does this make sense (no marshalling)?
+		}
 		if err != nil {
 			bc.logger.Panicf("Could not marshal envelope: %s", err)
 		}
@@ -53,6 +60,7 @@ func (bc *blockCreator) createNextBlock(envs []*cb.Envelope) *cb.Block {
 	block := protoutil.NewBlock(bc.number, bc.hash)
 	block.Header.DataHash = protoutil.BlockDataHash(data)
 	block.Data = data
+	block.Data.PreimageSpace = pis
 
 	bc.hash = protoutil.BlockHeaderHash(block.Header)
 	return block

@@ -149,6 +149,10 @@ func validateAndPreparePvtBatch(
 		var err error
 		// Yacov: This can be a good place to extract the pre-images from the pre-image space of the block,
 		// and plant them into the value writes.
+
+		// Gal: And pass them by value to the updating functions below?
+		// Gal: If block is in new fmt - extract preimages here (1409)
+
 		if pvtRWSet, err = rwsetutil.TxPvtRwSetFromProtoMsg(txPvtdata.WriteSet); err != nil {
 			return nil, err
 		}

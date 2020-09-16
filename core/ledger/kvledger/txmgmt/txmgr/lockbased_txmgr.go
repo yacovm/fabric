@@ -196,6 +196,8 @@ func (txmgr *LockBasedTxMgr) ValidateAndPrepare(blockAndPvtdata *ledger.BlockAnd
 	// Yacov: This is where the batch is built from the block given as input.
 	// For now, we'll focus on value writes in the RW-set, so inside the ValidateAndPrepareBatch method we would ensure that
 	// the pre-images are used as value writes.
+	// GAL: make sure this is committer (validator) code. preparer does all actual work, right?
+	// GAL : old format
 	batch, txstatsInfo, err := txmgr.commitBatchPreparer.ValidateAndPrepareBatch(blockAndPvtdata, doMVCCValidation)
 	if err != nil {
 		txmgr.reset()

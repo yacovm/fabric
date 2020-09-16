@@ -199,6 +199,7 @@ func (e *Endorser) SimulateProposal(txParams *ccprovider.TransactionParams, chai
 	// this change, so, should be safe.  Long term, let's move the Done up to the create.
 	defer txParams.TXSimulator.Done()
 
+
 	simResult, err := txParams.TXSimulator.GetTxSimulationResults()
 	if err != nil {
 		e.Metrics.SimulationFailure.With(meterLabels...).Add(1)
@@ -239,6 +240,8 @@ func (e *Endorser) SimulateProposal(txParams *ccprovider.TransactionParams, chai
 
 	// Yacov: This is where the writes that appear on the blockchain are assembled,
 	// right before they are passed to EndorseWithPlugin (line 451).
+
+	// GAL: pass by reference on simResults and add hashes
 	pubSimResBytes, err := simResult.GetPubSimulationBytes()
 	if err != nil {
 		e.Metrics.SimulationFailure.With(meterLabels...).Add(1)
@@ -246,6 +249,84 @@ func (e *Endorser) SimulateProposal(txParams *ccprovider.TransactionParams, chai
 	}
 
 	return res, pubSimResBytes, ccevent, nil
+}
+
+
+// SimulateProposal simulates the proposal by calling the chaincode
+func (e *Endorser) SimulateProposalGDPR(txParams *ccprovider.TransactionParams, chaincodeName string, chaincodeInput *pb.ChaincodeInput) (*pb.Response, []byte, *pb.ChaincodeEvent, [][]byte, error) {
+	logger := decorateLogger(endorserLogger, txParams)
+
+	meterLabels := []string{
+		"channel", txParams.ChannelID,
+		"chaincode", chaincodeName,
+	}
+
+	// ---3. execute the proposal and get simulation results
+	res, ccevent, err := e.callChaincode(txParams, chaincodeInput, chaincodeName)
+	if err != nil {
+		logger.Errorf("failed to invoke chaincode %s, error: %+v", chaincodeName, err)
+		return nil, nil, nil, nil, err
+	}
+
+	if txParams.TXSimulator == nil {
+		return res, nil, ccevent, nil, nil
+	}
+
+	// Note, this is a little goofy, as if there is private data, Done() gets called
+	// early, so this is invoked multiple times, but that is how the code worked before
+	// this change, so, should be safe.  Long term, let's move the Done up to the create.
+	defer txParams.TXSimulator.Done()
+
+
+	simResult, err := txParams.TXSimulator.GetTxSimulationResults()
+	if err != nil {
+		e.Metrics.SimulationFailure.With(meterLabels...).Add(1)
+		return nil, nil, nil, nil, err
+	}
+
+	if simResult.PvtSimulationResults != nil {
+		if chaincodeName == "lscc" {
+			// TODO: remove once we can store collection configuration outside of LSCC
+			e.Metrics.SimulationFailure.With(meterLabels...).Add(1)
+			return nil, nil, nil, nil, errors.New("Private data is forbidden to be used in instantiate")
+		}
+		pvtDataWithConfig, err := AssemblePvtRWSet(txParams.ChannelID, simResult.PvtSimulationResults, txParams.TXSimulator, e.Support.GetDeployedCCInfoProvider())
+		// To read collection config need to read collection updates before
+		// releasing the lock, hence txParams.TXSimulator.Done()  moved down here
+		txParams.TXSimulator.Done()
+
+		if err != nil {
+			e.Metrics.SimulationFailure.With(meterLabels...).Add(1)
+			return nil, nil, nil, nil, errors.WithMessage(err, "failed to obtain collections config")
+		}
+		endorsedAt, err := e.Support.GetLedgerHeight(txParams.ChannelID)
+		if err != nil {
+			e.Metrics.SimulationFailure.With(meterLabels...).Add(1)
+			return nil, nil, nil,  nil, errors.WithMessage(err, fmt.Sprintf("failed to obtain ledger height for channel '%s'", txParams.ChannelID))
+		}
+		// Add ledger height at which transaction was endorsed,
+		// `endorsedAt` is obtained from the block storage and at times this could be 'endorsement Height + 1'.
+		// However, since we use this height only to select the configuration (3rd parameter in distributePrivateData) and
+		// manage transient store purge for orphaned private writesets (4th parameter in distributePrivateData), this works for now.
+		// Ideally, ledger should add support in the simulator as a first class function `GetHeight()`.
+		pvtDataWithConfig.EndorsedAt = endorsedAt
+		if err := e.PrivateDataDistributor.DistributePrivateData(txParams.ChannelID, txParams.TxID, pvtDataWithConfig, endorsedAt); err != nil {
+			e.Metrics.SimulationFailure.With(meterLabels...).Add(1)
+			return nil, nil, nil, nil, err
+		}
+	}
+
+	// Yacov: This is where the writes that appear on the blockchain are assembled,
+	// right before they are passed to EndorseWithPlugin (line 451).
+
+	// GAL: pass by reference on simResults and add hashes
+	pubSimResBytes, pis, err := simResult.GetPubSimulationBytesGDPR()
+	if err != nil {
+		e.Metrics.SimulationFailure.With(meterLabels...).Add(1)
+		return nil, nil, nil, nil, err
+	}
+
+	return res, pubSimResBytes, ccevent, pis, nil
 }
 
 // preProcess checks the tx proposal headers, uniqueness and ACL
@@ -400,7 +481,7 @@ func (e *Endorser) ProcessProposalSuccessfullyOrError(up *UnpackedProposal) (*pb
 	// We need to strip out the value writes, replace them with hashes, and then
 	// construct a pre-image space which we will plant inside the ProposalResponse.
 	// 1 -- simulate
-	res, simulationResult, ccevent, err := e.SimulateProposal(txParams, up.ChaincodeName, up.Input)
+	res, simulationResult, ccevent, pis, err := e.SimulateProposalGDPR(txParams, up.ChaincodeName, up.Input)
 	if err != nil {
 		return nil, errors.WithMessage(err, "error in simulation")
 	}
@@ -459,11 +540,14 @@ func (e *Endorser) ProcessProposalSuccessfullyOrError(up *UnpackedProposal) (*pb
 		return nil, errors.WithMessage(err, "endorsing with plugin failed")
 	}
 
+	p2 := &pb.PreimageSpace{ValueWrites: pis}
+
 	return &pb.ProposalResponse{
 		Version:     1,
 		Endorsement: endorsement,
 		Payload:     mPrpBytes,
 		Response:    res,
+		PreimageSpace: p2,
 	}, nil
 }
 
