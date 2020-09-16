@@ -191,7 +191,7 @@ var _ = Describe("Encoder", func() {
 		It("translates the config into a config group", func() {
 			cg, err := encoder.NewOrdererGroup(conf)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(len(cg.Policies)).To(Equal(1))
+			Expect(len(cg.Policies)).To(Equal(2))
 			Expect(cg.Policies["SamplePolicy"]).NotTo(BeNil())
 			Expect(cg.Policies["SamplePolicy"].Policy).To(Equal(&cb.Policy{
 				Type: int32(cb.Policy_IMPLICIT_META),
@@ -906,7 +906,7 @@ var _ = Describe("Encoder", func() {
 			})
 
 			It("returns an encoded and signed tx", func() {
-				env, err := encoder.MakeChannelCreationTransaction("channel-id", &encoder.LocalSigner{Signer: fakeSigner}, conf)
+				env, err := encoder.MakeChannelCreationTransaction("channel-id", fakeSigner, conf)
 				Expect(err).NotTo(HaveOccurred())
 				payload := &cb.Payload{}
 				err = proto.Unmarshal(env.Payload, payload)
@@ -926,7 +926,7 @@ var _ = Describe("Encoder", func() {
 				})
 
 				It("wraps and returns the error", func() {
-					_, err := encoder.MakeChannelCreationTransaction("channel-id", &encoder.LocalSigner{Signer: fakeSigner}, conf)
+					_, err := encoder.MakeChannelCreationTransaction("channel-id", fakeSigner, conf)
 					Expect(err).To(MatchError("could not generate default config template: channel template configs must contain an application section"))
 				})
 			})
@@ -937,7 +937,7 @@ var _ = Describe("Encoder", func() {
 				})
 
 				It("wraps and returns the error", func() {
-					_, err := encoder.MakeChannelCreationTransaction("channel-id", &encoder.LocalSigner{Signer: fakeSigner}, conf)
+					_, err := encoder.MakeChannelCreationTransaction("channel-id", fakeSigner, conf)
 					Expect(err).To(MatchError("creating signature header failed: signature-header-error"))
 				})
 			})
@@ -948,7 +948,7 @@ var _ = Describe("Encoder", func() {
 				})
 
 				It("wraps and returns the error", func() {
-					_, err := encoder.MakeChannelCreationTransaction("channel-id", &encoder.LocalSigner{Signer: fakeSigner}, conf)
+					_, err := encoder.MakeChannelCreationTransaction("channel-id", fakeSigner, conf)
 					Expect(err).To(MatchError("signature failure over config update: sign-error"))
 				})
 			})

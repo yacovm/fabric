@@ -43,6 +43,8 @@ echo "Installing Ginkgo :( "
 go get github.com/onsi/ginkgo/ginkgo
 go get github.com/onsi/gomega/...
 
+make docker
+
 echo "Running integration tests"
 cd integration/smartbft
 ginkgo

@@ -26,6 +26,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestCar_BuildImage(t *testing.T) {
+	t.Skip()
 	vm, err := NewVM()
 	if err != nil {
 		t.Errorf("Error getting VM: %s", err)

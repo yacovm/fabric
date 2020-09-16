@@ -31,7 +31,7 @@ const (
 type InactiveChainRegistry interface {
 	// TrackChain tracks a chain with the given name, and calls the given callback
 	// when this chain should be created.
-	TrackChain(chainName string, genesisBlock *common.Block, createChain func())
+	TrackChain(chainName string, genesisBlock *common.Block, createChain CreateChainCallback)
 }
 
 // ChannelPredicate accepts channels according to their names.
