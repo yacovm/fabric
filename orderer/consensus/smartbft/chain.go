@@ -322,7 +322,8 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 		}
 
 		sigs = append(sigs, &common.MetadataSignature{
-			Signature: s.Value,
+			AuxiliaryInput: sig.AuxiliaryInput,
+			Signature:      s.Value,
 			// We do not put a signature header when we commit the block.
 			// Instead, we put the nonce and the identifier and at validation
 			// we reconstruct the signature header at runtime.
@@ -528,6 +529,7 @@ func (c *BFTChain) blockToDecision(block *common.Block) *types.Decision {
 			Nonce:                sigMD.Nonce,
 			BlockHeader:          block.Header.Bytes(),
 			OrdererBlockMetadata: signatureMetadata.Value,
+			AuxiliaryInput: sigMD.AuxiliaryInput,
 		}
 		signatures = append(signatures, types.Signature{
 			Msg:   sig.Marshal(),

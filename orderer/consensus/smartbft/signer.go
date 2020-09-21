@@ -35,7 +35,7 @@ func (s *Signer) Sign(msg []byte) []byte {
 	return signature
 }
 
-func (s *Signer) SignProposal(proposal types.Proposal) *types.Signature {
+func (s *Signer) SignProposal(proposal types.Proposal, auxiliaryInput []byte) *types.Signature {
 	block, err := ProposalToBlock(proposal)
 	if err != nil {
 		s.Logger.Panicf("Tried to sign bad proposal: %v", err)
@@ -44,6 +44,7 @@ func (s *Signer) SignProposal(proposal types.Proposal) *types.Signature {
 	nonce := randomNonceOrPanic()
 
 	sig := Signature{
+		AuxiliaryInput:  auxiliaryInput,
 		Nonce:           nonce,
 		BlockHeader:     block.Header.Bytes(),
 		SignatureHeader: utils.MarshalOrPanic(s.newSignatureHeaderOrPanic(nonce)),

@@ -79,6 +79,14 @@ type Verifier struct {
 	ConfigValidator       ConfigValidator
 }
 
+func (v *Verifier) AuxiliaryData(msg []byte) []byte {
+	sig := &Signature{}
+	if err := sig.Unmarshal(msg); err != nil {
+		v.Logger.Warnf("Failed unmarshalling signature message %s: %v", hex.EncodeToString(msg), err)
+	}
+	return sig.AuxiliaryInput
+}
+
 func (v *Verifier) VerifyProposal(proposal types.Proposal) ([]types.RequestInfo, error) {
 	block, err := ProposalToBlock(proposal)
 	if err != nil {
@@ -175,12 +183,12 @@ func (v *Verifier) verifyRequest(rawRequest []byte, noConfigAllowed bool) (types
 	return v.ReqInspector.requestIDFromSigHeader(req.sigHdr)
 }
 
-func (v *Verifier) VerifyConsenterSig(signature types.Signature, prop types.Proposal) error {
+func (v *Verifier) VerifyConsenterSig(signature types.Signature, prop types.Proposal) ([]byte, error) {
 	id2Identity := v.RuntimeConfig.Load().(RuntimeConfig).ID2Identities
 
 	identity, exists := id2Identity[signature.ID]
 	if !exists {
-		return errors.Errorf("node with id of %d doesn't exist", signature.ID)
+		return nil, errors.Errorf("node with id of %d doesn't exist", signature.ID)
 	}
 
 	sig := &Signature{}
@@ -188,7 +196,7 @@ func (v *Verifier) VerifyConsenterSig(signature types.Signature, prop types.Prop
 		v.Logger.Errorf("Failed unmarshaling signature from %d: %v", signature.ID, err)
 		v.Logger.Errorf("Offending signature Msg: %s", base64.StdEncoding.EncodeToString(signature.Msg))
 		v.Logger.Errorf("Offending signature Value: %s", base64.StdEncoding.EncodeToString(signature.Value))
-		return errors.Wrap(err, "malformed signature format")
+		return nil, errors.Wrap(err, "malformed signature format")
 	}
 
 	// Reconstruct the signature header
@@ -198,17 +206,17 @@ func (v *Verifier) VerifyConsenterSig(signature types.Signature, prop types.Prop
 	})
 
 	if err := v.verifySignatureIsBoundToProposal(sig, identity, prop); err != nil {
-		return err
+		return nil, err
 	}
 
-	expectedMsgToBeSigned := util.ConcatenateBytes(sig.OrdererBlockMetadata, sig.SignatureHeader, sig.BlockHeader)
+	expectedMsgToBeSigned := util.ConcatenateBytes(sig.OrdererBlockMetadata, sig.SignatureHeader, sig.BlockHeader, sig.AuxiliaryInput)
 	signedData := &common.SignedData{
 		Signature: signature.Value,
 		Data:      expectedMsgToBeSigned,
 		Identity:  identity,
 	}
 
-	return v.ConsenterVerifier.Evaluate([]*common.SignedData{signedData})
+	return sig.AuxiliaryInput, v.ConsenterVerifier.Evaluate([]*common.SignedData{signedData})
 }
 
 func (v *Verifier) VerificationSequence() uint64 {

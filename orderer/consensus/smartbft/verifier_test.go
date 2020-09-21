@@ -367,7 +367,7 @@ func TestVerifyConsenterSig(t *testing.T) {
 
 			proposal := assembler.AssembleProposal(md, [][]byte{nonConfigTx})
 
-			signature := *s.SignProposal(proposal)
+			signature := *s.SignProposal(proposal, nil)
 			if testCase.signatureMutator != nil {
 				signature = testCase.signatureMutator(signature)
 			}
@@ -386,7 +386,7 @@ func TestVerifyConsenterSig(t *testing.T) {
 				proposal = testCase.proposalMutator(proposal)
 			}
 
-			err := v.VerifyConsenterSig(signature, proposal)
+			_, err := v.VerifyConsenterSig(signature, proposal)
 
 			assert.EqualError(t, err, testCase.expectedErr)
 		})
