@@ -201,7 +201,7 @@ func (v *Verifier) VerifyConsenterSig(signature types.Signature, prop types.Prop
 		return err
 	}
 
-	expectedMsgToBeSigned := util.ConcatenateBytes(sig.OrdererBlockMetadata, sig.SignatureHeader, sig.BlockHeader)
+	expectedMsgToBeSigned := util.ConcatenateBytes(sig.OrdererBlockMetadata, sig.SignatureHeader, sig.BlockHeader, sig.AuxiliaryInput)
 	signedData := &common.SignedData{
 		Signature: signature.Value,
 		Data:      expectedMsgToBeSigned,

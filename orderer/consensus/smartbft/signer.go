@@ -7,6 +7,8 @@ SPDX-License-Identifier: Apache-2.0
 package smartbft
 
 import (
+	"crypto/rand"
+
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/hyperledger/fabric/common/crypto"
 	"github.com/hyperledger/fabric/protos/common"
@@ -35,7 +37,11 @@ func (s *Signer) Sign(msg []byte) []byte {
 	return signature
 }
 
-func (s *Signer) SignProposal(proposal types.Proposal) *types.Signature {
+func (s *Signer) SignProposal(proposal types.Proposal, auxiliaryInput []byte) *types.Signature {
+	// For now, put here some random data
+	auxiliaryInput = make([]byte, 10)
+	rand.Read(auxiliaryInput)
+
 	block, err := ProposalToBlock(proposal)
 	if err != nil {
 		s.Logger.Panicf("Tried to sign bad proposal: %v", err)
@@ -44,6 +50,7 @@ func (s *Signer) SignProposal(proposal types.Proposal) *types.Signature {
 	nonce := randomNonceOrPanic()
 
 	sig := Signature{
+		AuxiliaryInput:  auxiliaryInput,
 		Nonce:           nonce,
 		BlockHeader:     block.Header.Bytes(),
 		SignatureHeader: utils.MarshalOrPanic(s.newSignatureHeaderOrPanic(nonce)),

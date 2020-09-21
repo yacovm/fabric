@@ -48,7 +48,7 @@ type Signer interface {
 	// Sign signs on the given data and returns the signature.
 	Sign([]byte) []byte
 	// SignProposal signs on the given proposal and returns a composite Signature.
-	SignProposal(bft.Proposal) *bft.Signature
+	SignProposal(bft.Proposal, []byte) *bft.Signature
 }
 
 // Verifier validates data and verifies signatures.

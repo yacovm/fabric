@@ -22,6 +22,7 @@ type Signature struct {
 	SignatureHeader      []byte
 	BlockHeader          []byte
 	OrdererBlockMetadata []byte
+	AuxiliaryInput       []byte
 }
 
 func (sig *Signature) Unmarshal(bytes []byte) error {
@@ -38,7 +39,7 @@ func (sig *Signature) Marshal() []byte {
 }
 
 func (sig Signature) AsBytes() []byte {
-	msg2Sign := util.ConcatenateBytes(sig.OrdererBlockMetadata, sig.SignatureHeader, sig.BlockHeader)
+	msg2Sign := util.ConcatenateBytes(sig.OrdererBlockMetadata, sig.SignatureHeader, sig.BlockHeader, sig.AuxiliaryInput)
 	return msg2Sign
 }
 

@@ -421,7 +421,7 @@ func (v *View) processPrepares() Phase {
 	// Msg: A succinct representation of the proposal that binds this proposal unequivocally.
 
 	// The block proof consists of the aggregation of all these signatures from 2f+1 commits of different nodes.
-	v.myProposalSig = v.Signer.SignProposal(*proposal)
+	v.myProposalSig = v.Signer.SignProposal(*proposal, nil)
 
 	seq := v.ProposalSequence
 

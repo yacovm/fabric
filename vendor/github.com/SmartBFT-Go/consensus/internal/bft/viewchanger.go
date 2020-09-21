@@ -1184,7 +1184,7 @@ func (v *ViewChanger) commitInFlightProposal(proposal *protos.Proposal) (success
 		Payload:              proposal.Payload,
 		Header:               proposal.Header,
 	}
-	v.inFlightView.myProposalSig = v.Signer.SignProposal(*v.inFlightView.inFlightProposal)
+	v.inFlightView.myProposalSig = v.Signer.SignProposal(*v.inFlightView.inFlightProposal, nil)
 	v.inFlightView.lastBroadcastSent = &protos.Message{
 		Content: &protos.Message_Commit{
 			Commit: &protos.Commit{

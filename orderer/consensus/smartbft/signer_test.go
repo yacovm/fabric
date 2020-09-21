@@ -87,7 +87,7 @@ func TestSignProposal(t *testing.T) {
 	env := utils.MarshalOrPanic(&common.Envelope{Payload: []byte{1, 2, 3, 4, 5}})
 	prop := assembler.AssembleProposal(nil, [][]byte{env})
 
-	sig := s.SignProposal(prop)
+	sig := s.SignProposal(prop, nil)
 	assert.NotNil(t, sig)
 
 	signature := smartbft.Signature{}
@@ -117,7 +117,7 @@ func TestSignBadProposal(t *testing.T) {
 	}
 
 	f := func() {
-		s.SignProposal(types.Proposal{})
+		s.SignProposal(types.Proposal{}, nil)
 	}
 	assert.PanicsWithValue(t, "Tried to sign bad proposal: proposal header cannot be nil", f)
 
