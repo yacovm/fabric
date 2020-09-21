@@ -202,8 +202,6 @@ func CreateSignedTx(
 		pis = append(pis, resps[0].PreimageSpace.ValueWrites[i])
 	}
 
-
-
 	cea := &peer.ChaincodeEndorsedAction{ProposalResponsePayload: resps[0].Payload, Endorsements: endorsements}
 
 	// obtain the bytes of the proposal payload that will go to the transaction
