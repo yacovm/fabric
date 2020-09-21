@@ -210,7 +210,7 @@ func validateAndPreparePvtBatchGDPR(
 		// Gal: If block is in new fmt - extract preimages here (1409)
 		m := make(map[string][]byte)
 
-		for i, _ := range pispace {
+		for i := range pispace {
 			hval := string(util.ComputeHash(pispace[i])) // how do I know this is the right hash function?
 			m[hval] = pispace[i]
 		}

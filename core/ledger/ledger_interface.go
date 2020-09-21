@@ -455,7 +455,7 @@ func (txSim *TxSimulationResults) GetPubSimulationBytesGDPR(f func(nsRWSet *rwse
 	// empty object -> fromprotobytes
 	for _, nsrws := range txSim.PubSimulationResults.NsRwset {
 		nsrws, temp = f(nsrws)
-		for i, _ := range temp {
+		for i := range temp {
 			pis = append(pis, temp[i])
 		}
 		//rwset := &rwsetutil.TxRwSet{}

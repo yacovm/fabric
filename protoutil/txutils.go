@@ -198,7 +198,7 @@ func CreateSignedTx(
 
 	pis := make([][]byte, 100)
 
-	for i, _ := range resps[0].PreimageSpace.ValueWrites {
+	for i := range resps[0].PreimageSpace.ValueWrites {
 		pis = append(pis, resps[0].PreimageSpace.ValueWrites[i])
 	}
 
