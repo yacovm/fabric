@@ -9,10 +9,11 @@ package endorser
 import (
 	"context"
 	"fmt"
-	"github.com/hyperledger/fabric-protos-go/ledger/rwset"
-	"github.com/hyperledger/fabric/core/ledger/kvledger/txmgmt/rwsetutil"
 	"strconv"
 	"time"
+
+	"github.com/hyperledger/fabric-protos-go/ledger/rwset"
+	"github.com/hyperledger/fabric/core/ledger/kvledger/txmgmt/rwsetutil"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric-chaincode-go/shim"
@@ -201,7 +202,6 @@ func (e *Endorser) SimulateProposal(txParams *ccprovider.TransactionParams, chai
 	// this change, so, should be safe.  Long term, let's move the Done up to the create.
 	defer txParams.TXSimulator.Done()
 
-
 	simResult, err := txParams.TXSimulator.GetTxSimulationResults()
 	if err != nil {
 		e.Metrics.SimulationFailure.With(meterLabels...).Add(1)
@@ -253,7 +253,6 @@ func (e *Endorser) SimulateProposal(txParams *ccprovider.TransactionParams, chai
 	return res, pubSimResBytes, ccevent, nil
 }
 
-
 // SimulateProposal simulates the proposal by calling the chaincode
 func (e *Endorser) SimulateProposalGDPR(txParams *ccprovider.TransactionParams, chaincodeName string, chaincodeInput *pb.ChaincodeInput) (*pb.Response, []byte, *pb.ChaincodeEvent, [][]byte, error) {
 	logger := decorateLogger(endorserLogger, txParams)
@@ -279,7 +278,6 @@ func (e *Endorser) SimulateProposalGDPR(txParams *ccprovider.TransactionParams, 
 	// this change, so, should be safe.  Long term, let's move the Done up to the create.
 	defer txParams.TXSimulator.Done()
 
-
 	simResult, err := txParams.TXSimulator.GetTxSimulationResults()
 	if err != nil {
 		e.Metrics.SimulationFailure.With(meterLabels...).Add(1)
@@ -304,7 +302,7 @@ func (e *Endorser) SimulateProposalGDPR(txParams *ccprovider.TransactionParams, 
 		endorsedAt, err := e.Support.GetLedgerHeight(txParams.ChannelID)
 		if err != nil {
 			e.Metrics.SimulationFailure.With(meterLabels...).Add(1)
-			return nil, nil, nil,  nil, errors.WithMessage(err, fmt.Sprintf("failed to obtain ledger height for channel '%s'", txParams.ChannelID))
+			return nil, nil, nil, nil, errors.WithMessage(err, fmt.Sprintf("failed to obtain ledger height for channel '%s'", txParams.ChannelID))
 		}
 		// Add ledger height at which transaction was endorsed,
 		// `endorsedAt` is obtained from the block storage and at times this could be 'endorsement Height + 1'.
@@ -331,21 +329,20 @@ func (e *Endorser) SimulateProposalGDPR(txParams *ccprovider.TransactionParams, 
 	return res, pubSimResBytes, ccevent, pis, nil
 }
 
-func helperGDPR(nsrws *rwset.NsReadWriteSet) (*rwset.NsReadWriteSet , [][]byte) {
-	pis := make([][]byte,100)
+func helperGDPR(nsrws *rwset.NsReadWriteSet) (*rwset.NsReadWriteSet, [][]byte) {
+	pis := make([][]byte, 100)
 	rwset := &rwsetutil.TxRwSet{}
 	rwset.FromProtoBytes(nsrws.Rwset)
 	for _, innerNsrws := range rwset.NsRwSets {
 		//endorser.helperGDPR(innerNsrws)
-		for _, kvWrite := range innerNsrws.KvRwSet.Writes{
+		for _, kvWrite := range innerNsrws.KvRwSet.Writes {
 			kvWrite.ValueHash = util.ComputeSHA256(kvWrite.Value)
-			pis = append(pis,kvWrite.Value)
+			pis = append(pis, kvWrite.Value)
 			kvWrite.Value = nil
 		}
 	}
 	return nsrws, pis
 }
-
 
 // preProcess checks the tx proposal headers, uniqueness and ACL
 func (e *Endorser) preProcess(up *UnpackedProposal, channel *Channel) error {
@@ -561,10 +558,10 @@ func (e *Endorser) ProcessProposalSuccessfullyOrError(up *UnpackedProposal) (*pb
 	p2 := &pb.PreimageSpace{ValueWrites: pis}
 
 	return &pb.ProposalResponse{
-		Version:     1,
-		Endorsement: endorsement,
-		Payload:     mPrpBytes,
-		Response:    res,
+		Version:       1,
+		Endorsement:   endorsement,
+		Payload:       mPrpBytes,
+		Response:      res,
 		PreimageSpace: p2,
 	}, nil
 }
