@@ -8,6 +8,7 @@ package validation
 
 import (
 	"bytes"
+
 	"github.com/golang/protobuf/proto"
 
 	//"github.com/gogo/protobuf/proto"
@@ -170,8 +171,6 @@ func validateAndPreparePvtBatch(
 	return pvtUpdates, nil
 }
 
-
-
 // validateAndPreparePvtBatch pulls out the private write-set for the transactions that are marked as valid
 // by the internal public data validator. Finally, it validates (if not already self-endorsed) the pvt rwset against the
 // corresponding hash present in the public rwset
@@ -211,23 +210,22 @@ func validateAndPreparePvtBatchGDPR(
 		// Gal: If block is in new fmt - extract preimages here (1409)
 		m := make(map[string][]byte)
 
-		for i,_ := range pispace{
+		for i, _ := range pispace {
 			hval := string(util.ComputeHash(pispace[i])) // how do I know this is the right hash function?
 			m[hval] = pispace[i]
 		}
 
-
 		if pvtRWSet, err = rwsetutil.TxPvtRwSetFromProtoMsg(txPvtdata.WriteSet); err != nil {
 			return nil, err
 		}
-		for _, nsrws := range pvtRWSet.NsPvtRwSet{
-			for _, colpvt := range nsrws.CollPvtRwSets{
-				for _, kvwrite := range colpvt.KvRwSet.Writes{
+		for _, nsrws := range pvtRWSet.NsPvtRwSet {
+			for _, colpvt := range nsrws.CollPvtRwSets {
+				for _, kvwrite := range colpvt.KvRwSet.Writes {
 					str := string(kvwrite.ValueHash)
 					val := m[str]
 					if val != nil {
 						kvwrite.Value = val
-					} else{
+					} else {
 						return nil, proto.ErrNil // not the right error
 					}
 				}
