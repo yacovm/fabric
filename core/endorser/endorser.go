@@ -9,6 +9,8 @@ package endorser
 import (
 	"context"
 	"fmt"
+	"github.com/hyperledger/fabric-protos-go/ledger/rwset"
+	"github.com/hyperledger/fabric/core/ledger/kvledger/txmgmt/rwsetutil"
 	"strconv"
 	"time"
 
@@ -320,7 +322,7 @@ func (e *Endorser) SimulateProposalGDPR(txParams *ccprovider.TransactionParams, 
 	// right before they are passed to EndorseWithPlugin (line 451).
 
 	// GAL: pass by reference on simResults and add hashes
-	pubSimResBytes, pis, err := simResult.GetPubSimulationBytesGDPR()
+	pubSimResBytes, pis, err := simResult.GetPubSimulationBytesGDPR(helperGDPR)
 	if err != nil {
 		e.Metrics.SimulationFailure.With(meterLabels...).Add(1)
 		return nil, nil, nil, nil, err
@@ -328,6 +330,22 @@ func (e *Endorser) SimulateProposalGDPR(txParams *ccprovider.TransactionParams, 
 
 	return res, pubSimResBytes, ccevent, pis, nil
 }
+
+func helperGDPR(nsrws *rwset.NsReadWriteSet) (*rwset.NsReadWriteSet , [][]byte) {
+	pis := make([][]byte,100)
+	rwset := &rwsetutil.TxRwSet{}
+	rwset.FromProtoBytes(nsrws.Rwset)
+	for _, innerNsrws := range rwset.NsRwSets {
+		//endorser.helperGDPR(innerNsrws)
+		for _, kvWrite := range innerNsrws.KvRwSet.Writes{
+			kvWrite.ValueHash = util.ComputeSHA256(kvWrite.Value)
+			pis = append(pis,kvWrite.Value)
+			kvWrite.Value = nil
+		}
+	}
+	return nsrws, pis
+}
+
 
 // preProcess checks the tx proposal headers, uniqueness and ACL
 func (e *Endorser) preProcess(up *UnpackedProposal, channel *Channel) error {

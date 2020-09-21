@@ -8,8 +8,6 @@ package ledger
 
 import (
 	"fmt"
-	"github.com/hyperledger/fabric/common/util"
-	"github.com/hyperledger/fabric/core/ledger/kvledger/txmgmt/rwsetutil"
 	"hash"
 	"time"
 
@@ -448,22 +446,28 @@ func (txSim *TxSimulationResults) GetPubSimulationBytes() ([]byte, error) {
 	return proto.Marshal(txSim.PubSimulationResults)
 }
 
-func (txSim *TxSimulationResults) GetPubSimulationBytesGDPR() ([]byte, [][]byte, error) {
+func (txSim *TxSimulationResults) GetPubSimulationBytesGDPR(f func(nsRWSet *rwset.NsReadWriteSet) (*rwset.NsReadWriteSet, [][]byte )) ([]byte, [][]byte, error) {
 
 	//txSim.PvtSimulationResults.
 	pis := make([][]byte,100)
+	temp := make([][]byte,100)
 
 	// empty object -> fromprotobytes
 	for _, nsrws := range txSim.PubSimulationResults.NsRwset {
-		rwset := &rwsetutil.TxRwSet{}
-		rwset.FromProtoBytes(nsrws.Rwset)
-		for _, innerNsrws := range rwset.NsRwSets {
-			for _, kvWrite := range innerNsrws.KvRwSet.Writes{
-				kvWrite.ValueHash = util.ComputeSHA256(kvWrite.Value)
-				pis = append(pis,kvWrite.Value)
-				kvWrite.Value = nil
-			}
+		nsrws, temp = f(nsrws)
+		for i, _ := range temp {
+			pis = append(pis, temp[i])
 		}
+		//rwset := &rwsetutil.TxRwSet{}
+		//rwset.FromProtoBytes(nsrws.Rwset)
+		//for _, innerNsrws := range rwset.NsRwSets {
+		//	//endorser.helperGDPR(innerNsrws)
+		//	for _, kvWrite := range innerNsrws.KvRwSet.Writes{
+		//		kvWrite.ValueHash = util.ComputeSHA256(kvWrite.Value)
+		//		pis = append(pis,kvWrite.Value)
+		//		kvWrite.Value = nil
+		//	}
+		//}
 
 	}
 	psr, err := proto.Marshal(txSim.PubSimulationResults)
