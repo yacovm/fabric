@@ -9,6 +9,7 @@ package msgprocessor
 import (
 	"errors"
 	"fmt"
+
 	"github.com/golang/protobuf/proto"
 	ab "github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric/common/util"
@@ -18,7 +19,6 @@ import (
 
 type redactionRule struct{}
 type set map[string]struct{}
-
 
 func (a redactionRule) Apply(message *ab.Envelope) error {
 	if message.Payload == nil {
@@ -33,12 +33,12 @@ func (a redactionRule) Apply(message *ab.Envelope) error {
 	msgData := &ab.Payload{}
 
 	err := proto.Unmarshal(message.Payload, msgData)
-	if err != nil{
+	if err != nil {
 		return err
 	}
 
 	payload, err := protoutil.UnmarshalPayload(msgData.Data)
-	if err != nil{
+	if err != nil {
 		return err
 	}
 
@@ -75,7 +75,6 @@ func (a redactionRule) Apply(message *ab.Envelope) error {
 		return err
 	}
 
-
 	for _, nsrws := range txRWSet.NsRwSets {
 		for _, kvWrite := range nsrws.KvRwSet.Writes {
 			fmt.Println("validateHashesOfTxRWS:", kvWrite.Key, kvWrite.Value)
@@ -87,7 +86,6 @@ func (a redactionRule) Apply(message *ab.Envelope) error {
 			}
 		}
 	}
-
 
 	return nil
 }
