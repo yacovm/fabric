@@ -222,7 +222,7 @@ func (c *coordinator) StoreBlock(block *common.Block, privateDataSets util.PvtDa
 
 	// commit block and private data
 	commitStart := time.Now()
-	fmt.Print("GAL:")
+	fmt.Print("GAL(coord):")
 	fmt.Println(blockAndPvtData)
 
 	err = c.CommitLegacy(blockAndPvtData, &ledger.CommitOptions{})

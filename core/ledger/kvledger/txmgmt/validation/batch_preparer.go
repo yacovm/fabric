@@ -8,6 +8,7 @@ package validation
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/golang/protobuf/proto"
 
@@ -182,6 +183,9 @@ func validateAndPreparePvtBatchGDPR(
 	customTxProcessors map[common.HeaderType]ledger.CustomTxProcessor,
 	pispace [][]byte,
 ) (*privacyenabledstate.PvtUpdateBatch, error) {
+
+	fmt.Print("GAL(batch):")
+	fmt.Println(blk)
 
 	pvtUpdates := privacyenabledstate.NewPvtUpdateBatch()
 	metadataUpdates := metadataUpdates{}
