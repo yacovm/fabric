@@ -185,7 +185,7 @@ func validateAndPreparePvtBatchGDPR(
 ) (*privacyenabledstate.PvtUpdateBatch, error) {
 
 	fmt.Print("GAL(batch):")
-	fmt.Println(blk)
+	fmt.Println(*blk)
 
 	pvtUpdates := privacyenabledstate.NewPvtUpdateBatch()
 	metadataUpdates := metadataUpdates{}
