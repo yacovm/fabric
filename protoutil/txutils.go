@@ -198,6 +198,7 @@ func CreateSignedTx(
 	// Therefore we need to build a pre-image space from the first response of the peer to be put into the transaction.
 
 	pis := make([][]byte, 100)
+	fmt.Println("GAL: txutils")
 	fmt.Println(resps[0])
 	fmt.Println(resps[0].PreimageSpace)
 	fmt.Println(resps[0].PreimageSpace.ValueWrites[0])
