@@ -7,7 +7,6 @@ SPDX-License-Identifier: Apache-2.0
 package privdata
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/hyperledger/fabric-protos-go/common"
@@ -222,8 +221,8 @@ func (c *coordinator) StoreBlock(block *common.Block, privateDataSets util.PvtDa
 
 	// commit block and private data
 	commitStart := time.Now()
-	fmt.Print("GAL(coord):")
-	fmt.Println(blockAndPvtData)
+	//fmt.Print("GAL(coord):")
+	//fmt.Println(blockAndPvtData)
 
 	err = c.CommitLegacy(blockAndPvtData, &ledger.CommitOptions{})
 	c.reportCommitDuration(time.Since(commitStart))

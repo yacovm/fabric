@@ -182,8 +182,8 @@ func validateAndPreparePvtBatchGDPR(
 	pispace [][]byte,
 ) (*privacyenabledstate.PvtUpdateBatch, error) {
 
-	fmt.Print("GAL(batch):")
-	fmt.Println(*blk)
+/*	fmt.Print("GAL(batch):")
+	fmt.Println(*blk)*/
 
 	pvtUpdates := privacyenabledstate.NewPvtUpdateBatch()
 	metadataUpdates := metadataUpdates{}
@@ -227,6 +227,7 @@ func validateAndPreparePvtBatchGDPR(
 					val := m[str]
 					if val != nil {
 						kvwrite.Value = val
+						fmt.Println("GAL: found key")
 					} else {
 						return nil, errors.Errorf("could not find pre-image for key %s:%s in pre-image space", nsrws.NameSpace, kvwrite.Key)
 					}

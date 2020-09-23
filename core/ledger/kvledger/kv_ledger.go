@@ -475,8 +475,8 @@ func (l *kvLedger) CommitLegacy(pvtdataAndBlock *ledger.BlockAndPvtData, commitO
 	if err != nil {
 		return err
 	}
-	fmt.Print("GAL(ledger1):")
-	fmt.Println(pvtdataAndBlock)
+	//fmt.Print("GAL(ledger1):")
+	//fmt.Println(pvtdataAndBlock)
 	elapsedBlockProcessing := time.Since(startBlockProcessing)
 
 	startBlockstorageAndPvtdataCommit := time.Now()

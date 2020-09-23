@@ -8,7 +8,6 @@ package txmgr
 
 import (
 	"bytes"
-	"fmt"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -200,8 +199,8 @@ func (txmgr *LockBasedTxMgr) ValidateAndPrepare(blockAndPvtdata *ledger.BlockAnd
 	// GAL: make sure this is committer (validator) code. preparer does all actual work, right?
 	// GAL : old format
 	batch, txstatsInfo, err := txmgr.commitBatchPreparer.ValidateAndPrepareBatch(blockAndPvtdata, doMVCCValidation)
-	fmt.Print("GAL(txmgr):")
-	fmt.Println(block)
+	//fmt.Print("GAL(txmgr):")
+	//fmt.Println(block)
 	if err != nil {
 		txmgr.reset()
 		return nil, nil, err
@@ -615,8 +614,8 @@ func (txmgr *LockBasedTxMgr) CommitLostBlock(blockAndPvtdata *ledger.BlockAndPvt
 	if _, _, err := txmgr.ValidateAndPrepare(blockAndPvtdata, false); err != nil {
 		return err
 	}
-	fmt.Print("GAL(txmgr2):")
-	fmt.Println(blockAndPvtdata)
+	//fmt.Print("GAL(txmgr2):")
+	//fmt.Println(blockAndPvtdata)
 	// log every 1000th block at Info level so that statedb rebuild progress can be tracked in production envs.
 	if block.Header.Number%1000 == 0 {
 		logger.Infof("Recommitting block [%d] to state database", block.Header.Number)
