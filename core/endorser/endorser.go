@@ -345,7 +345,7 @@ func helperGDPR(nsrws *rwset.NsReadWriteSet) (*rwset.NsReadWriteSet, [][]byte, e
 	}
 	//}
 	return nsrws, pis, nil
-}
+} 
 
 // preProcess checks the tx proposal headers, uniqueness and ACL
 func (e *Endorser) preProcess(up *UnpackedProposal, channel *Channel) error {
