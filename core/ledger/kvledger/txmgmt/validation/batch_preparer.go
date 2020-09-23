@@ -10,8 +10,6 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/golang/protobuf/proto"
-
 	//"github.com/gogo/protobuf/proto"
 
 	"github.com/hyperledger/fabric-protos-go/common"
@@ -230,7 +228,7 @@ func validateAndPreparePvtBatchGDPR(
 					if val != nil {
 						kvwrite.Value = val
 					} else {
-						return nil, proto.ErrNil // not the right error
+						return nil, errors.Errorf("could not find pre-image for key %s:%s in pre-image space", nsrws.NameSpace, kvwrite.Key)
 					}
 				}
 			}
