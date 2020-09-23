@@ -204,6 +204,7 @@ func validateAndPreparePvtBatchGDPR(
 			}
 		}
 		var pvtRWSet *rwsetutil.TxPvtRwSet
+		var err error
 		// Yacov: This can be a good place to extract the pre-images from the pre-image space of the block,
 		// and plant them into the value writes.
 
@@ -221,9 +222,9 @@ func validateAndPreparePvtBatchGDPR(
 		//prwset := tx.rwset
 		//prwset.NsRwSets
 		//
-		//if pvtRWSet, err = rwsetutil.TxPvtRwSetFromProtoMsg(txPvtdata.WriteSet); err != nil {
-		//	return nil, err
-		//}
+		if pvtRWSet, err = rwsetutil.TxPvtRwSetFromProtoMsg(txPvtdata.WriteSet); err != nil {
+			return nil, err
+		}
 		for _, nsrws := range tx.rwset.NsRwSets {
 
 			for _, kvwrite := range nsrws.KvRwSet.Writes {
