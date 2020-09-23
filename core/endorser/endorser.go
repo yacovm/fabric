@@ -12,11 +12,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/hyperledger/fabric-protos-go/ledger/rwset"
-	"github.com/hyperledger/fabric/core/ledger/kvledger/txmgmt/rwsetutil"
+	"github.com/hyperledger/fabric-protos-go/ledger/rwset/kvrwset"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric-chaincode-go/shim"
+	"github.com/hyperledger/fabric-protos-go/ledger/rwset"
 	pb "github.com/hyperledger/fabric-protos-go/peer"
 	"github.com/hyperledger/fabric-protos-go/transientstore"
 	"github.com/hyperledger/fabric/common/flogging"
@@ -331,19 +331,19 @@ func (e *Endorser) SimulateProposalGDPR(txParams *ccprovider.TransactionParams, 
 
 func helperGDPR(nsrws *rwset.NsReadWriteSet) (*rwset.NsReadWriteSet, [][]byte, error) {
 	pis := make([][]byte, 100)
-	rwset := &rwsetutil.TxRwSet{}
-	err := rwset.FromProtoBytes(nsrws.Rwset)
+	kvRWset := &kvrwset.KVRWSet{} //Set{} //TxRwSet{}
+	err := proto.Unmarshal(nsrws.Rwset, kvRWset)
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, innerNsrws := range rwset.NsRwSets {
-		//endorser.helperGDPR(innerNsrws)
-		for _, kvWrite := range innerNsrws.KvRwSet.Writes {
-			kvWrite.ValueHash = util.ComputeSHA256(kvWrite.Value)
-			pis = append(pis, kvWrite.Value)
-			kvWrite.Value = nil
-		}
+	//for _, innerNsrws := range rwSet. {
+	//endorser.helperGDPR(innerNsrws)
+	for _, kvWrite := range kvRWset.Writes {
+		kvWrite.ValueHash = util.ComputeSHA256(kvWrite.Value)
+		pis = append(pis, kvWrite.Value)
+		kvWrite.Value = nil
 	}
+	//}
 	return nsrws, pis, nil
 }
 
