@@ -329,10 +329,13 @@ func (e *Endorser) SimulateProposalGDPR(txParams *ccprovider.TransactionParams, 
 	return res, pubSimResBytes, ccevent, pis, nil
 }
 
-func helperGDPR(nsrws *rwset.NsReadWriteSet) (*rwset.NsReadWriteSet, [][]byte) {
+func helperGDPR(nsrws *rwset.NsReadWriteSet) (*rwset.NsReadWriteSet, [][]byte, error) {
 	pis := make([][]byte, 100)
 	rwset := &rwsetutil.TxRwSet{}
-	rwset.FromProtoBytes(nsrws.Rwset)
+	err := rwset.FromProtoBytes(nsrws.Rwset)
+	if err != nil {
+		return nil, nil, err
+	}
 	for _, innerNsrws := range rwset.NsRwSets {
 		//endorser.helperGDPR(innerNsrws)
 		for _, kvWrite := range innerNsrws.KvRwSet.Writes {
@@ -341,7 +344,7 @@ func helperGDPR(nsrws *rwset.NsReadWriteSet) (*rwset.NsReadWriteSet, [][]byte) {
 			kvWrite.Value = nil
 		}
 	}
-	return nsrws, pis
+	return nsrws, pis, nil
 }
 
 // preProcess checks the tx proposal headers, uniqueness and ACL

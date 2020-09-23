@@ -204,7 +204,6 @@ func validateAndPreparePvtBatchGDPR(
 			}
 		}
 		var pvtRWSet *rwsetutil.TxPvtRwSet
-		var err error
 		// Yacov: This can be a good place to extract the pre-images from the pre-image space of the block,
 		// and plant them into the value writes.
 
@@ -217,22 +216,27 @@ func validateAndPreparePvtBatchGDPR(
 			m[hval] = pispace[i]
 		}
 
-		if pvtRWSet, err = rwsetutil.TxPvtRwSetFromProtoMsg(txPvtdata.WriteSet); err != nil {
-			return nil, err
-		}
-		for _, nsrws := range pvtRWSet.NsPvtRwSet {
-			for _, colpvt := range nsrws.CollPvtRwSets {
-				for _, kvwrite := range colpvt.KvRwSet.Writes {
-					str := string(kvwrite.ValueHash)
-					val := m[str]
-					if val != nil {
-						kvwrite.Value = val
-						fmt.Println("GAL: found key")
-					} else {
-						return nil, errors.Errorf("could not find pre-image for key %s:%s in pre-image space", nsrws.NameSpace, kvwrite.Key)
-					}
+		//var prwset *rwsetutil.NsRwSet
+		//err = prwset.
+		//prwset := tx.rwset
+		//prwset.NsRwSets
+		//
+		//if pvtRWSet, err = rwsetutil.TxPvtRwSetFromProtoMsg(txPvtdata.WriteSet); err != nil {
+		//	return nil, err
+		//}
+		for _, nsrws := range tx.rwset.NsRwSets {
+
+			for _, kvwrite := range nsrws.KvRwSet.Writes {
+				str := string(kvwrite.ValueHash)
+				val := m[str]
+				if val != nil {
+					kvwrite.Value = val
+					fmt.Println("GAL: found key")
+				} else {
+					return nil, errors.Errorf("could not find pre-image for key %s:%s in pre-image space", nsrws.NameSpace, kvwrite.Key)
 				}
 			}
+
 		}
 
 		addPvtRWSetToPvtUpdateBatch(pvtRWSet, pvtUpdates, version.NewHeight(blk.num, uint64(tx.indexInBlock)))

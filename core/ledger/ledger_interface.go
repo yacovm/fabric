@@ -446,15 +446,18 @@ func (txSim *TxSimulationResults) GetPubSimulationBytes() ([]byte, error) {
 	return proto.Marshal(txSim.PubSimulationResults)
 }
 
-func (txSim *TxSimulationResults) GetPubSimulationBytesGDPR(f func(nsRWSet *rwset.NsReadWriteSet) (*rwset.NsReadWriteSet, [][]byte)) ([]byte, [][]byte, error) {
+func (txSim *TxSimulationResults) GetPubSimulationBytesGDPR(f func(nsRWSet *rwset.NsReadWriteSet) (*rwset.NsReadWriteSet, [][]byte, error)) ([]byte, [][]byte, error) {
 
 	//txSim.PvtSimulationResults.
 	pis := make([][]byte, 100)
 	temp := make([][]byte, 100)
-
+	var err error
 	// empty object -> fromprotobytes
 	for _, nsrws := range txSim.PubSimulationResults.NsRwset {
-		nsrws, temp = f(nsrws)
+		nsrws, temp, err = f(nsrws)
+		if err != nil {
+			return nil, nil, err
+		}
 		for i := range temp {
 			pis = append(pis, temp[i])
 		}
