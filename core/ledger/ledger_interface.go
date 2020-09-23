@@ -474,6 +474,8 @@ func (txSim *TxSimulationResults) GetPubSimulationBytesGDPR(f func(nsRWSet *rwse
 
 	}
 	psr, err := proto.Marshal(txSim.PubSimulationResults)
+	fmt.Println("Gal: ledger_interface 478")
+	fmt.Println(pis)
 	return psr, pis, err
 }
 

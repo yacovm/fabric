@@ -321,6 +321,8 @@ func (e *Endorser) SimulateProposalGDPR(txParams *ccprovider.TransactionParams, 
 
 	// GAL: pass by reference on simResults and add hashes
 	pubSimResBytes, pis, err := simResult.GetPubSimulationBytesGDPR(helperGDPR)
+	fmt.Println("Gal:(endorser324)")
+	fmt.Println(pis)
 	if err != nil {
 		e.Metrics.SimulationFailure.With(meterLabels...).Add(1)
 		return nil, nil, nil, nil, err
