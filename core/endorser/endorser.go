@@ -558,8 +558,9 @@ func (e *Endorser) ProcessProposalSuccessfullyOrError(up *UnpackedProposal) (*pb
 		return nil, errors.WithMessage(err, "endorsing with plugin failed")
 	}
 
+	fmt.Println(pis[0])
 	p2 := &pb.PreimageSpace{ValueWrites: pis}
-
+	fmt.Println(p2.ValueWrites[0])
 	return &pb.ProposalResponse{
 		Version:       1,
 		Endorsement:   endorsement,
