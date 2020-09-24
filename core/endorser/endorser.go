@@ -257,7 +257,7 @@ func (e *Endorser) SimulateProposal(txParams *ccprovider.TransactionParams, chai
 func (e *Endorser) SimulateProposalGDPR(txParams *ccprovider.TransactionParams, chaincodeName string, chaincodeInput *pb.ChaincodeInput) (*pb.Response, []byte, *pb.ChaincodeEvent, [][]byte, error) {
 	if txParams.NamespaceID == "_lifecycle" || txParams.NamespaceID == "lscc" {
 		fmt.Printf("GAL: namespace - Caught namespace ID = %s ", txParams.NamespaceID)
-		res, pubSimResBytes, ccevent, err := e.SimulateProposal(txParams,chaincodeName,chaincodeInput)
+		res, pubSimResBytes, ccevent, err := e.SimulateProposal(txParams, chaincodeName, chaincodeInput)
 		return res, pubSimResBytes, ccevent, make([][]byte, 100), err
 	}
 
