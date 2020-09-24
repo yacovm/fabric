@@ -342,6 +342,7 @@ func helperGDPR(nsrws *rwset.NsReadWriteSet) (*rwset.NsReadWriteSet, [][]byte, e
 	//endorser.helperGDPR(innerNsrws)
 	for _, kvWrite := range kvRWset.Writes {
 		kvWrite.ValueHash = util.ComputeSHA256(kvWrite.Value)
+		fmt.Printf("Gal: Value = %s\n", string(kvWrite.Value))
 		pis = append(pis, kvWrite.Value)
 		kvWrite.Value = make([]byte, 0) //nil
 	}
