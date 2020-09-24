@@ -255,11 +255,6 @@ func (e *Endorser) SimulateProposal(txParams *ccprovider.TransactionParams, chai
 
 // SimulateProposal simulates the proposal by calling the chaincode
 func (e *Endorser) SimulateProposalGDPR(txParams *ccprovider.TransactionParams, chaincodeName string, chaincodeInput *pb.ChaincodeInput) (*pb.Response, []byte, *pb.ChaincodeEvent, [][]byte, error) {
-	if txParams.NamespaceID == "_lifecycle" || txParams.NamespaceID == "lscc" {
-		fmt.Printf("GAL: namespace - Caught namespace ID = %s ", txParams.NamespaceID)
-		res, pubSimResBytes, ccevent, err := e.SimulateProposal(txParams, chaincodeName, chaincodeInput)
-		return res, pubSimResBytes, ccevent, make([][]byte, 100), err
-	}
 
 	logger := decorateLogger(endorserLogger, txParams)
 
@@ -327,8 +322,7 @@ func (e *Endorser) SimulateProposalGDPR(txParams *ccprovider.TransactionParams, 
 
 	// GAL: pass by reference on simResults and add hashes
 	pubSimResBytes, pis, err := simResult.GetPubSimulationBytesGDPR(helperGDPR)
-	fmt.Println("Gal:(endorser324)")
-	fmt.Println(pis)
+
 	if err != nil {
 		e.Metrics.SimulationFailure.With(meterLabels...).Add(1)
 		return nil, nil, nil, nil, err
@@ -344,16 +338,11 @@ func helperGDPR(nsrws *rwset.NsReadWriteSet) (*rwset.NsReadWriteSet, [][]byte, e
 	if err != nil {
 		return nil, nil, err
 	}
-	//for _, innerNsrws := range rwSet. {
-	//endorser.helperGDPR(innerNsrws)
-	fmt.Printf("Gal: len kvRWset.Writes = %d", len(kvRWset.Writes))
 	for _, kvWrite := range kvRWset.Writes {
 		kvWrite.ValueHash = util.ComputeSHA256(kvWrite.Value)
-		fmt.Printf("Gal: Value = %s\n", string(kvWrite.Value))
 		pis = append(pis, kvWrite.Value)
 		kvWrite.Value = make([]byte, 0) //nil
 	}
-	//}
 	return nsrws, pis, nil
 }
 
@@ -568,10 +557,7 @@ func (e *Endorser) ProcessProposalSuccessfullyOrError(up *UnpackedProposal) (*pb
 		return nil, errors.WithMessage(err, "endorsing with plugin failed")
 	}
 
-	fmt.Println("Gal(endorser):")
-	fmt.Println(pis)
 	p2 := &pb.PreimageSpace{ValueWrites: pis}
-	fmt.Println(p2.ValueWrites[0])
 	return &pb.ProposalResponse{
 		Version:       1,
 		Endorsement:   endorsement,

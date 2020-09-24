@@ -9,8 +9,6 @@ package protoutil
 import (
 	"bytes"
 	"crypto/sha256"
-	"fmt"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric-protos-go/peer"
@@ -198,12 +196,7 @@ func CreateSignedTx(
 	// Therefore we need to build a pre-image space from the first response of the peer to be put into the transaction.
 
 	pis := make([][]byte, 100)
-	//fmt.Println("GAL: txutils 202")
-	//fmt.Println(resps[0])
-	//fmt.Println("GAL: txutils 204")
-	//fmt.Println(resps[0].PreimageSpace)
-	//fmt.Println("GAL: txutils 206")
-	fmt.Println(resps[0].PreimageSpace.ValueWrites[0])
+
 	for i := range resps[0].PreimageSpace.ValueWrites {
 		pis = append(pis, resps[0].PreimageSpace.ValueWrites[i])
 	}

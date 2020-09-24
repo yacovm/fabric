@@ -452,36 +452,19 @@ func (txSim *TxSimulationResults) GetPubSimulationBytesGDPR(f func(nsRWSet *rwse
 	pis := make([][]byte, 100)
 	temp := make([][]byte, 100)
 	var err error
-	// empty object -> fromprotobytes
-	fmt.Printf("Gal: len txSim.PubSimulationResults.NsRwset = %d\n", len(txSim.PubSimulationResults.NsRwset))
 
 	for _, nsrws := range txSim.PubSimulationResults.NsRwset {
 		nsrws, temp, err = f(nsrws)
 		if err != nil {
 			return nil, nil, err
 		}
-		fmt.Printf("Gal: len temp = %d\n", len(temp))
 
 		for i := range temp {
-			fmt.Println("GAL: ledger_interface 462")
-			fmt.Println(temp[i])
 			pis = append(pis, temp[i])
 		}
-		//rwset := &rwsetutil.TxRwSet{}
-		//rwset.FromProtoBytes(nsrws.Rwset)
-		//for _, innerNsrws := range rwset.NsRwSets {
-		//	//endorser.helperGDPR(innerNsrws)
-		//	for _, kvWrite := range innerNsrws.KvRwSet.Writes{
-		//		kvWrite.ValueHash = util.ComputeSHA256(kvWrite.Value)
-		//		pis = append(pis,kvWrite.Value)
-		//		kvWrite.Value = nil
-		//	}
-		//}
 
 	}
 	psr, err := proto.Marshal(txSim.PubSimulationResults)
-	fmt.Println("Gal: ledger_interface 478")
-	fmt.Println(pis)
 	return psr, pis, err
 }
 
