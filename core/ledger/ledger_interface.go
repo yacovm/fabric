@@ -460,6 +460,8 @@ func (txSim *TxSimulationResults) GetPubSimulationBytesGDPR(f func(nsRWSet *rwse
 		if err != nil {
 			return nil, nil, err
 		}
+		fmt.Printf("Gal: len temp = %d\n", len(temp))
+
 		for i := range temp {
 			fmt.Println("GAL: ledger_interface 462")
 			fmt.Println(temp[i])
