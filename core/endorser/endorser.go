@@ -255,6 +255,12 @@ func (e *Endorser) SimulateProposal(txParams *ccprovider.TransactionParams, chai
 
 // SimulateProposal simulates the proposal by calling the chaincode
 func (e *Endorser) SimulateProposalGDPR(txParams *ccprovider.TransactionParams, chaincodeName string, chaincodeInput *pb.ChaincodeInput) (*pb.Response, []byte, *pb.ChaincodeEvent, [][]byte, error) {
+	if txParams.NamespaceID == "_lifecycle" || txParams.NamespaceID == "lscc" {
+		fmt.Printf("GAL: namespace - Caught namespace ID = %s ", txParams.NamespaceID)
+		res, pubSimResBytes, ccevent, err := e.SimulateProposal(txParams,chaincodeName,chaincodeInput)
+		return res, pubSimResBytes, ccevent, make([][]byte, 100), err
+	}
+
 	logger := decorateLogger(endorserLogger, txParams)
 
 	meterLabels := []string{
