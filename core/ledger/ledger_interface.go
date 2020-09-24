@@ -453,6 +453,8 @@ func (txSim *TxSimulationResults) GetPubSimulationBytesGDPR(f func(nsRWSet *rwse
 	temp := make([][]byte, 100)
 	var err error
 	// empty object -> fromprotobytes
+	fmt.Printf("Gal: len txSim.PubSimulationResults.NsRwset = %d\n", len(txSim.PubSimulationResults.NsRwset))
+	fmt.Printf("Gal: len txSim.PvtSimulationResults.NsPvtRwset = %d\n", len(txSim.PvtSimulationResults.NsPvtRwset))
 	for _, nsrws := range txSim.PubSimulationResults.NsRwset {
 		nsrws, temp, err = f(nsrws)
 		if err != nil {
