@@ -25,4 +25,4 @@ TESTS*.xml
 .tox/
 .vagrant/
 .vscode
-scripts/run-integration-tests.sh
+/scripts/run-integration-tests.sh
