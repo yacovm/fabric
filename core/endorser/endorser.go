@@ -340,6 +340,7 @@ func helperGDPR(nsrws *rwset.NsReadWriteSet) (*rwset.NsReadWriteSet, [][]byte, e
 	}
 	//for _, innerNsrws := range rwSet. {
 	//endorser.helperGDPR(innerNsrws)
+	fmt.Printf("Gal: len kvRWset.Writes = %d", len(kvRWset.Writes))
 	for _, kvWrite := range kvRWset.Writes {
 		kvWrite.ValueHash = util.ComputeSHA256(kvWrite.Value)
 		fmt.Printf("Gal: Value = %s\n", string(kvWrite.Value))
@@ -562,7 +563,7 @@ func (e *Endorser) ProcessProposalSuccessfullyOrError(up *UnpackedProposal) (*pb
 	}
 
 	fmt.Println("Gal(endorser):")
-	fmt.Println(pis[0])
+	fmt.Println(pis)
 	p2 := &pb.PreimageSpace{ValueWrites: pis}
 	fmt.Println(p2.ValueWrites[0])
 	return &pb.ProposalResponse{
