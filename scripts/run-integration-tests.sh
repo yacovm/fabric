@@ -23,4 +23,4 @@ go get github.com/onsi/ginkgo/ginkgo
 go get github.com/onsi/gomega/...
 
 echo "running integration test"
-ginkgo --focus "deploys and executes chaincode using _lifecycle and upgrades it"
+/Users/galassa/gopath//bin/ginkgo --focus "deploys and executes chaincode using _lifecycle and upgrades it"

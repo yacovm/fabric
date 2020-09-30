@@ -87,14 +87,14 @@ func forEachTransaction(block *common.Block, f func(block *common.Block, i int, 
 	for i, envBytes := range block.Data.Data {
 		go func(i int, envBytes []byte) {
 			defer workers.Done()
-			processEnvelope(envBytes, block, i, f, onErr)
+			ProcessEnvelope(envBytes, block, i, f, onErr)
 		}(i, envBytes)
 	}
 
 	workers.Wait()
 }
 
-func processEnvelope(envBytes []byte, block *common.Block, i int, f func(block *common.Block, i int, rws *rwsetutil.TxRwSet), onErr func(err error)) {
+func ProcessEnvelope(envBytes []byte, block *common.Block, i int, f func(block *common.Block, i int, rws *rwsetutil.TxRwSet), onErr func(err error)) {
 	originalEnvelope, err := protoutil.GetEnvelopeFromBlock(envBytes)
 	if err != nil {
 		onErr(err)

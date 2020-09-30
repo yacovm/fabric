@@ -475,8 +475,7 @@ func (l *kvLedger) CommitLegacy(pvtdataAndBlock *ledger.BlockAndPvtData, commitO
 	if err != nil {
 		return err
 	}
-	//fmt.Print("GAL(ledger1):")
-	//fmt.Println(pvtdataAndBlock)
+
 	elapsedBlockProcessing := time.Since(startBlockProcessing)
 
 	startBlockstorageAndPvtdataCommit := time.Now()
@@ -563,6 +562,70 @@ func (l *kvLedger) commitToPvtAndBlockStore(blockAndPvtdata *ledger.BlockAndPvtD
 	if err := l.blockStore.AddBlock(blockAndPvtdata.Block); err != nil {
 		return err
 	}
+	//
+	//idToBeRedacted := "1234"
+	//
+	//rb := &common.Block{}
+	//rb, err = l.blockStore.RetrieveBlockByTxID(idToBeRedacted)
+	//
+	//var pis = rb.Data.PreimageSpace
+	//
+	////GAL: finding the <key, hash> pair
+	//for i,_ := range rb.Data.Data{
+	//	env, err := protoutil.GetEnvelopeFromBlock(rb.Data.Data[i])
+	//	if err != nil {
+	//		return err
+	//	}
+	//	msgData := &common.Payload{}
+	//	err = proto.Unmarshal(env.Payload, msgData)
+	//	if err != nil {
+	//		return err
+	//	}
+	//
+	//	payload, err := protoutil.UnmarshalPayload(msgData.Data)
+	//	if err != nil {
+	//		return err
+	//	}
+	//
+	//	tx, err := protoutil.UnmarshalTransaction(payload.Data)
+	//	if err != nil {
+	//		return err
+	//	}
+	//
+	//	ccPayload, err := protoutil.UnmarshalChaincodeActionPayload(tx.Actions[0].Payload)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	ccPayload.
+	//	if ccPayload.Action == nil || ccPayload.Action.ProposalResponsePayload == nil {
+	//		return errors.New("no payload in ChaincodeActionPayload")
+	//	}
+	//	pRespPayload, err := protoutil.UnmarshalProposalResponsePayload(ccPayload.Action.ProposalResponsePayload)
+	//	if err != nil {
+	//		return err
+	//	}
+	//
+	//	if pRespPayload.Extension == nil {
+	//		return errors.New("response payload is missing extension")
+	//	}
+	//
+	//	ccAction, err := protoutil.UnmarshalChaincodeAction(pRespPayload.Extension)
+	//	if err != nil {
+	//		return err
+	//	}
+	//
+	//	txRWSet := &rwsetutil.TxRwSet{}
+	//
+	//	if err = txRWSet.FromProtoBytes(ccAction.Results); err != nil {
+	//		return err
+	//	}
+	//
+	//	for k,_ := range txRWSet.NsRwSets {
+	//		for _, write := range txRWSet.NsRwSets[i].KvRwSet.Writes{
+	//			write.
+	//		}
+	//	}
+	//}
 
 	if pvtdataStoreHt == blockNum+1 {
 		// Only when the pvtdataStore was ahead of blockStore
