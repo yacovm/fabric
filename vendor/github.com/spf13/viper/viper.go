@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kr/pretty"
@@ -42,6 +43,10 @@ var v *Viper
 func init() {
 	v = New()
 }
+
+var (
+	lock = sync.RWMutex{}
+)
 
 type remoteConfigFactory interface {
 	Get(rp RemoteProvider) (io.Reader, error)
@@ -398,6 +403,9 @@ func (v *Viper) SetTypeByDefaultValue(enable bool) {
 // Get returns an interface. For a specific value use one of the Get____ methods.
 func Get(key string) interface{} { return v.Get(key) }
 func (v *Viper) Get(key string) interface{} {
+	lock.RLock()
+	defer lock.RUnlock()
+
 	path := strings.Split(key, v.keyDelim)
 
 	lcaseKey := strings.ToLower(key)
@@ -767,6 +775,8 @@ func (v *Viper) SetDefault(key string, value interface{}) {
 // flags, config file, ENV, default, or key/value store
 func Set(key string, value interface{}) { v.Set(key, value) }
 func (v *Viper) Set(key string, value interface{}) {
+	lock.Lock()
+	defer lock.Unlock()
 	// If alias passed in, then set the proper override
 	key = v.realKey(strings.ToLower(key))
 	v.override[key] = value

@@ -10,8 +10,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"github.com/hyperledger/fabric/protos/utils"
 	"testing"
+
+	"github.com/hyperledger/fabric/protos/utils"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/policies/orderer/mocks"
