@@ -151,6 +151,7 @@ func configFromMetadataOptions(selfID uint64, options *smartbft.Options) (types.
 	switch options.LeaderRotation {
 	case smartbft.Options_OFF:
 		config.LeaderRotation = false
+		config.DecisionsPerLeader = 0
 	default:
 		config.LeaderRotation = true
 	}

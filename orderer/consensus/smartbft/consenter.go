@@ -180,7 +180,7 @@ func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *co
 	if err != nil {
 		return nil, errors.Wrap(err, "failed parsing smartbft configuration")
 	}
-	c.Logger.Debugf("SmartBFT-Go config: %v", config)
+	c.Logger.Debugf("SmartBFT-Go config: %+v", config)
 
 	configValidator := &ConfigBlockValidator{
 		ChannelConfigTemplator: c.Registrar,

@@ -214,6 +214,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			// Disable leader rotation in application channel
 			nwo.UpdateSmartBFTMetadata(network, peer, orderer, channel, func(md *smartbft.ConfigMetadata) {
 				md.Options.LeaderRotation = smartbft.Options_OFF
+				md.Options.DecisionsPerLeader = 0
 			})
 
 			assertBlockReception(map[string]int{"testchannel1": 1}, network.Orderers, peer, network)
@@ -370,7 +371,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Finished synchronizing with cluster"))
 
 			By("Waiting for follower to understand it synced a view change")
-			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Node 4 was informed of a new view 2 channel=testchannel1"))
+			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Node 4 was informed of a new view 1 channel=testchannel1"))
 
 			By("Waiting for all nodes to have the latest block sequence")
 			assertBlockReception(map[string]int{"testchannel1": 5}, network.Orderers, peer, network)
