@@ -42,10 +42,9 @@ func init() {
 
 var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 	var (
-		testDir string
-		client  *docker.Client
-		network *nwo.Network
-
+		testDir          string
+		client           *docker.Client
+		network          *nwo.Network
 		networkProcess   ifrit.Process
 		ordererProcesses []ifrit.Process
 		peerProcesses    ifrit.Process

@@ -529,7 +529,7 @@ func (c *BFTChain) blockToDecision(block *common.Block) *types.Decision {
 			Nonce:                sigMD.Nonce,
 			BlockHeader:          block.Header.Bytes(),
 			OrdererBlockMetadata: signatureMetadata.Value,
-			AuxiliaryInput: sigMD.AuxiliaryInput,
+			AuxiliaryInput:       sigMD.AuxiliaryInput,
 		}
 		signatures = append(signatures, types.Signature{
 			Msg:   sig.Marshal(),

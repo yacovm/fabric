@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/common/policies"
 	"github.com/hyperledger/fabric/common/viperutil"
@@ -20,7 +21,6 @@ import (
 	"github.com/hyperledger/fabric/protos/orderer/etcdraft"
 	"github.com/hyperledger/fabric/protos/orderer/smartbft"
 	"github.com/spf13/viper"
-	"github.com/SmartBFT-Go/consensus/pkg/types"
 )
 
 const (
