@@ -904,6 +904,168 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			queryExpect(network, peer, channel, "x1", 100)
 
 		})
+
+		It("smartbft reconfiguration prevents blacklisting", func() {
+			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, StartPort(), components)
+			network.GenerateConfigTree()
+			network.Bootstrap()
+
+			network.EventuallyTimeout *= 2
+
+			var ordererRunners []*ginkgomon.Runner
+			for _, orderer := range network.Orderers {
+				runner := network.OrdererRunner(orderer)
+				runner.Command.Env = append(runner.Command.Env, "FABRIC_LOGGING_SPEC=orderer.common.cluster=debug:orderer.consensus.smartbft=debug:policies.ImplicitOrderer=debug")
+				ordererRunners = append(ordererRunners, runner)
+				proc := ifrit.Invoke(runner)
+				ordererProcesses = append(ordererProcesses, proc)
+				Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
+			}
+
+			peerRunner := network.PeerGroupRunner()
+			peerProcesses = ifrit.Invoke(peerRunner)
+
+			Eventually(peerProcesses.Ready(), network.EventuallyTimeout).Should(BeClosed())
+
+			peer := network.Peer("Org1", "peer0")
+
+			assertBlockReception(map[string]int{"systemchannel": 0}, network.Orderers, peer, network)
+			By("check block validation policy on sys channel")
+			assertBlockValidationPolicy(network, peer, network.Orderers[0], "systemchannel", common.Policy_IMPLICIT_ORDERER)
+
+			By("Waiting for followers to see the leader")
+			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+
+			channel := "testchannel1"
+
+			orderer := network.Orderers[0]
+			network.CreateAndJoinChannel(orderer, channel)
+
+			assertBlockReception(map[string]int{"systemchannel": 1}, network.Orderers, peer, network)
+
+			nwo.DeployChaincode(network, channel, network.Orderers[0], nwo.Chaincode{
+				Name:    "mycc",
+				Version: "0.0",
+				Path:    "github.com/hyperledger/fabric/integration/chaincode/simple/cmd",
+				Ctor:    `{"Args":["init","a","100","b","200"]}`,
+				Policy:  `AND ('Org1MSP.member','Org2MSP.member')`,
+			})
+
+			assertBlockReception(map[string]int{"testchannel1": 1}, network.Orderers, peer, network)
+
+			By("check block validation policy on app channel")
+			assertBlockValidationPolicy(network, peer, network.Orderers[0], channel, common.Policy_IMPLICIT_ORDERER)
+
+			By("Transacting on testchannel1")
+			invokeQuery(network, peer, orderer, channel, 90)
+			invokeQuery(network, peer, orderer, channel, 80)
+			assertBlockReception(map[string]int{"testchannel1": 3}, network.Orderers, peer, network)
+
+			By("Adding a new consenter")
+
+			orderer5 := &nwo.Orderer{
+				Name:         "orderer5",
+				Organization: "OrdererOrg",
+			}
+			network.Orderers = append(network.Orderers, orderer5)
+
+			ports := nwo.Ports{}
+			for _, portName := range nwo.OrdererPortNames() {
+				ports[portName] = network.ReservePort()
+			}
+			network.PortsByOrdererID[orderer5.ID()] = ports
+
+			network.GenerateCryptoConfig()
+			network.GenerateOrdererConfig(orderer5)
+
+			sess, err := network.Cryptogen(commands.Extend{
+				Config: network.CryptoConfigPath(),
+				Input:  network.CryptoPath(),
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(sess, network.EventuallyTimeout).Should(gexec.Exit(0))
+
+			ordererCertificatePath := filepath.Join(network.OrdererLocalTLSDir(orderer5), "server.crt")
+			ordererCertificate, err := ioutil.ReadFile(ordererCertificatePath)
+			Expect(err).NotTo(HaveOccurred())
+
+			ordererIdentity, err := ioutil.ReadFile(network.OrdererCert(orderer5))
+			Expect(err).NotTo(HaveOccurred())
+
+			for _, channel := range []string{"systemchannel", "testchannel1"} {
+				nwo.UpdateSmartBFTMetadata(network, peer, orderer, channel, func(md *smartbft.ConfigMetadata) {
+					md.Consenters = append(md.Consenters, &smartbft.Consenter{
+						MspId:       "OrdererMSP",
+						ConsenterId: 5,
+						Identity: utils.MarshalOrPanic(&msp.SerializedIdentity{
+							Mspid:   "OrdererMSP",
+							IdBytes: ordererIdentity,
+						}),
+						ServerTlsCert: ordererCertificate,
+						ClientTlsCert: ordererCertificate,
+						Host:          "127.0.0.1",
+						Port:          uint32(network.OrdererPort(orderer5, nwo.ClusterPort)),
+					})
+				})
+			}
+
+			assertBlockReception(map[string]int{
+				"systemchannel": 2,
+				"testchannel1":  4,
+			}, network.Orderers[:4], peer, network)
+
+			By("Waiting for followers to see the leader of the system channel")
+			Eventually(ordererRunners[0].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 3 channel=systemchannel"))
+			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 3 channel=systemchannel"))
+			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 3 channel=systemchannel"))
+
+			By("Planting last config block in the orderer's file system")
+			configBlock := nwo.GetConfigBlock(network, peer, orderer, "systemchannel")
+			err = ioutil.WriteFile(filepath.Join(testDir, "systemchannel_block.pb"), utils.MarshalOrPanic(configBlock), 0644)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Launching the added orderer")
+			orderer5Runner := network.OrdererRunner(orderer5)
+			orderer5Runner.Command.Env = append(orderer5Runner.Command.Env, "FABRIC_LOGGING_SPEC=grpc=debug:orderer.consensus.smartbft=debug:policies.ImplicitOrderer=debug")
+			ordererRunners = append(ordererRunners, orderer5Runner)
+			proc := ifrit.Invoke(orderer5Runner)
+			ordererProcesses = append(ordererProcesses, proc)
+			Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
+
+			By("Waiting for the added orderer to see the leader")
+			Eventually(orderer5Runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 3 channel=systemchannel"))
+
+			By("Waiting for followers to see the leader of the application channel")
+			Eventually(ordererRunners[0].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 5 channel=testchannel1"))
+			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 5 channel=testchannel1"))
+			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 5 channel=testchannel1"))
+			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 5 channel=testchannel1"))
+
+			By("Killing the leader")
+			orderer = network.Orderers[4]
+			By(fmt.Sprintf("Killing %s", orderer.Name))
+			ordererProcesses[4].Signal(syscall.SIGTERM)
+			Eventually(ordererProcesses[4].Wait(), network.EventuallyTimeout).Should(Receive())
+
+			By("Waiting for view change to occur")
+			Eventually(ordererRunners[0].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Starting view with number 1, sequence 5, and decisions 0 channel=testchannel1"))
+			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Starting view with number 1, sequence 5, and decisions 0 channel=testchannel1"))
+			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Starting view with number 1, sequence 5, and decisions 0 channel=testchannel1"))
+			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Starting view with number 1, sequence 5, and decisions 0 channel=testchannel1"))
+
+			orderer = network.Orderers[1]
+
+			By("Transacting")
+			invokeQuery(network, peer, orderer, channel, 70)
+
+			By("Ensuring blacklisting is skipped due to reconfig")
+			Eventually(ordererRunners[0].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Skipping verifying prev commits due to verification sequence advancing from 1 to 2 channel=testchannel1"))
+			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Skipping verifying prev commits due to verification sequence advancing from 1 to 2 channel=testchannel1"))
+			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Skipping verifying prev commits due to verification sequence advancing from 1 to 2 channel=testchannel1"))
+			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Skipping verifying prev commits due to verification sequence advancing from 1 to 2 channel=testchannel1"))
+		})
 	})
 })
 
