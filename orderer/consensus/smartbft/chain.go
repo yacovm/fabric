@@ -531,6 +531,12 @@ func (c *BFTChain) blockToDecision(block *common.Block) *types.Decision {
 			OrdererBlockMetadata: signatureMetadata.Value,
 			AuxiliaryInput:       sigMD.AuxiliaryInput,
 		}
+		prpf := &smartbftprotos.PreparesFrom{}
+		if err := proto.Unmarshal(sigMD.AuxiliaryInput, prpf); err != nil {
+			c.Logger.Errorf("Failed unmarshaling auxiliary data")
+			continue
+		}
+		c.Logger.Infof("AuxiliaryInput[%d]: %v", id, prpf)
 		signatures = append(signatures, types.Signature{
 			Msg:   sig.Marshal(),
 			Value: sigMD.Signature,
