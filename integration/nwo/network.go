@@ -704,7 +704,10 @@ func (n *Network) listTLSCACertificates() []string {
 // have been created by the network.
 func (n *Network) Cleanup() {
 	nw, err := n.DockerClient.NetworkInfo(n.NetworkID)
-	Expect(err).NotTo(HaveOccurred())
+	if err != nil {
+		fmt.Println("No such network:", err)
+		return
+	}
 
 	err = n.DockerClient.RemoveNetwork(nw.ID)
 	Expect(err).NotTo(HaveOccurred())

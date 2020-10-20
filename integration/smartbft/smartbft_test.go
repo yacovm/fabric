@@ -10,7 +10,11 @@
 package smartbft
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"os"
@@ -82,6 +86,51 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 	})
 
 	Describe("smartbft network", func() {
+		It("smartbft upgrade BFT-2 to BFT-3", func() {
+			wd, err := os.Getwd()
+			Expect(err).To(Not(HaveOccurred()))
+
+			archive, err := ioutil.ReadFile(filepath.Join(wd, "bft-pre-upgrade.tar.gz"))
+			Expect(err).To(Not(HaveOccurred()))
+
+			path := filepath.Join("/tmp", "e2e-smartbft-test254466452")
+			if _, err := os.Stat(path); err == nil {
+				os.RemoveAll(path)
+			}
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				err = os.Mkdir(path, 0755)
+				Expect(err).To(Not(HaveOccurred()))
+			}
+			testDir = path
+
+			err = extractTarGZ(archive, path)
+			Expect(err).ToNot(HaveOccurred())
+
+			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, StartPort(), components)
+
+			var ordererRunners []*ginkgomon.Runner
+			for _, orderer := range network.Orderers {
+				runner := network.OrdererRunner(orderer)
+				runner.Command.Env = append(runner.Command.Env, "FABRIC_LOGGING_SPEC=orderer.consensus.smartbft=debug:grpc=debug")
+				ordererRunners = append(ordererRunners, runner)
+				proc := ifrit.Invoke(runner)
+				ordererProcesses = append(ordererProcesses, proc)
+				Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
+			}
+
+			peerGroupRunner, _ := peerGroupRunners(network)
+			peerProcesses = ifrit.Invoke(peerGroupRunner)
+			Eventually(peerProcesses.Ready(), network.EventuallyTimeout).Should(BeClosed())
+
+			network.PortsByOrdererID[network.Orderers[3].ID()] = map[nwo.PortName]uint16{
+				nwo.ListenPort: 39012,
+			}
+			peer := network.Peer("Org1", "peer0")
+			invokeQuery(network, peer, network.Orderers[3], "testchannel1", 70)
+			invokeQuery(network, peer, network.Orderers[3], "testchannel1", 60)
+			invokeQuery(network, peer, network.Orderers[3], "testchannel1", 50)
+		})
+
 		It("smartbft multiple nodes stop start all nodes", func() {
 			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, StartPort(), components)
 			network.GenerateConfigTree()
@@ -1159,11 +1208,6 @@ func assertBlockValidationPolicy(network *nwo.Network, peer *nwo.Peer, orderer *
 	Expect(common.Policy_PolicyType(blockValidationPolicyValue.Policy.Type)).To(Equal(policyType))
 }
 
-func by(text string, callbacks ...func()) {
-	fmt.Println(text)
-	By(text, callbacks...)
-}
-
 func peerGroupRunners(n *nwo.Network) (ifrit.Runner, []*ginkgomon.Runner) {
 	runners := []*ginkgomon.Runner{}
 	members := grouper.Members{}
@@ -1173,4 +1217,43 @@ func peerGroupRunners(n *nwo.Network) (ifrit.Runner, []*ginkgomon.Runner) {
 		runners = append(runners, runner)
 	}
 	return grouper.NewParallel(syscall.SIGTERM, members), runners
+}
+
+func extractTarGZ(archive []byte, baseDir string) error {
+	gzReader, err := gzip.NewReader(bytes.NewBuffer(archive))
+	if err != nil {
+		return err
+	}
+
+	tarReader := tar.NewReader(gzReader)
+
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			return err
+		}
+
+		filePath := filepath.Join(baseDir, header.Name)
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.Mkdir(filePath, 0755); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			fd, err := os.Create(filePath)
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(fd, tarReader)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
