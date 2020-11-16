@@ -8,9 +8,9 @@ package msgprocessor
 
 import (
 	"github.com/hyperledger/fabric-protos-go/common"
-	"github.com/hyperledger/fabric/.build/docker/gotools/obj/src/github.com/pkg/errors"
 	"github.com/hyperledger/fabric/core/ledger/kvledger/txmgmt/rwsetutil"
 	"github.com/hyperledger/fabric/gdpr"
+	"github.com/pkg/errors"
 )
 
 type GDPRFilter struct {
