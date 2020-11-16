@@ -29,7 +29,7 @@ require (
 	github.com/frankban/quicktest v1.9.0 // indirect
 	github.com/fsouza/go-dockerclient v1.4.1
 	github.com/go-kit/kit v0.8.0
-	github.com/golang/protobuf v1.4.2
+	github.com/golang/protobuf v1.4.3
 	github.com/gorilla/handlers v1.4.0
 	github.com/gorilla/mux v1.7.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.1.0
@@ -45,8 +45,9 @@ require (
 	github.com/mattn/go-runewidth v0.0.4 // indirect
 	github.com/miekg/pkcs11 v1.0.3
 	github.com/mitchellh/mapstructure v1.2.2
-	github.com/onsi/ginkgo v1.14.1
-	github.com/onsi/gomega v1.10.2
+	github.com/nxadm/tail v1.4.5 // indirect
+	github.com/onsi/ginkgo v1.14.2
+	github.com/onsi/gomega v1.10.3
 	github.com/opencontainers/runc v1.0.0-rc8 // indirect
 	github.com/pierrec/lz4 v2.5.0+incompatible // indirect
 	github.com/pkg/errors v0.8.1
@@ -65,8 +66,12 @@ require (
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20181228115726-23731bf9ba55
 	go.uber.org/zap v1.14.1
 	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
+	golang.org/x/net v0.0.0-20201110031124-69a78807bb2b // indirect
+	golang.org/x/sys v0.0.0-20201113233024-12cec1faf1ba // indirect
+	golang.org/x/text v0.3.4 // indirect
 	golang.org/x/tools v0.0.0-20200918232735-d647fc253266
 	google.golang.org/grpc v1.29.1
+	google.golang.org/protobuf v1.25.0 // indirect
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 	gopkg.in/cheggaaa/pb.v1 v1.0.28
 	gopkg.in/yaml.v2 v2.3.0
