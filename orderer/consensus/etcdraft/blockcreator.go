@@ -47,7 +47,7 @@ func (bc *blockCreator) createNextBlock(envs []*cb.Envelope) *cb.Block {
 	var err error
 	for i, env := range envs {
 		data.Data[i], err = proto.Marshal(env)
-		for _ , pi := range env.PreImages {
+		for _, pi := range env.PreImages {
 			pis = append(pis, pi) // Does this make sense (no marshalling)?
 			pi = nil
 		}

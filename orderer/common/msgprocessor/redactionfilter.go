@@ -8,6 +8,7 @@ package msgprocessor
 
 import (
 	"fmt"
+
 	"github.com/hyperledger/fabric/gdpr"
 
 	"github.com/golang/protobuf/proto"
@@ -18,12 +19,13 @@ import (
 
 type redactionRule struct{}
 type set map[string]struct{}
+
 //func ProcessEnvelope(envBytes []byte, block *common.Block, i int, f func(block *common.Block, i int, rws *rwsetutil.TxRwSet), onErr func(err error)) {
 
 func checkRwSet(block *ab.Block, _ int, rws *rwsetutil.TxRwSet) {
 	hashesOfPreimages := make(set)
 
-	for _, pi := range block.Data.PreimageSpace{
+	for _, pi := range block.Data.PreimageSpace {
 		hashesOfPreimages[(string(util.ComputeSHA256(pi)))] = struct{}{}
 	}
 
@@ -44,7 +46,6 @@ func onError(err error) {
 	//return errors.New("key wasn't found in pre-image space")
 }
 
-
 func (a redactionRule) Apply(message *ab.Envelope) error {
 	msg, err := proto.Marshal(message)
 	if err != nil {
@@ -57,12 +58,12 @@ func (a redactionRule) Apply(message *ab.Envelope) error {
 
 	hashesOfPreimages := make([][]byte, 100)
 	for _, preimage := range message.PreImages {
-		hashesOfPreimages = append(hashesOfPreimages,util.ComputeSHA256(preimage) )//[(string(util.ComputeSHA256(preimage)))] = struct{}{}
+		hashesOfPreimages = append(hashesOfPreimages, util.ComputeSHA256(preimage)) //[(string(util.ComputeSHA256(preimage)))] = struct{}{}
 	}
 
 	b := &ab.Block{}
 	b.Data.PreimageSpace = hashesOfPreimages
-	gdpr.ProcessEnvelope(msg, b, 0, checkRwSet, onError )
+	gdpr.ProcessEnvelope(msg, b, 0, checkRwSet, onError)
 
 	//
 	//msgData := &ab.Payload{}
