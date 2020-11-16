@@ -212,6 +212,11 @@ func validateAndPreparePvtBatchGDPR(
 			m[hval] = pispace[i]
 		}
 
+		//var prwset *rwsetutil.NsRwSet
+		//err = prwset.
+		//prwset := tx.rwset
+		//prwset.NsRwSets
+		//
 		if pvtRWSet, err = rwsetutil.TxPvtRwSetFromProtoMsg(txPvtdata.WriteSet); err != nil {
 			return nil, err
 		}

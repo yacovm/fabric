@@ -783,6 +783,8 @@ func (s *GossipStateProviderImpl) commitBlock(block *common.Block, pvtData util.
 	t1 := time.Now()
 
 	// Commit block with available private transactions
+	//fmt.Print("GAL(state):")
+	//fmt.Println(block)
 
 	if err := s.ledger.StoreBlock(block, pvtData); err != nil {
 		s.logger.Errorf("Got error while committing(%+v)", errors.WithStack(err))

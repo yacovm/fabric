@@ -68,7 +68,6 @@ func CreateStandardChannelFilters(filterSupport channelconfig.Resources, config 
 		EmptyRejectRule,
 		NewSizeFilter(filterSupport),
 		NewSigFilter(policies.ChannelWriters, policies.ChannelOrdererWriters, filterSupport),
-		redactionRule{},
 		// Yacov: Add here a new filter.
 	}
 
