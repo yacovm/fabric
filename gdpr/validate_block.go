@@ -24,31 +24,31 @@ func hash(preimage []byte) []byte {
 	return h.Sum(nil)
 }
 
-type set map[string]struct{}
+type Set map[string]struct{}
 
-func (s set) exists(element string) bool {
+func (s Set) Exists(element string) bool {
 	_, ok := s[element]
 	return ok
 }
 
-func hashedPreImages(block *common.Block) set {
-	hashesOfPreimages := make(set)
-	for _, preimage := range block.GetData().GetPreimageSpace() {
+func HashedPreImages(preImages [][]byte) Set {
+	hashesOfPreimages := make(Set)
+	for _, preimage := range preImages {
 		hashesOfPreimages[(string(hash(preimage)))] = struct{}{}
 	}
 	return hashesOfPreimages
 }
 
-type transactionValidation struct {
+type TransactionValidation struct {
 	err                   atomic.Value
-	hashesInPreImageSpace set
+	hashesInPreImageSpace Set
 }
 
-func (tv *transactionValidation) validateHashesOfTxRWS(_ *common.Block, _ int, rws *rwsetutil.TxRwSet) {
+func (tv *TransactionValidation) validateHashesOfTxRWS(_ *common.Block, _ int, rws *rwsetutil.TxRwSet) {
 	for _, nsrws := range rws.NsRwSets {
 		for _, kvWrite := range nsrws.KvRwSet.Writes {
 			fmt.Println("validateHashesOfTxRWS:", kvWrite.Key, kvWrite.Value)
-			if !tv.hashesInPreImageSpace.exists(string(kvWrite.ValueHash)) {
+			if !tv.hashesInPreImageSpace.Exists(string(kvWrite.ValueHash)) {
 				err := fmt.Errorf("key %s write wasn't found in pre-image space", kvWrite.Key)
 				tv.err.Store(err)
 			} else {
@@ -58,11 +58,11 @@ func (tv *transactionValidation) validateHashesOfTxRWS(_ *common.Block, _ int, r
 	}
 }
 
-func (tv *transactionValidation) onErr(err error) {
+func (tv *TransactionValidation) onErr(err error) {
 	tv.err.Store(err)
 }
 
-func (tv *transactionValidation) error() error {
+func (tv *TransactionValidation) error() error {
 	errVal := tv.err.Load()
 	if errVal == nil {
 		return nil
@@ -71,8 +71,8 @@ func (tv *transactionValidation) error() error {
 }
 
 func Validate(block *common.Block) error {
-	txValidation := transactionValidation{
-		hashesInPreImageSpace: hashedPreImages(block),
+	txValidation := TransactionValidation{
+		hashesInPreImageSpace: HashedPreImages(block.Data.PreimageSpace),
 	}
 
 	forEachTransaction(block, txValidation.validateHashesOfTxRWS, txValidation.onErr)
@@ -87,20 +87,20 @@ func forEachTransaction(block *common.Block, f func(block *common.Block, i int, 
 	for i, envBytes := range block.Data.Data {
 		go func(i int, envBytes []byte) {
 			defer workers.Done()
-			processEnvelope(envBytes, block, i, f, onErr)
+
+			originalEnvelope, err := protoutil.GetEnvelopeFromBlock(envBytes)
+			if err != nil {
+				onErr(err)
+				return
+			}
+			ProcessEnvelope(originalEnvelope, block, i, f, onErr)
 		}(i, envBytes)
 	}
 
 	workers.Wait()
 }
 
-func processEnvelope(envBytes []byte, block *common.Block, i int, f func(block *common.Block, i int, rws *rwsetutil.TxRwSet), onErr func(err error)) {
-	originalEnvelope, err := protoutil.GetEnvelopeFromBlock(envBytes)
-	if err != nil {
-		onErr(err)
-		return
-	}
-
+func ProcessEnvelope(originalEnvelope *common.Envelope, block *common.Block, i int, f func(block *common.Block, i int, rws *rwsetutil.TxRwSet), onErr func(err error)) {
 	payload, err := protoutil.UnmarshalPayload(originalEnvelope.Payload)
 	if err != nil {
 		onErr(err)
