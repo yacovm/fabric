@@ -7,6 +7,8 @@ SPDX-License-Identifier: Apache-2.0
 package etcdraft
 
 import (
+	"fmt"
+
 	"github.com/golang/protobuf/proto"
 	cb "github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric/common/flogging"
@@ -42,14 +44,13 @@ func (bc *blockCreator) createNextBlock(envs []*cb.Envelope) *cb.Block {
 		Data: make([][]byte, len(envs)),
 	}
 
-	pis := make([][]byte, 100)
+	var pis [][]byte
 
 	var err error
 	for i, env := range envs {
+		fmt.Println(len(env.PreImages), "pre-images in envelope")
 		data.Data[i], err = proto.Marshal(env)
-		for i := range env.PreImages {
-			pis = append(pis, env.PreImages[i]) // Does this make sense (no marshalling)?
-		}
+		pis = append(pis, env.PreImages...)
 		if err != nil {
 			bc.logger.Panicf("Could not marshal envelope: %s", err)
 		}
@@ -61,6 +62,8 @@ func (bc *blockCreator) createNextBlock(envs []*cb.Envelope) *cb.Block {
 	block.Header.DataHash = protoutil.BlockDataHash(data)
 	block.Data = data
 	block.Data.PreimageSpace = pis
+
+	fmt.Println("Created block with", len(block.Data.PreimageSpace), "pre-images")
 
 	bc.hash = protoutil.BlockHeaderHash(block.Header)
 	return block

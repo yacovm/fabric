@@ -449,15 +449,16 @@ func (txSim *TxSimulationResults) GetPubSimulationBytes() ([]byte, error) {
 func (txSim *TxSimulationResults) GetPubSimulationBytesGDPR(f func(nsRWSet *rwset.NsReadWriteSet) (*rwset.NsReadWriteSet, [][]byte, error)) ([]byte, [][]byte, error) {
 
 	//txSim.PvtSimulationResults.
-	pis := make([][]byte, 100)
-	temp := make([][]byte, 100)
+	var pis [][]byte
 	var err error
 
 	for _, nsrws := range txSim.PubSimulationResults.NsRwset {
-		nsrws, temp, err = f(nsrws)
+		nsrws2, temp, err := f(nsrws)
 		if err != nil {
 			return nil, nil, err
 		}
+
+		*nsrws = *nsrws2
 
 		for i := range temp {
 			pis = append(pis, temp[i])

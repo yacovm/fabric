@@ -322,6 +322,9 @@ func (mgr *blockfileMgr) addBlock(block *common.Block) error {
 			bcInfo.CurrentBlockHash, block.Header.PreviousHash,
 		)
 	}
+
+	fmt.Println("Appending block with", len(block.Data.PreimageSpace), "pre-images")
+
 	blockBytes, info, err := serializeBlock(block)
 	if err != nil {
 		return errors.WithMessage(err, "error serializing block")

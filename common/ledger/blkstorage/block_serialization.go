@@ -40,6 +40,11 @@ func serializeBlock(block *common.Block) ([]byte, *serializedBlockInfo, error) {
 	if err = addMetadataBytes(block.Metadata, buf); err != nil {
 		return nil, nil, err
 	}
+	if len(block.Data.PreimageSpace) > 0 {
+		if err = addPreImagesBytes(block.Data, buf); err != nil {
+			return nil, nil, err
+		}
+	}
 	return buf.Bytes(), info, nil
 }
 
@@ -54,6 +59,12 @@ func deserializeBlock(serializedBlockBytes []byte) (*common.Block, error) {
 		return nil, err
 	}
 	if block.Metadata, err = extractMetadata(b); err != nil {
+		return nil, err
+	}
+	if b.GetBytesConsumed() == len(serializedBlockBytes) {
+		return block, nil
+	}
+	if block.Data.PreimageSpace, err = extractPreImages(b); err != nil {
 		return nil, err
 	}
 	return block, nil
@@ -130,6 +141,14 @@ func addMetadataBytes(blockMetadata *common.BlockMetadata, buf *proto.Buffer) er
 	return nil
 }
 
+func addPreImagesBytes(data *common.BlockData, buf *proto.Buffer) error {
+	data.Data = nil
+	if err := buf.EncodeRawBytes(protoutil.MarshalOrPanic(data)); err != nil {
+		return errors.Wrap(err, "error encoding the block metadata")
+	}
+	return nil
+}
+
 func extractHeader(buf *buffer) (*common.BlockHeader, error) {
 	header := &common.BlockHeader{}
 	var err error
@@ -191,4 +210,17 @@ func extractMetadata(buf *buffer) (*common.BlockMetadata, error) {
 		metadata.Metadata = append(metadata.Metadata, metadataEntry)
 	}
 	return metadata, nil
+}
+
+func extractPreImages(buf *buffer) ([][]byte, error) {
+	var err error
+	var blockDataRaw []byte
+	if blockDataRaw, err = buf.DecodeRawBytes(false); err != nil {
+		return nil, errors.Wrap(err, "error decoding the pre-images")
+	}
+	blockData := &common.BlockData{}
+	if err := proto.Unmarshal(blockDataRaw, blockData); err != nil {
+		return nil, errors.Wrap(err, "error unmarshaling the pre-images")
+	}
+	return blockData.PreimageSpace, nil
 }

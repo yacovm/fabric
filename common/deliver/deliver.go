@@ -8,6 +8,7 @@ package deliver
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"math"
 	"strconv"
@@ -326,6 +327,7 @@ func (h *Handler) deliverBlocks(ctx context.Context, srv *Server, envelope *cb.E
 			return cb.Status_FORBIDDEN, nil
 		}
 
+		fmt.Println("Sending a block with", len(block.Data.PreimageSpace), "pre-images")
 		logger.Debugf("[channel: %s] Delivering block [%d] for (%p) for %s", chdr.ChannelId, block.Header.Number, seekInfo, addr)
 
 		signedData := &protoutil.SignedData{Data: envelope.Payload, Identity: shdr.Creator, Signature: envelope.Signature}

@@ -8,6 +8,7 @@ package endorser
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"strconv"
 	"time"
@@ -332,17 +333,19 @@ func (e *Endorser) SimulateProposalGDPR(txParams *ccprovider.TransactionParams, 
 }
 
 func helperGDPR(nsrws *rwset.NsReadWriteSet) (*rwset.NsReadWriteSet, [][]byte, error) {
-	pis := make([][]byte, 100)
-	kvRWset := &kvrwset.KVRWSet{} //Set{} //TxRwSet{}
+	var pis [][]byte
+	kvRWset := &kvrwset.KVRWSet{}
 	err := proto.Unmarshal(nsrws.Rwset, kvRWset)
 	if err != nil {
 		return nil, nil, err
 	}
 	for _, kvWrite := range kvRWset.Writes {
 		kvWrite.ValueHash = util.ComputeSHA256(kvWrite.Value)
+		fmt.Println(kvWrite.Key, "-->", base64.StdEncoding.EncodeToString(kvWrite.Value), "hash:", base64.StdEncoding.EncodeToString(kvWrite.ValueHash))
 		pis = append(pis, kvWrite.Value)
-		kvWrite.Value = make([]byte, 0) //nil
+		kvWrite.Value = nil
 	}
+	nsrws.Rwset = protoutil.MarshalOrPanic(kvRWset)
 	return nsrws, pis, nil
 }
 
@@ -558,6 +561,10 @@ func (e *Endorser) ProcessProposalSuccessfullyOrError(up *UnpackedProposal) (*pb
 	}
 
 	p2 := &pb.PreimageSpace{ValueWrites: pis}
+	fmt.Println("Pre-Images:")
+	for _, pi := range pis {
+		fmt.Println(">>", base64.StdEncoding.EncodeToString(pi), "hash:", util.ComputeSHA256(pi))
+	}
 	return &pb.ProposalResponse{
 		Version:       1,
 		Endorsement:   endorsement,

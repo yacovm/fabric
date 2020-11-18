@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package msgprocessor
 
 import (
+	"encoding/base64"
 	"fmt"
 
 	"github.com/hyperledger/fabric-protos-go/common"
@@ -22,7 +23,7 @@ func (G GDPRFilter) Apply(message *common.Envelope) error {
 	preImages := gdpr.HashedPreImages(message.PreImages)
 	fmt.Println("Hashed pre-images:")
 	for pm := range preImages {
-		fmt.Println(">>", pm)
+		fmt.Println(">>", base64.StdEncoding.EncodeToString([]byte(pm)))
 	}
 	var finalError error
 	gdpr.ProcessEnvelope(message, nil, 0, func(block *common.Block, i int, rws *rwsetutil.TxRwSet) {

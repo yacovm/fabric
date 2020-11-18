@@ -9,6 +9,7 @@ package blocksprovider
 import (
 	"context"
 	"crypto/x509"
+	"fmt"
 	"math"
 	"time"
 
@@ -227,6 +228,7 @@ func (d *Deliverer) processMsg(msg *orderer.DeliverResponse) error {
 			return errors.WithMessage(err, "block from orderer could not be verified")
 		}
 
+		fmt.Println("Detected", len(t.Block.Data.PreimageSpace), "pre-images in block")
 		marshaledBlock, err := proto.Marshal(t.Block)
 		if err != nil {
 			return errors.WithMessage(err, "block from orderer could not be re-marshaled")

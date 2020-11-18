@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric/core/ledger/kvledger/txmgmt/rwsetutil"
 	"github.com/hyperledger/fabric/protoutil"
@@ -24,17 +25,22 @@ func hash(preimage []byte) []byte {
 	return h.Sum(nil)
 }
 
-type Set map[string]struct{}
+type Set map[string][]byte
 
 func (s Set) Exists(element string) bool {
 	_, ok := s[element]
 	return ok
 }
 
+func (s Set) Lookup(hashedWrite []byte) []byte {
+	val := s[string(hashedWrite)]
+	return val
+}
+
 func HashedPreImages(preImages [][]byte) Set {
 	hashesOfPreimages := make(Set)
 	for _, preimage := range preImages {
-		hashesOfPreimages[(string(hash(preimage)))] = struct{}{}
+		hashesOfPreimages[(string(hash(preimage)))] = preimage
 	}
 	return hashesOfPreimages
 }
@@ -156,4 +162,85 @@ func ProcessEnvelope(originalEnvelope *common.Envelope, block *common.Block, i i
 	}
 
 	f(block, i, txRWSet)
+}
+
+func FoldReadWriteSet(block *common.Block, i int, txRWSet *rwsetutil.TxRwSet) {
+	env, err := protoutil.UnmarshalEnvelope(block.Data.Data[i])
+	if err != nil {
+		panic(err)
+	}
+
+	payload, err := protoutil.UnmarshalPayload(env.Payload)
+	if err != nil {
+		panic(err)
+	}
+
+	chdr, err := protoutil.ChannelHeader(env)
+	if err != nil {
+		panic(err)
+	}
+
+	if common.HeaderType(chdr.Type) != common.HeaderType_ENDORSER_TRANSACTION {
+		return
+	}
+
+	tx, err := protoutil.UnmarshalTransaction(payload.Data)
+	if err != nil {
+		panic(err)
+	}
+
+	ccPayload, err := protoutil.UnmarshalChaincodeActionPayload(tx.Actions[0].Payload)
+	if err != nil {
+		panic(err)
+	}
+
+	pRespPayload, err := protoutil.UnmarshalProposalResponsePayload(ccPayload.Action.ProposalResponsePayload)
+	if err != nil {
+		panic(err)
+	}
+
+	ccAction, err := protoutil.UnmarshalChaincodeAction(pRespPayload.Extension)
+	if err != nil {
+		panic(err)
+	}
+
+	txRWSetBytes, err := txRWSet.ToProtoBytes()
+	if err != nil {
+		panic(err)
+	}
+
+	ccAction.Results = txRWSetBytes
+	ccActionBytes, err := proto.Marshal(ccAction)
+	if err != nil {
+		panic(err)
+	}
+
+	pRespPayload.Extension = ccActionBytes
+
+	ccPayload.Action.ProposalResponsePayload, err = proto.Marshal(pRespPayload)
+	if err != nil {
+		panic(err)
+	}
+
+	tx.Actions[0].Payload, err = proto.Marshal(ccPayload)
+	if err != nil {
+		panic(err)
+	}
+
+	payload.Data, err = proto.Marshal(tx)
+	if err != nil {
+		panic(err)
+	}
+
+	env.Payload, err = proto.Marshal(payload)
+	if err != nil {
+		panic(err)
+	}
+
+	envBytes, err := proto.Marshal(env)
+	if err != nil {
+		panic(err)
+	}
+
+	block.Data.Data[i] = envBytes
 }

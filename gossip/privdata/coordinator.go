@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package privdata
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/hyperledger/fabric-protos-go/common"
@@ -153,6 +154,8 @@ func (c *coordinator) StoreBlock(block *common.Block, privateDataSets util.PvtDa
 	if block.Header == nil {
 		return errors.New("Block header is nil")
 	}
+
+	fmt.Println("Detected", len(block.Data.PreimageSpace), "pre-images in block")
 
 	logger.Infof("[%s] Received block [%d] from buffer", c.ChainID, block.Header.Number)
 
