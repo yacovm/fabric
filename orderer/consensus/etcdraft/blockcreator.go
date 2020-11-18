@@ -48,9 +48,10 @@ func (bc *blockCreator) createNextBlock(envs []*cb.Envelope) *cb.Block {
 
 	var err error
 	for i, env := range envs {
+		pis = append(pis, env.PreImages...)
+		env.PreImages = nil
 		fmt.Println(len(env.PreImages), "pre-images in envelope")
 		data.Data[i], err = proto.Marshal(env)
-		pis = append(pis, env.PreImages...)
 		if err != nil {
 			bc.logger.Panicf("Could not marshal envelope: %s", err)
 		}
