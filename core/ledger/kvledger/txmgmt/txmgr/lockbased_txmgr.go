@@ -8,7 +8,11 @@ package txmgr
 
 import (
 	"bytes"
+	"fmt"
 	"sync"
+
+	"github.com/hyperledger/fabric/gdpr"
+	"github.com/hyperledger/fabric/protoutil"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric-protos-go/common"
@@ -191,12 +195,41 @@ func (txmgr *LockBasedTxMgr) ValidateAndPrepare(blockAndPvtdata *ledger.BlockAnd
 	defer txmgr.oldBlockCommit.Unlock()
 	logger.Debug("lock acquired on oldBlockCommit for validating read set version against the committed version")
 
-	block := blockAndPvtdata.Block
-	logger.Debugf("Validating new block with num trans = [%d]", len(block.Data.Data))
+	logger.Debugf("Validating new block with num trans = [%d]", len(blockAndPvtdata.Block.Data.Data))
 	// Yacov: This is where the batch is built from the block given as input.
 	// For now, we'll focus on value writes in the RW-set, so inside the ValidateAndPrepareBatch method we would ensure that
 	// the pre-images are used as value writes.
+	// GAL: make sure this is committer (validator) code. preparer does all actual work, right?
+	// GAL : old format
+	block := proto.Clone(blockAndPvtdata.Block).(*common.Block)
+	preImages := gdpr.HashedPreImages(block.Data.PreimageSpace)
+	fmt.Println("pre-images in block:", len(preImages))
+	var finalError error
+	for i, txn := range block.Data.Data {
+		envelope := protoutil.UnmarshalEnvelopeOrPanic(txn)
+		gdpr.ProcessEnvelope(envelope, block, i, func(block *common.Block, i int, rws *rwsetutil.TxRwSet) {
+			for _, nsRWS := range rws.NsRwSets {
+				for _, kvWrite := range nsRWS.KvRwSet.Writes {
+					if preImage := preImages.Lookup(kvWrite.ValueHash); preImage != nil {
+						kvWrite.Value = preImage
+					}
+				}
+				gdpr.FoldReadWriteSet(block, i, rws)
+			}
+		}, func(err error) {
+			finalError = err
+		})
+	}
+
+	if finalError != nil {
+		return nil, nil, finalError
+	}
+
+	originalBlock := blockAndPvtdata.Block
+	blockAndPvtdata.Block = block
 	batch, txstatsInfo, err := txmgr.commitBatchPreparer.ValidateAndPrepareBatch(blockAndPvtdata, doMVCCValidation)
+	blockAndPvtdata.Block = originalBlock
+
 	if err != nil {
 		txmgr.reset()
 		return nil, nil, err
@@ -610,7 +643,6 @@ func (txmgr *LockBasedTxMgr) CommitLostBlock(blockAndPvtdata *ledger.BlockAndPvt
 	if _, _, err := txmgr.ValidateAndPrepare(blockAndPvtdata, false); err != nil {
 		return err
 	}
-
 	// log every 1000th block at Info level so that statedb rebuild progress can be tracked in production envs.
 	if block.Header.Number%1000 == 0 {
 		logger.Infof("Recommitting block [%d] to state database", block.Header.Number)

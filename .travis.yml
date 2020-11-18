@@ -17,5 +17,5 @@ jobs:
       script: make basic-checks
     - stage: integration
       script: bash scripts/run-integration-tests.sh
-    - stage: UT
-      script: ./ci/scripts/setup_hsm.sh && make unit-test
+      #    - stage: UT
+      # script: ./ci/scripts/setup_hsm.sh && make unit-test

@@ -424,7 +424,7 @@ func (v *TxValidator) validateTx(req *blockValidationRequest, results chan<- *bl
 				return
 			}
 			logger.Debugf("config transaction received for chain %s", channel)
-		} else {
+		} else { /*GAL: Add header type here*/
 			logger.Warningf("Unknown transaction type [%s] in block number [%d] transaction index [%d]",
 				common.HeaderType(chdr.Type), block.Header.Number, tIdx)
 			results <- &blockValidationResult{

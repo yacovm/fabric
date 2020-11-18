@@ -475,6 +475,8 @@ func (l *kvLedger) CommitLegacy(pvtdataAndBlock *ledger.BlockAndPvtData, commitO
 	if err != nil {
 		return err
 	}
+	//fmt.Print("GAL(ledger1):")
+	//fmt.Println(pvtdataAndBlock)
 	elapsedBlockProcessing := time.Since(startBlockProcessing)
 
 	startBlockstorageAndPvtdataCommit := time.Now()
@@ -504,6 +506,7 @@ func (l *kvLedger) CommitLegacy(pvtdataAndBlock *ledger.BlockAndPvtData, commitO
 	// Yacov: We might want to disable history database or just purge the keys upon redaction
 	// History database could be written in parallel with state and/or async as a future optimization,
 	// although it has not been a bottleneck...no need to clutter the log with elapsed duration.
+	// GAL: isn't history local? why would we want to do that?
 	if l.historyDB != nil {
 		logger.Debugf("[%s] Committing block [%d] transactions to history database", l.ledgerID, blockNo)
 		if err := l.historyDB.Commit(block); err != nil {
@@ -556,6 +559,7 @@ func (l *kvLedger) commitToPvtAndBlockStore(blockAndPvtdata *ledger.BlockAndPvtD
 	}
 
 	// Yacov: This is where the block is written to the ledger in the peer
+	// GAL: anything to do wrt to block structure here? (my guess: no)
 	if err := l.blockStore.AddBlock(blockAndPvtdata.Block); err != nil {
 		return err
 	}

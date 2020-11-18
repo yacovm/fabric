@@ -8,6 +8,7 @@ package validation
 
 import (
 	"bytes"
+	//"github.com/gogo/protobuf/proto"
 
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric-protos-go/ledger/rwset"
@@ -70,6 +71,7 @@ func NewCommitBatchPreparer(
 func (p *CommitBatchPreparer) ValidateAndPrepareBatch(blockAndPvtdata *ledger.BlockAndPvtData,
 	doMVCCValidation bool) (*privacyenabledstate.UpdateBatch, []*TxStatInfo, error) {
 	blk := blockAndPvtdata.Block
+	pis := blk.Data.PreimageSpace
 	logger.Debugf("ValidateAndPrepareBatch() for block number = [%d]", blk.Header.Number)
 	var internalBlock *block
 	var txsStatInfo []*TxStatInfo
@@ -92,12 +94,13 @@ func (p *CommitBatchPreparer) ValidateAndPrepareBatch(blockAndPvtdata *ledger.Bl
 		return nil, nil, err
 	}
 	logger.Debug("validating rwset...")
-	if pvtUpdates, err = validateAndPreparePvtBatch(
+	if pvtUpdates, err = validateAndPreparePvtBatchGDPR(
 		internalBlock,
 		p.db,
 		pubAndHashUpdates,
 		blockAndPvtdata.PvtData,
 		p.customTxProcessors,
+		pis,
 	); err != nil {
 		return nil, nil, err
 	}
@@ -149,9 +152,88 @@ func validateAndPreparePvtBatch(
 		var err error
 		// Yacov: This can be a good place to extract the pre-images from the pre-image space of the block,
 		// and plant them into the value writes.
+
+		// Gal: And pass them by value to the updating functions below?
+		// Gal: If block is in new fmt - extract preimages here (1409)
+
 		if pvtRWSet, err = rwsetutil.TxPvtRwSetFromProtoMsg(txPvtdata.WriteSet); err != nil {
 			return nil, err
 		}
+		addPvtRWSetToPvtUpdateBatch(pvtRWSet, pvtUpdates, version.NewHeight(blk.num, uint64(tx.indexInBlock)))
+		addEntriesToMetadataUpdates(metadataUpdates, pvtRWSet)
+	}
+	if err := incrementPvtdataVersionIfNeeded(metadataUpdates, pvtUpdates, pubAndHashUpdates, db); err != nil {
+		return nil, err
+	}
+	return pvtUpdates, nil
+}
+
+// validateAndPreparePvtBatch pulls out the private write-set for the transactions that are marked as valid
+// by the internal public data validator. Finally, it validates (if not already self-endorsed) the pvt rwset against the
+// corresponding hash present in the public rwset
+func validateAndPreparePvtBatchGDPR(
+	blk *block,
+	db *privacyenabledstate.DB,
+	pubAndHashUpdates *publicAndHashUpdates,
+	pvtdata map[uint64]*ledger.TxPvtData,
+	customTxProcessors map[common.HeaderType]ledger.CustomTxProcessor,
+	pispace [][]byte,
+) (*privacyenabledstate.PvtUpdateBatch, error) {
+
+	pvtUpdates := privacyenabledstate.NewPvtUpdateBatch()
+	metadataUpdates := metadataUpdates{}
+	for _, tx := range blk.txs {
+		if tx.validationCode != peer.TxValidationCode_VALID {
+			continue
+		}
+		if !tx.containsPvtWrites() {
+			continue
+		}
+		txPvtdata := pvtdata[uint64(tx.indexInBlock)]
+		if txPvtdata == nil {
+			continue
+		}
+		if requiresPvtdataValidation(txPvtdata) {
+			if err := validatePvtdata(tx, txPvtdata); err != nil {
+				return nil, err
+			}
+		}
+		var pvtRWSet *rwsetutil.TxPvtRwSet
+		var err error
+		// Yacov: This can be a good place to extract the pre-images from the pre-image space of the block,
+		// and plant them into the value writes.
+
+		// Gal: And pass them by value to the updating functions below?
+		// Gal: If block is in new fmt - extract preimages here (1409)
+		m := make(map[string][]byte)
+
+		for i := range pispace {
+			hval := string(util.ComputeHash(pispace[i])) // how do I know this is the right hash function?
+			m[hval] = pispace[i]
+		}
+
+		//var prwset *rwsetutil.NsRwSet
+		//err = prwset.
+		//prwset := tx.rwset
+		//prwset.NsRwSets
+		//
+		if pvtRWSet, err = rwsetutil.TxPvtRwSetFromProtoMsg(txPvtdata.WriteSet); err != nil {
+			return nil, err
+		}
+		for _, nsrws := range tx.rwset.NsRwSets {
+
+			for _, kvwrite := range nsrws.KvRwSet.Writes {
+				str := string(kvwrite.ValueHash)
+				val := m[str]
+				if val != nil {
+					kvwrite.Value = val
+				} else {
+					return nil, errors.Errorf("could not find pre-image for key %s:%s in pre-image space", nsrws.NameSpace, kvwrite.Key)
+				}
+			}
+
+		}
+
 		addPvtRWSetToPvtUpdateBatch(pvtRWSet, pvtUpdates, version.NewHeight(blk.num, uint64(tx.indexInBlock)))
 		addEntriesToMetadataUpdates(metadataUpdates, pvtRWSet)
 	}

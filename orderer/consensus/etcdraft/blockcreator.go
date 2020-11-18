@@ -7,6 +7,8 @@ SPDX-License-Identifier: Apache-2.0
 package etcdraft
 
 import (
+	"fmt"
+
 	"github.com/golang/protobuf/proto"
 	cb "github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric/common/flogging"
@@ -35,13 +37,20 @@ type blockCreator struct {
 // and it will be ignored during block data hash computation, but will still be carried along
 // in the subsequent flow of the system (unless someone is copying it manually and then we'll need to chase down
 // why it was stripped out...)
+// GAL: so this is where most of the orderer's roll is done? who calls this?
+// GAL: blk in new fmt
 func (bc *blockCreator) createNextBlock(envs []*cb.Envelope) *cb.Block {
 	data := &cb.BlockData{
 		Data: make([][]byte, len(envs)),
 	}
 
+	var pis [][]byte
+
 	var err error
 	for i, env := range envs {
+		pis = append(pis, env.PreImages...)
+		env.PreImages = nil
+		fmt.Println(len(env.PreImages), "pre-images in envelope")
 		data.Data[i], err = proto.Marshal(env)
 		if err != nil {
 			bc.logger.Panicf("Could not marshal envelope: %s", err)
@@ -53,6 +62,9 @@ func (bc *blockCreator) createNextBlock(envs []*cb.Envelope) *cb.Block {
 	block := protoutil.NewBlock(bc.number, bc.hash)
 	block.Header.DataHash = protoutil.BlockDataHash(data)
 	block.Data = data
+	block.Data.PreimageSpace = pis
+
+	fmt.Println("Created block with", len(block.Data.PreimageSpace), "pre-images")
 
 	bc.hash = protoutil.BlockHeaderHash(block.Header)
 	return block

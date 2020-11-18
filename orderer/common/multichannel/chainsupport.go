@@ -75,6 +75,7 @@ func newChainSupport(
 	// Yacov: The standard channel filters below, are validation rules for ingress non config transactions.
 	// We'd like to add our own filter which checks if a transaction is a redaction one,
 	// and if so - check the pre-image space matches the hashes.
+	// Gal: where are the filters actually being applied?
 	cs.Processor = msgprocessor.NewStandardChannel(cs, msgprocessor.CreateStandardChannelFilters(cs, registrar.config), bccsp)
 
 	// Set up the block writer

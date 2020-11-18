@@ -8,13 +8,11 @@ package gdpr
 
 import (
 	"encoding/base64"
-	"runtime/debug"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric/core/ledger/kvledger/txmgmt/rwsetutil"
-	"github.com/hyperledger/fabric/protoutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -38,7 +36,7 @@ func TestValidateBlock(t *testing.T) {
 			}
 		}
 
-		foldReadWriteSet(t, block, i, rws)
+		FoldReadWriteSet(block, i, rws)
 
 	}, func(err error) {
 		assert.NoError(t, err)
@@ -74,7 +72,7 @@ func TestValidateBlockInvalid(t *testing.T) {
 			}
 		}
 
-		foldReadWriteSet(t, block, i, rws)
+		FoldReadWriteSet(block, i, rws)
 
 	}, func(err error) {
 		assert.NoError(t, err)
@@ -87,62 +85,4 @@ func TestValidateBlockInvalid(t *testing.T) {
 
 	err = Validate(block)
 	assert.EqualError(t, err, "key b write wasn't found in pre-image space")
-}
-
-func foldReadWriteSet(t *testing.T, block *common.Block, i int, txRWSet *rwsetutil.TxRwSet) {
-	env, err := protoutil.UnmarshalEnvelope(block.Data.Data[i])
-	assert.NoError(t, err)
-
-	payload, err := protoutil.UnmarshalPayload(env.Payload)
-	assert.NoError(t, err)
-
-	chdr, err := protoutil.ChannelHeader(env)
-	assert.NoError(t, err)
-
-	assert.Equal(t, common.HeaderType(chdr.Type), common.HeaderType_ENDORSER_TRANSACTION)
-
-	tx, err := protoutil.UnmarshalTransaction(payload.Data)
-	assert.NoError(t, err)
-
-	ccPayload, err := protoutil.UnmarshalChaincodeActionPayload(tx.Actions[0].Payload)
-	assert.NoError(t, err)
-
-	assert.NotNil(t, ccPayload.Action)
-	assert.NotNil(t, ccPayload.Action.ProposalResponsePayload)
-
-	pRespPayload, err := protoutil.UnmarshalProposalResponsePayload(ccPayload.Action.ProposalResponsePayload)
-	assert.NoError(t, err)
-
-	assert.NotNil(t, pRespPayload.Extension)
-
-	ccAction, err := protoutil.UnmarshalChaincodeAction(pRespPayload.Extension)
-	assert.NoError(t, err)
-
-	txRWSetBytes, err := txRWSet.ToProtoBytes()
-	assert.NoError(t, err)
-
-	ccAction.Results = txRWSetBytes
-	ccActionBytes, err := proto.Marshal(ccAction)
-	assert.NoError(t, err)
-
-	pRespPayload.Extension = ccActionBytes
-
-	ccPayload.Action.ProposalResponsePayload, err = proto.Marshal(pRespPayload)
-	assert.NoError(t, err)
-
-	tx.Actions[0].Payload, err = proto.Marshal(ccPayload)
-	assert.NoError(t, err)
-
-	payload.Data, err = proto.Marshal(tx)
-	assert.NoError(t, err)
-
-	env.Payload, err = proto.Marshal(payload)
-	assert.NoError(t, err)
-
-	envBytes, err := proto.Marshal(env)
-	assert.NoError(t, err)
-
-	block.Data.Data[i] = envBytes
-
-	debug.PrintStack()
 }

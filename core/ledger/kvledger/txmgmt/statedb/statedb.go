@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package statedb
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/hyperledger/fabric/core/ledger/internal/version"
@@ -193,7 +194,7 @@ func (batch *UpdateBatch) Put(ns string, key string, value []byte, version *vers
 // TODO introducing a new function to limit the refactoring. Later in a separate CR, the 'Put' function above should be removed
 func (batch *UpdateBatch) PutValAndMetadata(ns string, key string, value []byte, metadata []byte, version *version.Height) {
 	if value == nil {
-		panic("Nil value not allowed. Instead call 'Delete' function")
+		panic(fmt.Sprintf("Nil value not allowed for key %s. Instead call 'Delete' function", key))
 	}
 	batch.Update(ns, key, &VersionedValue{value, metadata, version})
 }

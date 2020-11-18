@@ -446,6 +446,29 @@ func (txSim *TxSimulationResults) GetPubSimulationBytes() ([]byte, error) {
 	return proto.Marshal(txSim.PubSimulationResults)
 }
 
+func (txSim *TxSimulationResults) GetPubSimulationBytesGDPR(f func(nsRWSet *rwset.NsReadWriteSet) (*rwset.NsReadWriteSet, [][]byte, error)) ([]byte, [][]byte, error) {
+
+	//txSim.PvtSimulationResults.
+	var pis [][]byte
+	var err error
+
+	for _, nsrws := range txSim.PubSimulationResults.NsRwset {
+		nsrws2, temp, err := f(nsrws)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		*nsrws = *nsrws2
+
+		for i := range temp {
+			pis = append(pis, temp[i])
+		}
+
+	}
+	psr, err := proto.Marshal(txSim.PubSimulationResults)
+	return psr, pis, err
+}
+
 // GetPvtSimulationBytes returns the serialized bytes of private readwrite set
 func (txSim *TxSimulationResults) GetPvtSimulationBytes() ([]byte, error) {
 	if !txSim.ContainsPvtWrites() {
