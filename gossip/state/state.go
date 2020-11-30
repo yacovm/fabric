@@ -8,6 +8,8 @@ package state
 
 import (
 	"bytes"
+	"fmt"
+	"github.ibm.com/YACOVM/blockcreator/reader"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -545,6 +547,7 @@ func (s *GossipStateProviderImpl) Stop() {
 }
 
 func (s *GossipStateProviderImpl) deliverPayloads() {
+	var start time.Time
 	for {
 		select {
 		// Wait for notification that next seq has arrived
@@ -572,6 +575,13 @@ func (s *GossipStateProviderImpl) deliverPayloads() {
 						s.logger.Errorf("Wasn't able to unmarshal private data for block seqNum = %d due to (%+v)...dropping block", payload.SeqNum, errors.WithStack(err))
 						continue
 					}
+				}
+				if rawBlock.Header.Number == 5 {
+					start = time.Now()
+				}
+				if rawBlock.Header.Number == 5000 {
+					since := time.Since(start) / time.Second
+					fmt.Println(">>>>>>>>>>>>>>", (len(rawBlock.Data.Data) * 5000) / int(since))
 				}
 				if err := s.commitBlock(rawBlock, p); err != nil {
 					if executionErr, isExecutionErr := err.(*vsccErrors.VSCCExecutionFailureError); isExecutionErr {
@@ -775,6 +785,22 @@ func (s *GossipStateProviderImpl) addPayload(payload *proto.Payload, blockingMod
 
 	s.payloads.Push(payload)
 	s.logger.Debugf("Blocks payloads buffer size for channel [%s] is %d blocks", s.chainID, s.payloads.Size())
+
+	if payload.SeqNum == 4 {
+		// Processed block 1, let's start reading blocks from the file system now
+		idx := reader.IndexFromFile("/home/yacovm/testblocks/blocks-index")
+		index := reader.Index(*idx)
+		fmt.Println("READING BLOCKS FROM LOCAL FILE, INDEX CONTAINS", len(index.FileToSequences), "FILES")
+		go func() {
+			for block := range index.Blocks() {
+				s.addPayload(&proto.Payload{
+					SeqNum: block.Header.Number,
+					Data: protoutil.MarshalOrPanic(block),
+				}, true)
+			}
+		}()
+	}
+
 	return nil
 }
 

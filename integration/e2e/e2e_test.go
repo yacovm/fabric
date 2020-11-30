@@ -15,6 +15,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"github.ibm.com/YACOVM/blockcreator/writer"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -64,7 +65,7 @@ var _ = Describe("EndToEnd", func() {
 			Lang:            "binary",
 			PackageFile:     filepath.Join(testDir, "simplecc.tar.gz"),
 			Ctor:            `{"Args":["init","a","100","b","200"]}`,
-			SignaturePolicy: `AND ('Org1MSP.member','Org2MSP.member')`,
+			SignaturePolicy: `OR ('Org1MSP.member','Org2MSP.member')`,
 			Sequence:        "1",
 			InitRequired:    true,
 			Label:           "my_prebuilt_chaincode",
@@ -359,14 +360,16 @@ var _ = Describe("EndToEnd", func() {
 			ordererProcess = ifrit.Invoke(ordererRunner)
 			Eventually(ordererProcess.Ready(), network.EventuallyTimeout).Should(BeClosed())
 
-			peerRunners = make([]*ginkgomon.Runner, len(network.Peers))
+			peerRunners = nil
 			processes = map[string]ifrit.Process{}
 			for i, peer := range network.Peers {
 				pr := network.PeerRunner(peer)
+				peerRunners = append(peerRunners, pr)
 				peerRunners[i] = pr
 				p := ifrit.Invoke(pr)
 				processes[peer.ID()] = p
 				Eventually(p.Ready(), network.EventuallyTimeout).Should(BeClosed())
+				break
 			}
 		})
 
@@ -379,6 +382,32 @@ var _ = Describe("EndToEnd", func() {
 				p.Signal(syscall.SIGTERM)
 				Eventually(p.Wait(), network.EventuallyTimeout).Should(Receive())
 			}
+		})
+
+		It("makes the peer read from a local file", func() {
+			orderer := network.Orderer("orderer")
+
+			By("Create fake blocks")
+			bm := writer.NewBlockMaker(writer.Config{
+				SupportsRedaction: true,
+				ChaincodeName: chaincode.Name,
+				ChaincodeVersion: chaincode.Version,
+				OrdererCertPath: filepath.Join(testDir, "crypto/ordererOrganizations/example.com/orderers/orderer.example.com/msp/signcerts/orderer.example.com-cert.pem"),
+				OrdererKeyPath: filepath.Join(testDir, "crypto/ordererOrganizations/example.com/orderers/orderer.example.com/msp/keystore/priv_sk"),
+				OrdererMSP: "OrdererMSP",
+				PeerMSP: "Org1MSP",
+				PeerCertPath: filepath.Join(testDir, "crypto/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp/signcerts/peer0.org1.example.com-cert.pem"),
+				PeerKeyPath: filepath.Join(testDir, "crypto/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp/keystore/priv_sk"),
+			})
+			bm.GenerateBlocks("/home/yacovm/testblocks/blocks", 5, 5000, 10)
+			By("Finished generating blocks")
+
+			By("Create first channel and deploy the chaincode")
+			network.CreateAndJoinChannel(orderer, "testchannel")
+			nwo.EnableCapabilities(network, "testchannel", "Application", "V2_0", orderer, network.Peer("Org1", "peer0"))
+			nwo.DeployChaincode(network, "testchannel", orderer, chaincode)
+			time.Sleep(time.Second *180)
+			Fail("bla")
 		})
 
 		It("creates two channels with two orgs trying to reconfigure and update metadata", func() {
