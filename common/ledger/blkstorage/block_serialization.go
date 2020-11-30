@@ -40,11 +40,13 @@ func serializeBlock(block *common.Block) ([]byte, *serializedBlockInfo, error) {
 	if err = addMetadataBytes(block.Metadata, buf); err != nil {
 		return nil, nil, err
 	}
+	transactions := block.Data.Data
 	if len(block.Data.PreimageSpace) > 0 {
 		if err = addPreImagesBytes(block.Data, buf); err != nil {
 			return nil, nil, err
 		}
 	}
+	block.Data.Data = transactions
 	return buf.Bytes(), info, nil
 }
 

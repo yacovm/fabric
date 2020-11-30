@@ -203,27 +203,31 @@ func (txmgr *LockBasedTxMgr) ValidateAndPrepare(blockAndPvtdata *ledger.BlockAnd
 	// GAL : old format
 	block := proto.Clone(blockAndPvtdata.Block).(*common.Block)
 	preImages := gdpr.HashedPreImages(block.Data.PreimageSpace)
-	fmt.Println("pre-images in block:", len(preImages))
-	var finalError error
+	fmt.Println("pre-images in block:", len(preImages), "transactions in block:", len(block.Data.Data))
+	var wg sync.WaitGroup
+	wg.Add(len(block.Data.Data))
 	for i, txn := range block.Data.Data {
-		envelope := protoutil.UnmarshalEnvelopeOrPanic(txn)
-		gdpr.ProcessEnvelope(envelope, block, i, func(block *common.Block, i int, rws *rwsetutil.TxRwSet) {
-			for _, nsRWS := range rws.NsRwSets {
-				for _, kvWrite := range nsRWS.KvRwSet.Writes {
-					if preImage := preImages.Lookup(kvWrite.ValueHash); preImage != nil {
-						kvWrite.Value = preImage
+		i := i
+		txn := txn
+		go func(i int, txn []byte) {
+			defer wg.Done()
+			envelope := protoutil.UnmarshalEnvelopeOrPanic(txn)
+			gdpr.ProcessEnvelope(envelope, block, i, func(block *common.Block, i int, rws *rwsetutil.TxRwSet) {
+				for _, nsRWS := range rws.NsRwSets {
+					for _, kvWrite := range nsRWS.KvRwSet.Writes {
+						if preImage := preImages.Lookup(kvWrite.ValueHash); preImage != nil {
+							kvWrite.Value = preImage
+						}
 					}
+					gdpr.FoldReadWriteSet(block, i, rws)
 				}
-				gdpr.FoldReadWriteSet(block, i, rws)
-			}
-		}, func(err error) {
-			finalError = err
-		})
+			}, func(err error) {
+				panic(err)
+			})
+		}(i, txn)
 	}
 
-	if finalError != nil {
-		return nil, nil, finalError
-	}
+	wg.Wait()
 
 	originalBlock := blockAndPvtdata.Block
 	blockAndPvtdata.Block = block

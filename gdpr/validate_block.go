@@ -164,11 +164,17 @@ func ProcessEnvelope(originalEnvelope *common.Envelope, block *common.Block, i i
 	f(block, i, txRWSet)
 }
 
+var (
+	lock = sync.RWMutex{}
+)
+
 func FoldReadWriteSet(block *common.Block, i int, txRWSet *rwsetutil.TxRwSet) {
+	lock.RLock()
 	env, err := protoutil.UnmarshalEnvelope(block.Data.Data[i])
 	if err != nil {
 		panic(err)
 	}
+	lock.RUnlock()
 
 	payload, err := protoutil.UnmarshalPayload(env.Payload)
 	if err != nil {
@@ -241,6 +247,9 @@ func FoldReadWriteSet(block *common.Block, i int, txRWSet *rwsetutil.TxRwSet) {
 	if err != nil {
 		panic(err)
 	}
+
+	lock.Lock()
+	defer lock.Unlock()
 
 	block.Data.Data[i] = envBytes
 }

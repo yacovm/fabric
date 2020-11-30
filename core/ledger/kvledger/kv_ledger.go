@@ -470,7 +470,7 @@ func (l *kvLedger) CommitLegacy(pvtdataAndBlock *ledger.BlockAndPvtData, commitO
 		pvtdataAndBlock.PvtData = convertTxPvtDataArrayToMap(txPvtData)
 	}
 
-	logger.Debugf("[%s] Validating state for block [%d]", l.ledgerID, blockNo)
+	logger.Infof("[%s] Validating state for block [%d] with %d transactions", l.ledgerID, blockNo, len(block.Data.Data))
 	txstatsInfo, updateBatchBytes, err := l.txmgr.ValidateAndPrepare(pvtdataAndBlock, true)
 	if err != nil {
 		return err
@@ -497,7 +497,7 @@ func (l *kvLedger) CommitLegacy(pvtdataAndBlock *ledger.BlockAndPvtData, commitO
 	elapsedBlockstorageAndPvtdataCommit := time.Since(startBlockstorageAndPvtdataCommit)
 
 	startCommitState := time.Now()
-	logger.Debugf("[%s] Committing block [%d] transactions to state database", l.ledgerID, blockNo)
+	logger.Infof("[%s] Committing block [%d] with %d transactions to state database", l.ledgerID, blockNo, len(block.Data.Data))
 	if err = l.txmgr.Commit(); err != nil {
 		panic(errors.WithMessage(err, "error during commit to txmgr"))
 	}

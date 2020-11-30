@@ -23,23 +23,16 @@ func BasicSolo() *Config {
 			EnableNodeOUs: true,
 			Users:         2,
 			CA:            &CA{Hostname: "ca"},
-		}, {
-			Name:          "Org2",
-			MSPID:         "Org2MSP",
-			Domain:        "org2.example.com",
-			EnableNodeOUs: true,
-			Users:         2,
-			CA:            &CA{Hostname: "ca"},
-		}},
+		},
+		},
 		Consortiums: []*Consortium{{
 			Name: "SampleConsortium",
 			Organizations: []string{
 				"Org1",
-				"Org2",
 			},
 		}},
 		Consensus: &Consensus{
-			Type: "solo",
+			Type:            "solo",
 		},
 		SystemChannel: &SystemChannel{
 			Name:    "systemchannel",
@@ -57,12 +50,6 @@ func BasicSolo() *Config {
 			Channels: []*PeerChannel{
 				{Name: "testchannel", Anchor: true},
 			},
-		}, {
-			Name:         "peer0",
-			Organization: "Org2",
-			Channels: []*PeerChannel{
-				{Name: "testchannel", Anchor: true},
-			},
 		}},
 		Profiles: []*Profile{{
 			Name:     "TwoOrgsOrdererGenesis",
@@ -70,7 +57,7 @@ func BasicSolo() *Config {
 		}, {
 			Name:          "TwoOrgsChannel",
 			Consortium:    "SampleConsortium",
-			Organizations: []string{"Org1", "Org2"},
+			Organizations: []string{"Org1"},
 		}},
 	}
 }
@@ -194,7 +181,7 @@ func MultiChannelEtcdRaft() *Config {
 	}, {
 		Name:          "TwoOrgsChannel",
 		Consortium:    "SampleConsortium",
-		Organizations: []string{"Org1", "Org2"},
+		Organizations: []string{"Org1"},
 	}}
 	config.SystemChannel.Profile = "SampleDevModeEtcdRaft"
 

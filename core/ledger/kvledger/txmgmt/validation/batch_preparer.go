@@ -93,7 +93,7 @@ func (p *CommitBatchPreparer) ValidateAndPrepareBatch(blockAndPvtdata *ledger.Bl
 	if pubAndHashUpdates, err = p.validator.validateAndPrepareBatch(internalBlock, doMVCCValidation); err != nil {
 		return nil, nil, err
 	}
-	logger.Debug("validating rwset...")
+	logger.Info("validating rwset with", len(blockAndPvtdata.Block.Data.Data), "transactions")
 	if pvtUpdates, err = validateAndPreparePvtBatchGDPR(
 		internalBlock,
 		p.db,
@@ -106,7 +106,7 @@ func (p *CommitBatchPreparer) ValidateAndPrepareBatch(blockAndPvtdata *ledger.Bl
 	}
 	logger.Debug("postprocessing ProtoBlock...")
 	postprocessProtoBlock(blk, internalBlock)
-	logger.Debug("ValidateAndPrepareBatch() complete")
+	logger.Info("ValidateAndPrepareBatch() for block with", len(blockAndPvtdata.Block.Data.Data), " transactions is complete")
 
 	txsFilter := txflags.ValidationFlags(blk.Metadata.Metadata[common.BlockMetadataIndex_TRANSACTIONS_FILTER])
 	for i := range txsFilter {
@@ -212,11 +212,6 @@ func validateAndPreparePvtBatchGDPR(
 			m[hval] = pispace[i]
 		}
 
-		//var prwset *rwsetutil.NsRwSet
-		//err = prwset.
-		//prwset := tx.rwset
-		//prwset.NsRwSets
-		//
 		if pvtRWSet, err = rwsetutil.TxPvtRwSetFromProtoMsg(txPvtdata.WriteSet); err != nil {
 			return nil, err
 		}

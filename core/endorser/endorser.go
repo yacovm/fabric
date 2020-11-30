@@ -561,7 +561,6 @@ func (e *Endorser) ProcessProposalSuccessfullyOrError(up *UnpackedProposal) (*pb
 	}
 
 	p2 := &pb.PreimageSpace{ValueWrites: pis}
-	fmt.Println("Pre-Images:")
 	for _, pi := range pis {
 		fmt.Println(">>", base64.StdEncoding.EncodeToString(pi), "hash:", util.ComputeSHA256(pi))
 	}

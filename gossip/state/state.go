@@ -579,9 +579,9 @@ func (s *GossipStateProviderImpl) deliverPayloads() {
 				if rawBlock.Header.Number == 5 {
 					start = time.Now()
 				}
-				if rawBlock.Header.Number == 5000 {
+				if rawBlock.Header.Number == 1000 {
 					since := time.Since(start) / time.Second
-					fmt.Println(">>>>>>>>>>>>>>", (len(rawBlock.Data.Data) * 5000) / int(since))
+					fmt.Println(">>>>>>>>>>>>>>", (len(rawBlock.Data.Data) * 1000) / int(since))
 				}
 				if err := s.commitBlock(rawBlock, p); err != nil {
 					if executionErr, isExecutionErr := err.(*vsccErrors.VSCCExecutionFailureError); isExecutionErr {

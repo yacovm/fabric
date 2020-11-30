@@ -399,14 +399,14 @@ var _ = Describe("EndToEnd", func() {
 				PeerCertPath: filepath.Join(testDir, "crypto/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp/signcerts/peer0.org1.example.com-cert.pem"),
 				PeerKeyPath: filepath.Join(testDir, "crypto/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp/keystore/priv_sk"),
 			})
-			bm.GenerateBlocks("/home/yacovm/testblocks/blocks", 5, 5000, 10)
+			bm.GenerateBlocks("/home/yacovm/testblocks/blocks", 5, 1000, 1000)
 			By("Finished generating blocks")
 
 			By("Create first channel and deploy the chaincode")
 			network.CreateAndJoinChannel(orderer, "testchannel")
 			nwo.EnableCapabilities(network, "testchannel", "Application", "V2_0", orderer, network.Peer("Org1", "peer0"))
 			nwo.DeployChaincode(network, "testchannel", orderer, chaincode)
-			time.Sleep(time.Second *180)
+			time.Sleep(time.Second *360)
 			Fail("bla")
 		})
 

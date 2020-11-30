@@ -201,8 +201,11 @@ func CreateSignedTx(
 
 	var pis [][]byte
 
-	for i := range resps[0].PreimageSpace.ValueWrites {
-		pis = append(pis, resps[0].PreimageSpace.ValueWrites[i])
+	preimageSpace := resps[0].PreimageSpace
+	if preimageSpace != nil {
+		for i := range preimageSpace.ValueWrites {
+			pis = append(pis, resps[0].PreimageSpace.ValueWrites[i])
+		}
 	}
 
 	cea := &peer.ChaincodeEndorsedAction{ProposalResponsePayload: resps[0].Payload, Endorsements: endorsements}
@@ -251,7 +254,6 @@ func CreateSignedTx(
 	// This is mandatory because the payload below is signed by the signature, and when redaction
 	// occurs, the signature still needs to be verifiable.
 
-	fmt.Println("Pre-Images:")
 	for _, pi := range pis {
 		fmt.Println(">>", base64.StdEncoding.EncodeToString(pi), "hash:", util.ComputeSHA256(pi))
 	}
