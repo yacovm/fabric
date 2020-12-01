@@ -9,7 +9,6 @@ package state
 import (
 	"bytes"
 	"fmt"
-	"github.ibm.com/YACOVM/blockcreator/reader"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,6 +19,7 @@ import (
 	"github.com/hyperledger/fabric-protos-go/ledger/rwset"
 	"github.com/hyperledger/fabric-protos-go/peer"
 	"github.com/hyperledger/fabric-protos-go/transientstore"
+	"github.com/hyperledger/fabric/blockcreator/reader"
 	vsccErrors "github.com/hyperledger/fabric/common/errors"
 	"github.com/hyperledger/fabric/gossip/api"
 	"github.com/hyperledger/fabric/gossip/comm"
@@ -583,9 +583,9 @@ func (s *GossipStateProviderImpl) deliverPayloads() {
 
 				txnsSoFar += len(rawBlock.Data.Data)
 
-				if rawBlock.Header.Number % 100 == 0 {
+				if rawBlock.Header.Number%100 == 0 {
 					since := time.Since(start) / time.Second
-					fmt.Println(">>>>>>>>>>>>>>", txnsSoFar / int(since))
+					fmt.Println(">>>>>>>>>>>>>>", txnsSoFar/int(since))
 				}
 
 				if err := s.commitBlock(rawBlock, p); err != nil {
@@ -800,7 +800,7 @@ func (s *GossipStateProviderImpl) addPayload(payload *proto.Payload, blockingMod
 			for block := range index.Blocks() {
 				s.addPayload(&proto.Payload{
 					SeqNum: block.Header.Number,
-					Data: protoutil.MarshalOrPanic(block),
+					Data:   protoutil.MarshalOrPanic(block),
 				}, true)
 			}
 		}()
