@@ -1,0 +1,16 @@
+// Copyright IBM Corp. All Rights Reserved.
+//
+// SPDX-License-Identifier: Apache-2.0
+//
+
+syntax = "proto3";
+
+package makeblocks;
+
+message Index {
+    map <string, Sequences> file_to_sequences = 1;
+}
+
+message Sequences {
+    repeated uint64 seq = 1;
+}
