@@ -15,6 +15,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"github.com/hyperledger/fabric/integration/runner"
 	"github.ibm.com/YACOVM/blockcreator/writer"
 	"io"
 	"io/ioutil"
@@ -339,11 +340,12 @@ var _ = Describe("EndToEnd", func() {
 	Describe("basic single node etcdraft network", func() {
 		var (
 			peerRunners    []*ginkgomon.Runner
-			processes      map[string]ifrit.Process
 			ordererProcess ifrit.Process
+			processes = map[string]ifrit.Process{}
 		)
 
 		BeforeEach(func() {
+			processes = map[string]ifrit.Process{}
 			network = nwo.New(nwo.MultiChannelEtcdRaft(), testDir, client, StartPort(), components)
 			network.ChannelParticipationEnabled = true
 			network.GenerateConfigTree()
@@ -354,6 +356,30 @@ var _ = Describe("EndToEnd", func() {
 				core.Peer.Deliveryclient.ReconnectTotalTimeThreshold = time.Duration(time.Second)
 				network.WritePeerConfig(peer, core)
 			}
+
+			couchDB := &runner.CouchDB{}
+			couchProcess := ifrit.Invoke(couchDB)
+			Eventually(couchProcess.Ready(), runner.DefaultStartTimeout).Should(BeClosed())
+			Consistently(couchProcess.Wait()).ShouldNot(Receive())
+			couchAddr := couchDB.Address()
+			peer := network.Peer("Org1", "peer0")
+			core := network.ReadPeerConfig(peer)
+			core.Ledger.State.StateDatabase = "CouchDB"
+			core.Ledger.State.CouchDBConfig.CouchDBAddress = couchAddr
+			processes[couchDB.Name] = couchProcess
+			setTermFileEnvForBinaryExternalBuilder := func(envKey, termFile string, externalBuilders []fabricconfig.ExternalBuilder) {
+				os.Setenv(envKey, termFile)
+				for i, e := range externalBuilders {
+					if e.Name == "binary" {
+						e.PropagateEnvironment = append(e.PropagateEnvironment, envKey)
+						externalBuilders[i] = e
+					}
+				}
+			}
+			org1TermFile := filepath.Join(testDir, "org1-term-file")
+			setTermFileEnvForBinaryExternalBuilder("ORG1_TERM_FILE", org1TermFile, core.Chaincode.ExternalBuilders)
+			network.WritePeerConfig(peer, core)
+
 			network.Bootstrap()
 
 			ordererRunner := network.OrdererGroupRunner()
@@ -361,7 +387,6 @@ var _ = Describe("EndToEnd", func() {
 			Eventually(ordererProcess.Ready(), network.EventuallyTimeout).Should(BeClosed())
 
 			peerRunners = nil
-			processes = map[string]ifrit.Process{}
 			for i, peer := range network.Peers {
 				pr := network.PeerRunner(peer)
 				peerRunners = append(peerRunners, pr)
@@ -399,14 +424,14 @@ var _ = Describe("EndToEnd", func() {
 				PeerCertPath: filepath.Join(testDir, "crypto/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp/signcerts/peer0.org1.example.com-cert.pem"),
 				PeerKeyPath: filepath.Join(testDir, "crypto/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp/keystore/priv_sk"),
 			})
-			bm.GenerateBlocks("/home/yacovm/testblocks/blocks", 5, 1000, 1000)
+			bm.GenerateBlocks("/home/yacovm/testblocks/blocks", 5, 1000, 100)
 			By("Finished generating blocks")
 
 			By("Create first channel and deploy the chaincode")
 			network.CreateAndJoinChannel(orderer, "testchannel")
 			nwo.EnableCapabilities(network, "testchannel", "Application", "V2_0", orderer, network.Peer("Org1", "peer0"))
 			nwo.DeployChaincode(network, "testchannel", orderer, chaincode)
-			time.Sleep(time.Second *360)
+			time.Sleep(time.Minute * 10)
 			Fail("bla")
 		})
 

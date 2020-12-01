@@ -548,6 +548,7 @@ func (s *GossipStateProviderImpl) Stop() {
 
 func (s *GossipStateProviderImpl) deliverPayloads() {
 	var start time.Time
+	var txnsSoFar int
 	for {
 		select {
 		// Wait for notification that next seq has arrived
@@ -579,10 +580,14 @@ func (s *GossipStateProviderImpl) deliverPayloads() {
 				if rawBlock.Header.Number == 5 {
 					start = time.Now()
 				}
-				if rawBlock.Header.Number == 1000 {
+
+				txnsSoFar += len(rawBlock.Data.Data)
+
+				if rawBlock.Header.Number % 100 == 0 {
 					since := time.Since(start) / time.Second
-					fmt.Println(">>>>>>>>>>>>>>", (len(rawBlock.Data.Data) * 1000) / int(since))
+					fmt.Println(">>>>>>>>>>>>>>", txnsSoFar / int(since))
 				}
+
 				if err := s.commitBlock(rawBlock, p); err != nil {
 					if executionErr, isExecutionErr := err.(*vsccErrors.VSCCExecutionFailureError); isExecutionErr {
 						s.logger.Errorf("Failed executing VSCC due to %v. Aborting chain processing", executionErr)

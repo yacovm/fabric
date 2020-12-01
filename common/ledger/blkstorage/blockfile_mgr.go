@@ -351,8 +351,8 @@ func (mgr *blockfileMgr) addBlock(block *common.Block) error {
 		latestFileSize:     currentBlkfilesInfo.latestFileSize + totalBytesToAppend,
 		noBlockFiles:       false,
 		lastPersistedBlock: block.Header.Number}
-	//save the blockfilesInfo in the database
-	if err = mgr.saveBlkfilesInfo(newBlkfilesInfo, false); err != nil {
+		//save the blockfilesInfo in the database
+		if err = mgr.saveBlkfilesInfo(newBlkfilesInfo, false); err != nil {
 		truncateErr := mgr.currentFileWriter.truncateFile(currentBlkfilesInfo.latestFileSize)
 		if truncateErr != nil {
 			panic(fmt.Sprintf("Error in truncating current file to known size after an error in saving blockfiles info: %s", err))
