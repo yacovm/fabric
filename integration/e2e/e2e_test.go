@@ -417,7 +417,7 @@ var _ = Describe("EndToEnd", func() {
 			network.CreateAndJoinChannel(orderer, "testchannel")
 			nwo.EnableCapabilities(network, "testchannel", "Application", "V2_0", orderer, network.Peer("Org1", "peer0"))
 			nwo.DeployChaincode(network, "testchannel", orderer, chaincode)
-			time.Sleep(time.Second * 180)
+			time.Sleep(time.Minute * 10)
 			Fail("bla")
 		})
 
