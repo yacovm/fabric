@@ -256,7 +256,7 @@ var (
 )
 
 func init() {
-	keyBuffs = make([][]byte, 100)
+	keyBuffs = make([][]byte, 10)
 	for i := 0; i < len(keyBuffs); i++ {
 		keyBuffs[i] = make([]byte, 16)
 		rand.Read(keyBuffs[i])
@@ -265,7 +265,7 @@ func init() {
 }
 
 func randomKVWrite() *kvrwset.KVWrite {
-	keyIndex := rand2.Intn(100)
+	keyIndex := rand2.Intn(len(keyBuffs))
 	valueBuff := make([]byte, 32)
 	rand.Read(valueBuff)
 	return &kvrwset.KVWrite{
