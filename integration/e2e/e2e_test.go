@@ -23,6 +23,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -424,7 +425,12 @@ var _ = Describe("EndToEnd", func() {
 				PeerCertPath: filepath.Join(testDir, "crypto/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp/signcerts/peer0.org1.example.com-cert.pem"),
 				PeerKeyPath: filepath.Join(testDir, "crypto/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp/keystore/priv_sk"),
 			})
-			bm.GenerateBlocks("/home/yacovm/testblocks/blocks", 5, 1000, 100)
+			blockSize, err := strconv.ParseInt(os.Getenv("BLOCKSIZE"), 10, 32)
+			Expect(err).NotTo(HaveOccurred())
+
+			blockCount := 1000 * 1000 / blockSize
+
+			bm.GenerateBlocks("/home/yacovm/testblocks/blocks", 5, int(blockCount), int(blockSize))
 			By("Finished generating blocks")
 
 			By("Create first channel and deploy the chaincode")
