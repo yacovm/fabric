@@ -13,8 +13,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"github.com/hyperledger/fabric/blockcreator/writer"
-	"github.com/hyperledger/fabric/integration/runner"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -25,11 +23,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.ibm.com/YACOVM/blockcreator/writer"
 	docker "github.com/fsouza/go-dockerclient"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric-lib-go/healthz"
 	"github.com/hyperledger/fabric-protos-go/orderer/etcdraft"
+	writer "github.com/hyperledger/fabric/blockcreator/writer"
 	"github.com/hyperledger/fabric/integration/channelparticipation"
 	"github.com/hyperledger/fabric/integration/nwo"
 	"github.com/hyperledger/fabric/integration/nwo/commands"
@@ -397,14 +395,14 @@ var _ = Describe("EndToEnd", func() {
 
 			By("Create fake blocks")
 			bm := writer.NewBlockMaker(writer.Config{
-				ChaincodeName: chaincode.Name,
+				ChaincodeName:    chaincode.Name,
 				ChaincodeVersion: chaincode.Version,
-				OrdererCertPath: filepath.Join(testDir, "crypto/ordererOrganizations/example.com/orderers/orderer.example.com/msp/signcerts/orderer.example.com-cert.pem"),
-				OrdererKeyPath: filepath.Join(testDir, "crypto/ordererOrganizations/example.com/orderers/orderer.example.com/msp/keystore/priv_sk"),
-				OrdererMSP: "OrdererMSP",
-				PeerMSP: "Org1MSP",
-				PeerCertPath: filepath.Join(testDir, "crypto/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp/signcerts/peer0.org1.example.com-cert.pem"),
-				PeerKeyPath: filepath.Join(testDir, "crypto/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp/keystore/priv_sk"),
+				OrdererCertPath:  filepath.Join(testDir, "crypto/ordererOrganizations/example.com/orderers/orderer.example.com/msp/signcerts/orderer.example.com-cert.pem"),
+				OrdererKeyPath:   filepath.Join(testDir, "crypto/ordererOrganizations/example.com/orderers/orderer.example.com/msp/keystore/priv_sk"),
+				OrdererMSP:       "OrdererMSP",
+				PeerMSP:          "Org1MSP",
+				PeerCertPath:     filepath.Join(testDir, "crypto/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp/signcerts/peer0.org1.example.com-cert.pem"),
+				PeerKeyPath:      filepath.Join(testDir, "crypto/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp/keystore/priv_sk"),
 			})
 			bm.GenerateBlocks("/home/yacovm/testblocks/blocks", 5, 5000, 10)
 			By("Finished generating blocks")
@@ -413,7 +411,7 @@ var _ = Describe("EndToEnd", func() {
 			network.CreateAndJoinChannel(orderer, "testchannel")
 			nwo.EnableCapabilities(network, "testchannel", "Application", "V2_0", orderer, network.Peer("Org1", "peer0"))
 			nwo.DeployChaincode(network, "testchannel", orderer, chaincode)
-			time.Sleep(time.Second *180)
+			time.Sleep(time.Second * 180)
 			Fail("bla")
 		})
 
