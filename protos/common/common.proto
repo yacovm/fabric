@@ -185,4 +185,5 @@ message BlockMetadata {
 message OrdererBlockMetadata {
     LastConfig last_config = 1;
     bytes consenter_metadata = 2;
+    bytes committee_metadata = 3;
 }

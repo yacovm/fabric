@@ -363,6 +363,8 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 		c.support.WriteBlock(block, nil)
 	}
 
+	// TODO: call c.cs.Process() with the commitment from the block
+
 	reconfig := c.updateRuntimeConfig(block)
 	return reconfig
 }

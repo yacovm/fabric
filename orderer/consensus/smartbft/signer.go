@@ -43,6 +43,9 @@ func (s *Signer) SignProposal(proposal types.Proposal, auxiliaryInput []byte) *t
 
 	nonce := randomNonceOrPanic()
 
+	// TODO: populate committee metadata
+	cm := &CommitteeMetadata{}
+
 	sig := Signature{
 		AuxiliaryInput:  auxiliaryInput,
 		Nonce:           nonce,
@@ -51,6 +54,7 @@ func (s *Signer) SignProposal(proposal types.Proposal, auxiliaryInput []byte) *t
 		OrdererBlockMetadata: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
 			LastConfig:        &common.LastConfig{Index: uint64(s.LastConfigBlockNum(block))},
 			ConsenterMetadata: proposal.Metadata,
+			CommitteeMetadata: cm.Marshal(),
 		}),
 	}
 
