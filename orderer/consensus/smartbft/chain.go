@@ -9,17 +9,15 @@ package smartbft
 import (
 	"encoding/base64"
 	"fmt"
-	pvss "github.com/SmartBFT-Go/randomcommittees/pkg"
-	"time"
-
-	"sync/atomic"
-
 	"reflect"
+	"sync/atomic"
+	"time"
 
 	smartbft "github.com/SmartBFT-Go/consensus/pkg/consensus"
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/pkg/wal"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
+	pvss "github.com/SmartBFT-Go/randomcommittees/pkg"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/channelconfig"
 	"github.com/hyperledger/fabric/common/crypto"
@@ -67,7 +65,7 @@ type signerSerializer interface {
 // BFTChain implements Chain interface to wire with
 // BFT smart library
 type BFTChain struct {
-	cs               CommitteeSelection
+	cs               pvss.CommitteeSelection
 	RuntimeConfig    *atomic.Value
 	Channel          string
 	Config           types.Configuration
@@ -109,7 +107,7 @@ func NewChain(
 	logger := flogging.MustGetLogger("orderer.consensus.smartbft.chain").With(zap.String("channel", support.ChainID()))
 
 	c := &BFTChain{
-		cs: cs,
+		cs:               cs,
 		RuntimeConfig:    &atomic.Value{},
 		Channel:          support.ChainID(),
 		Config:           config,
