@@ -9,6 +9,7 @@ package smartbft
 import (
 	"encoding/base64"
 	"fmt"
+	pvss "github.com/SmartBFT-Go/randomcommittees/pkg"
 	"time"
 
 	"sync/atomic"
@@ -66,6 +67,7 @@ type signerSerializer interface {
 // BFTChain implements Chain interface to wire with
 // BFT smart library
 type BFTChain struct {
+	cs               CommitteeSelection
 	RuntimeConfig    *atomic.Value
 	Channel          string
 	Config           types.Configuration
@@ -96,6 +98,8 @@ func NewChain(
 	metrics *Metrics,
 ) (*BFTChain, error) {
 
+	cs := pvss.New()
+
 	requestInspector := &RequestInspector{
 		ValidateIdentityStructure: func(_ *msp.SerializedIdentity) error {
 			return nil
@@ -105,6 +109,7 @@ func NewChain(
 	logger := flogging.MustGetLogger("orderer.consensus.smartbft.chain").With(zap.String("channel", support.ChainID()))
 
 	c := &BFTChain{
+		cs: cs,
 		RuntimeConfig:    &atomic.Value{},
 		Channel:          support.ChainID(),
 		Config:           config,
