@@ -198,3 +198,7 @@ noverify = [
 [[constraint]]
   branch = "leader_rotation"
   name = "github.com/SmartBFT-Go/consensus"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/SmartBFT-Go/randomcommittees"

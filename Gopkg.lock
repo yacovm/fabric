@@ -91,6 +91,14 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:09b4875a33719e082472d6783190a64773a34b22b83262cdf72f46345ee9a4b1"
+  name = "github.com/SmartBFT-Go/randomcommittees"
+  packages = ["pkg"]
+  pruneopts = "NUT"
+  revision = "7f1cf416e49a0a29c0bce7d1a65814fd98ba189d"
+
+[[projects]]
+  branch = "master"
   digest = "1:f3793f8a708522400cef1dba23385e901aede5519f68971fd69938ef330b07a1"
   name = "github.com/alecthomas/template"
   packages = [
@@ -1011,6 +1019,7 @@
     "github.com/SmartBFT-Go/consensus/pkg/types",
     "github.com/SmartBFT-Go/consensus/pkg/wal",
     "github.com/SmartBFT-Go/consensus/smartbftprotos",
+    "github.com/SmartBFT-Go/randomcommittees/pkg",
     "github.com/davecgh/go-spew/spew",
     "github.com/fsouza/go-dockerclient",
     "github.com/go-kit/kit/metrics",
