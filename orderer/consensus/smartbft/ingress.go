@@ -18,7 +18,7 @@ import (
 
 // MessageReceiver receives messages
 type MessageReceiver interface {
-	HandleMessage(sender uint64, m *protos.Message)
+	HandleMessage(sender uint64, m *protos.Message, metadata []byte)
 	HandleRequest(sender uint64, req []byte)
 }
 
@@ -52,7 +52,7 @@ func (in *Ingreess) OnConsensus(channel string, sender uint64, request *orderer.
 		in.Logger.Warningf("Malformed message: %v", err)
 		return errors.Wrap(err, "malformed message")
 	}
-	receiver.HandleMessage(sender, msg)
+	receiver.HandleMessage(sender, msg, request.Metadata)
 	return nil
 }
 

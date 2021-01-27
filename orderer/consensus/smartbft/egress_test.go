@@ -20,14 +20,22 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
+func noopConvertor(m *protos.Message, channel string) *orderer.ConsensusRequest {
+	return &orderer.ConsensusRequest{
+		Payload: utils.MarshalOrPanic(m),
+		Channel: channel,
+	}
+}
+
 func TestEgressSendConsensus(t *testing.T) {
 	logger := flogging.MustGetLogger("test")
 	rpc := &mocks.RPC{}
 	rpc.On("SendConsensus", mock.Anything, mock.Anything).Return(nil)
 	egress := &smartbft.Egress{
-		Logger:  logger,
-		Channel: "test",
-		RPC:     rpc,
+		ConvertMessage: noopConvertor,
+		Logger:         logger,
+		Channel:        "test",
+		RPC:            rpc,
 	}
 
 	viewData := &protos.Message{
@@ -51,9 +59,10 @@ func TestEgressSendTransaction(t *testing.T) {
 	rpc := &mocks.RPC{}
 	rpc.On("SendSubmit", mock.Anything, mock.Anything).Return(nil)
 	egress := &smartbft.Egress{
-		Logger:  logger,
-		Channel: "test",
-		RPC:     rpc,
+		ConvertMessage: noopConvertor,
+		Logger:         logger,
+		Channel:        "test",
+		RPC:            rpc,
 	}
 
 	t.Run("malformed transaction", func(t *testing.T) {

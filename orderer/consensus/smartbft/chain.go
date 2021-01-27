@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hyperledger/fabric/protos/orderer"
+
 	smartbft "github.com/SmartBFT-Go/consensus/pkg/consensus"
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/pkg/wal"
@@ -233,6 +235,13 @@ func bftSmartConsensusBuild(
 		RequestInspector:  requestInspector,
 		Synchronizer:      sync,
 		Comm: &Egress{
+			ConvertMessage: func(m *smartbftprotos.Message, channel string) *orderer.ConsensusRequest {
+				msg := bftMsgToClusterMsg(m, channel)
+				if prp := m.GetPrePrepare(); prp != nil {
+					msg.Metadata = nil // TODO: put here ZKP proof of commitment
+				}
+				return msg
+			},
 			RuntimeConfig: c.RuntimeConfig,
 			Channel:       c.support.ChainID(),
 			Logger:        flogging.MustGetLogger("orderer.consensus.smartbft.egress").With(channelDecorator),
@@ -288,8 +297,22 @@ func buildVerifier(
 	}
 }
 
-func (c *BFTChain) HandleMessage(sender uint64, m *smartbftprotos.Message) {
+func (c *BFTChain) HandleMessage(sender uint64, m *smartbftprotos.Message, metadata []byte) {
 	c.Logger.Debugf("Message from %d", sender)
+	if prp := m.GetPrePrepare(); prp != nil {
+		err := c.cs.VerifyCommitment(pvss.Commitment{}, metadata) // TODO: actually extract the commitment from the pre-prepare
+		if err != nil {
+			c.Logger.Warningf("Failed verifying commitment of pre-prepare: %v", err)
+			return
+		}
+	}
+	if cmt := m.GetCommit(); cmt != nil {
+		err := c.cs.VerifyReconShare(pvss.ReconShare{}, nil) // TODO: actually extract the ReconShare and ZKP from the commitment
+		if err != nil {
+			c.Logger.Warningf("Failed verifying ReconShare of commit: %v", err)
+			return
+		}
+	}
 	c.consensus.HandleMessage(sender, m)
 }
 
