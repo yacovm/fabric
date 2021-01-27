@@ -410,6 +410,14 @@ func (v *Verifier) verifySignatureIsBoundToProposal(sig *Signature, identity []b
 		return errors.Errorf("signature's OrdererBlockMetadata and OrdererBlockMetadata extracted from block do not match")
 	}
 
+	// TODO: Verify this committee metadata: check the state matches our state, and the config hash matches our config hash,
+	// TODO: check also the commitment is sound (elements are in group, ZKP is correct)
+	cm := &CommitteeMetadata{}
+	if err := cm.Unmarshal(ordererMDFromBlock.CommitteeMetadata); err != nil {
+		return errors.Errorf("failed unmarshaling committee metadata (%s): %v",
+			base64.StdEncoding.EncodeToString(ordererMDFromBlock.CommitteeMetadata), err)
+	}
+
 	return nil
 }
 

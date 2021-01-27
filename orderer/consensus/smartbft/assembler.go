@@ -55,11 +55,15 @@ func (a *Assembler) AssembleProposal(metadata []byte, requests [][]byte) (nextPr
 		lastConfigBlockNum = block.Header.Number
 	}
 
+	// TODO: populate this committee metadata
+	cm := &CommitteeMetadata{}
+
 	block.Metadata.Metadata[common.BlockMetadataIndex_LAST_CONFIG] = utils.MarshalOrPanic(&common.Metadata{
 		Value: utils.MarshalOrPanic(&common.LastConfig{Index: lastConfigBlockNum}),
 	})
 	block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(&common.Metadata{
 		Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
+			CommitteeMetadata: cm.Marshal(),
 			ConsenterMetadata: metadata,
 			LastConfig: &common.LastConfig{
 				Index: lastConfigBlockNum,
