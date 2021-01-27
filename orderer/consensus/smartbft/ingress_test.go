@@ -34,7 +34,7 @@ func TestDispatchConsensus(t *testing.T) {
 	t.Run("Channel exists", func(t *testing.T) {
 		receivedMessage := make(chan *protos.Message, 1)
 		mr := &mocks.MessageReceiver{}
-		mr.On("HandleMessage", uint64(1), mock.Anything).Return(nil).Run(func(arguments mock.Arguments) {
+		mr.On("HandleMessage", uint64(1), mock.Anything, mock.Anything).Return(nil).Run(func(arguments mock.Arguments) {
 			receivedMessage <- arguments.Get(1).(*protos.Message)
 		}).Once()
 

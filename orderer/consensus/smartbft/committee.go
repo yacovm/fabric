@@ -13,7 +13,7 @@ import (
 type CommitteeMetadata struct {
 	ConfigHash []byte
 	State      []byte
-	Commitment []byte
+	ReconShare []byte
 }
 
 func (cm *CommitteeMetadata) Unmarshal(bytes []byte) error {
@@ -25,7 +25,7 @@ func (cm *CommitteeMetadata) Unmarshal(bytes []byte) error {
 }
 
 func (cm *CommitteeMetadata) Marshal() []byte {
-	if len(cm.ConfigHash) == 0 && len(cm.State) == 0 && len(cm.Commitment) == 0 {
+	if len(cm.ConfigHash) == 0 && len(cm.State) == 0 && len(cm.ReconShare) == 0 {
 		return nil
 	}
 	bytes, err := asn1.Marshal(*cm)

@@ -13,9 +13,9 @@ type MessageReceiver struct {
 	mock.Mock
 }
 
-// HandleMessage provides a mock function with given fields: sender, m
-func (_m *MessageReceiver) HandleMessage(sender uint64, m *smartbftprotos.Message) {
-	_m.Called(sender, m)
+// HandleMessage provides a mock function with given fields: sender, m, metadata
+func (_m *MessageReceiver) HandleMessage(sender uint64, m *smartbftprotos.Message, metadata []byte) {
+	_m.Called(sender, m, metadata)
 }
 
 // HandleRequest provides a mock function with given fields: sender, req
