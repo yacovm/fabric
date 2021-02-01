@@ -1,5 +1,9 @@
 #!/usr/bin/env bash -xe
 
+
+export GOROOT=$(go env GOROOT)
+export GOPATH=$(go env GOPATH)
+
 go get -u golang.org/x/tools/cmd/goimports
 
 bash ./scripts/golinter.sh
