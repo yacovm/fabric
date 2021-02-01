@@ -251,8 +251,6 @@ func bftSmartConsensusBuild(
 		consensus.LastSignatures = signatures
 	}
 
-	c.reportIsLeader(proposal) // report the leader
-
 	return consensus
 }
 
@@ -352,7 +350,7 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 		signers,
 		c.Config.SelfID)
 	c.Metrics.CommittedBlockNumber.Set(float64(block.Header.Number)) // report the committed block number
-	c.reportIsLeader(&proposal)                                      // report the leader
+	c.reportIsLeader()                                               // report the leader
 	if utils.IsConfigBlock(block) {
 
 		c.support.WriteConfigBlock(block, nil)
@@ -364,21 +362,8 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 	return reconfig
 }
 
-func (c *BFTChain) reportIsLeader(proposal *types.Proposal) {
-	var viewNum uint64
-	if proposal.Metadata == nil { // genesis block
-		viewNum = 0
-	} else {
-		proposalMD := &smartbftprotos.ViewMetadata{}
-		if err := proto.Unmarshal(proposal.Metadata, proposalMD); err != nil {
-			c.Logger.Panicf("Failed unmarshaling smartbft metadata from proposal: %v", err)
-		}
-		viewNum = proposalMD.ViewId
-	}
-
-	nodes := c.RuntimeConfig.Load().(RuntimeConfig).Nodes
-	n := uint64(len(nodes))
-	leaderID := nodes[viewNum%n] // same calculation as done in the library
+func (c *BFTChain) reportIsLeader() {
+	leaderID := c.consensus.GetLeaderID()
 
 	c.Metrics.LeaderID.Set(float64(leaderID))
 
@@ -387,7 +372,6 @@ func (c *BFTChain) reportIsLeader(proposal *types.Proposal) {
 	} else {
 		c.Metrics.IsLeader.Set(0)
 	}
-
 }
 
 func (c *BFTChain) updateRuntimeConfig(block *common.Block) types.Reconfig {
@@ -462,6 +446,7 @@ func (c *BFTChain) Errored() <-chan struct{} {
 
 func (c *BFTChain) Start() {
 	c.consensus.Start()
+	c.reportIsLeader() // report the leader
 }
 
 func (c *BFTChain) Halt() {
