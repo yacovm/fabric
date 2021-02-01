@@ -7,6 +7,8 @@
 
 type=$1
 
+export GOROOT=$(go env GOROOT)
+export GOPATH=$(go env GOPATH)
 
 make docker
 
