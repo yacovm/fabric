@@ -19,7 +19,7 @@ import (
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/pkg/wal"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
-	pvss "github.com/SmartBFT-Go/randomcommittees/pkg"
+	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/channelconfig"
 	"github.com/hyperledger/fabric/common/crypto"
@@ -67,7 +67,7 @@ type signerSerializer interface {
 // BFTChain implements Chain interface to wire with
 // BFT smart library
 type BFTChain struct {
-	cs               pvss.CommitteeSelection
+	cs               committee.Selection
 	RuntimeConfig    *atomic.Value
 	Channel          string
 	Config           types.Configuration
@@ -98,7 +98,7 @@ func NewChain(
 	metrics *Metrics,
 ) (*BFTChain, error) {
 
-	cs := pvss.New()
+	cs := committee.New()
 
 	requestInspector := &RequestInspector{
 		ValidateIdentityStructure: func(_ *msp.SerializedIdentity) error {
@@ -300,14 +300,14 @@ func buildVerifier(
 func (c *BFTChain) HandleMessage(sender uint64, m *smartbftprotos.Message, metadata []byte) {
 	c.Logger.Debugf("Message from %d", sender)
 	if prp := m.GetPrePrepare(); prp != nil {
-		err := c.cs.VerifyCommitment(pvss.Commitment{}, metadata) // TODO: actually extract the commitment from the pre-prepare
+		err := c.cs.VerifyCommitment(committee.Commitment{}, metadata) // TODO: actually extract the commitment from the pre-prepare
 		if err != nil {
 			c.Logger.Warningf("Failed verifying commitment of pre-prepare: %v", err)
 			return
 		}
 	}
 	if cmt := m.GetCommit(); cmt != nil {
-		err := c.cs.VerifyReconShare(pvss.ReconShare{}, nil) // TODO: actually extract the ReconShare and ZKP from the commitment
+		err := c.cs.VerifyReconShare(committee.ReconShare{}, nil) // TODO: actually extract the ReconShare and ZKP from the commitment
 		if err != nil {
 			c.Logger.Warningf("Failed verifying ReconShare of commit: %v", err)
 			return
