@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gbytes"
 	. "github.com/onsi/gomega/gexec"
 	"github.com/stretchr/testify/require"
 )
@@ -47,5 +46,4 @@ func TestSelectionMain(t *testing.T) {
 	process, err := Start(cmd, os.Stdout, nil)
 	gt.Expect(err).NotTo(HaveOccurred())
 	gt.Eventually(process).Should(Exit(0))
-	gt.Expect(process.Out).To(gbytes.Say("Public key for committee selection"))
 }

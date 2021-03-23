@@ -7,7 +7,6 @@ SPDX-License-Identifier: Apache-2.0
 package main
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
@@ -21,6 +20,28 @@ import (
 )
 
 var logger = flogging.MustGetLogger("selection.cli")
+
+type rnd struct {
+	seed   []byte
+	buffer []byte
+}
+
+func (r *rnd) Read(p []byte) (n int, err error) {
+	for len(r.buffer) < len(p) {
+		r.buffer = append(r.buffer, sha256Hash(r.seed)...)
+		r.seed = sha256Hash(r.seed)
+	}
+
+	n = copy(p, r.buffer)
+	r.buffer = r.buffer[n:]
+	return n, nil
+}
+
+func sha256Hash(bytes []byte) []byte {
+	h := sha256.New()
+	h.Write(bytes)
+	return h.Sum(nil)
+}
 
 func main() {
 	factory.InitFactories(nil)
@@ -37,11 +58,9 @@ func main() {
 			return err
 		}
 
-		h := sha256.New()
-		h.Write(privateKeyBytes)
-		digest := h.Sum(nil)
-
-		rndSeed := bytes.NewBuffer(digest)
+		rndSeed := &rnd{
+			seed: sha256Hash(privateKeyBytes),
+		}
 
 		selection := cs.NewCommitteeSelection(logger)
 		pk, _, err := selection.GenerateKeyPair(rndSeed)
@@ -49,7 +68,7 @@ func main() {
 			return err
 		}
 
-		fmt.Printf("Public key for committee selection: \n %s\n", base64.StdEncoding.EncodeToString(pk))
+		fmt.Println(base64.StdEncoding.EncodeToString(pk))
 		return nil
 	})
 	cli.Run(os.Args[1:])
