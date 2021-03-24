@@ -9,9 +9,14 @@ package smartbft
 import (
 	"sync"
 	"time"
-
-	"github.com/hyperledger/fabric/common/flogging"
 )
+
+type MonitorLogger interface {
+	Infof(template string, args ...interface{})
+	Debugf(template string, args ...interface{})
+	Warnf(template string, args ...interface{})
+	Panicf(template string, args ...interface{})
+}
 
 // Role indicates if this node sends or receives heartbeats
 type Role bool
@@ -34,14 +39,14 @@ type HeartbeatMonitor struct {
 	hbCount           uint64
 	lastTick          time.Time
 	lastHeartbeat     time.Time
-	logger            *flogging.FabricLogger
+	logger            MonitorLogger
 	stopChan          chan struct{}
 	running           sync.WaitGroup
 	monitorLock       sync.RWMutex
 }
 
 // NewHeartbeatMonitor creates a new HeartbeatMonitor
-func NewHeartbeatMonitor(rpc RPC, scheduler <-chan time.Time, logger *flogging.FabricLogger, heartbeatTimeout time.Duration, heartbeatCount uint64, role Role, senders []uint64, receivers []uint64) *HeartbeatMonitor {
+func NewHeartbeatMonitor(rpc RPC, scheduler <-chan time.Time, logger MonitorLogger, heartbeatTimeout time.Duration, heartbeatCount uint64, role Role, senders []uint64, receivers []uint64) *HeartbeatMonitor {
 	hm := &HeartbeatMonitor{
 		stopChan:          make(chan struct{}),
 		inc:               make(chan uint64),

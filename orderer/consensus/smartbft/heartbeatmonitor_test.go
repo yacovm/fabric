@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/orderer/consensus/smartbft"
 	"github.com/hyperledger/fabric/orderer/consensus/smartbft/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.uber.org/zap"
 )
 
 const (
@@ -27,7 +27,9 @@ const (
 func TestNewHeartbeatMonitor(t *testing.T) {
 	rpc := &mocks.RPC{}
 	scheduler := make(chan time.Time)
-	logger := flogging.MustGetLogger("test")
+	basicLog, err := zap.NewDevelopment()
+	assert.NoError(t, err)
+	logger := basicLog.Sugar()
 	hm := smartbft.NewHeartbeatMonitor(rpc, scheduler, logger, heartbeatTimeout, heartbeatCount, smartbft.HeartbeatReceiver, []uint64{1, 2, 3}, []uint64{11, 12, 13})
 	assert.NotNil(t, hm)
 	hm.Start()
@@ -42,7 +44,9 @@ func TestHeartbeatMonitorSender(t *testing.T) {
 		sendWG.Done()
 	}).Return(nil)
 	scheduler := make(chan time.Time)
-	logger := flogging.MustGetLogger("test")
+	basicLog, err := zap.NewDevelopment()
+	assert.NoError(t, err)
+	logger := basicLog.Sugar()
 	hm := smartbft.NewHeartbeatMonitor(rpc, scheduler, logger, heartbeatTimeout, heartbeatCount, smartbft.HeartbeatSender, []uint64{1, 2, 3}, []uint64{11, 12, 13})
 	assert.NotNil(t, hm)
 	hm.Start()
@@ -63,7 +67,9 @@ func TestHeartbeatMonitorReceiver(t *testing.T) {
 	var sendWG sync.WaitGroup
 	sendWG.Add(3)
 	scheduler := make(chan time.Time)
-	logger := flogging.MustGetLogger("test")
+	basicLog, err := zap.NewDevelopment()
+	assert.NoError(t, err)
+	logger := basicLog.Sugar()
 	hm := smartbft.NewHeartbeatMonitor(rpc, scheduler, logger, heartbeatTimeout, heartbeatCount, smartbft.HeartbeatReceiver, []uint64{1, 2, 3}, []uint64{11, 12, 13})
 	assert.NotNil(t, hm)
 	hm.Start()
