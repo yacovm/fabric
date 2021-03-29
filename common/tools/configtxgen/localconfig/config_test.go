@@ -325,6 +325,7 @@ func TestConsensusSpecificInit(t *testing.T) {
 					ServerTlsCert: []byte("path/to/server/cert"),
 					MspId:         "Org1",
 					Identity:      []byte("path/to/indentity/cert"),
+					SelectionPk:   []byte("path/to/indentity/sc_pk"),
 				},
 			}
 
@@ -336,6 +337,7 @@ func TestConsensusSpecificInit(t *testing.T) {
 						ServerTlsCert: []byte("path/to/server/cert"),
 						MspId:         "Org1",
 						Identity:      []byte("path/to/indentity/cert"),
+						SelectionPk:   []byte("path/to/indentity/sc_pk"),
 					},
 					{ // missing Port
 						Port:          7050,
@@ -343,6 +345,7 @@ func TestConsensusSpecificInit(t *testing.T) {
 						ServerTlsCert: []byte("path/to/server/cert"),
 						MspId:         "Org1",
 						Identity:      []byte("path/to/indentity/cert"),
+						SelectionPk:   []byte("path/to/indentity/sc_pk"),
 					},
 					{ // missing ClientTlsCert
 						Host:          "node-1.example.com",
@@ -350,6 +353,7 @@ func TestConsensusSpecificInit(t *testing.T) {
 						ServerTlsCert: []byte("path/to/server/cert"),
 						MspId:         "Org1",
 						Identity:      []byte("path/to/indentity/cert"),
+						SelectionPk:   []byte("path/to/indentity/sc_pk"),
 					},
 					{ // missing ServerTlsCert
 						Host:          "node-1.example.com",
@@ -357,6 +361,7 @@ func TestConsensusSpecificInit(t *testing.T) {
 						ClientTlsCert: []byte("path/to/client/cert"),
 						MspId:         "Org1",
 						Identity:      []byte("path/to/indentity/cert"),
+						SelectionPk:   []byte("path/to/indentity/sc_pk"),
 					},
 					{ // missing identity cert
 						Host:          "node-1.example.com",
@@ -364,12 +369,22 @@ func TestConsensusSpecificInit(t *testing.T) {
 						ClientTlsCert: []byte("path/to/client/cert"),
 						ServerTlsCert: []byte("path/to/server/cert"),
 						MspId:         "Org1",
+						SelectionPk:   []byte("path/to/indentity/sc_pk"),
 					},
 					{ // missing msp id
 						Host:          "node-1.example.com",
 						Port:          7050,
 						ClientTlsCert: []byte("path/to/client/cert"),
 						ServerTlsCert: []byte("path/to/server/cert"),
+						Identity:      []byte("path/to/indentity/cert"),
+						SelectionPk:   []byte("path/to/indentity/sc_pk"),
+					},
+					{ // missing selection pk
+						Host:          "node-1.example.com",
+						Port:          7050,
+						ClientTlsCert: []byte("path/to/client/cert"),
+						ServerTlsCert: []byte("path/to/server/cert"),
+						MspId:         "Org1",
 						Identity:      []byte("path/to/indentity/cert"),
 					},
 				}
@@ -391,6 +406,8 @@ func TestConsensusSpecificInit(t *testing.T) {
 				assert.NotNil(t, profile.Orderer.SmartBFT, "SmartBFT config settings should be set")
 				assert.Equal(t, profile.Orderer.SmartBFT.Consenters[0].ClientTlsCert, consenters[0].ClientTlsCert,
 					"Client TLS cert path should be correctly set")
+				assert.Equal(t, profile.Orderer.SmartBFT.Consenters[0].SelectionPk, consenters[0].SelectionPk,
+					"Committee selection public key should be correctly set")
 				assert.Equal(t, profile.Orderer.SmartBFT.Consenters[0].ServerTlsCert, consenters[0].ServerTlsCert,
 					"Server TLS cert path should be correctly set")
 				assert.Equal(t, profile.Orderer.SmartBFT.Consenters[0].Identity, consenters[0].Identity,

@@ -91,3 +91,18 @@ func (e Endorsers) Args() []string {
 	}
 	return args
 }
+
+type Detect struct {
+	KeyPath string
+}
+
+func (d Detect) Args() []string {
+	return []string{
+		"detect",
+		"--userKey", d.KeyPath,
+	}
+}
+
+func (d Detect) SessionName() string {
+	return "detect-selection-pk"
+}

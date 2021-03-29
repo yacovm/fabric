@@ -330,12 +330,12 @@ func MarshalSmartBFTMetadata(md *smartbft.ConfigMetadata) ([]byte, error) {
 		c.ServerTlsCert = serverCert
 
 		// Load OSN signing identity certificate
-		idBytes, err := ioutil.ReadFile(string(c.Identity))
+		idBytes, err := ioutil.ReadFile(string(c.GetIdentity()))
 		if err != nil {
 			return nil, errors.Errorf("cannot load consenter identity certificate %s:%d, %s", c.GetHost(), c.GetPort(), err)
 		}
 
-		c.Identity, err = msp.NewSerializedIdentity(c.MspId, idBytes)
+		c.Identity, err = msp.NewSerializedIdentity(c.GetMspId(), idBytes)
 
 		if err != nil {
 			return nil, errors.Errorf("cannot marshal consenter serialized identity %s:%d: %s", c.GetHost(), c.GetPort(), err)

@@ -455,6 +455,35 @@ func (n *Network) OrdererUserKey(o *Orderer, user string) string {
 	return filepath.Join(keystore, keys[0].Name())
 }
 
+// OrdererSignKey returns the path to the private key used by orderer
+// to sign over the content
+func (n *Network) OrdererSignKey(o *Orderer) string {
+	keystore := filepath.Join(
+		n.OrdererLocalMSPDir(o),
+		"keystore",
+	)
+
+	// file names are the SKI and non-deterministic
+	keys, err := ioutil.ReadDir(keystore)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(keys).To(HaveLen(1))
+
+	return filepath.Join(keystore, keys[0].Name())
+}
+
+// OrdererSelectionPK returns base64 encoded content of the
+// committee selection public key
+func (n *Network) OrdererSelectionPK(o *Orderer) string {
+	sess, err := n.Detect(commands.Detect{
+		KeyPath: n.OrdererSignKey(o),
+	})
+	Expect(err).NotTo(HaveOccurred())
+	Eventually(sess).Should(gexec.Exit(0))
+
+	contents := sess.Buffer().Contents()
+	return string(contents)
+}
+
 // peerLocalCryptoDir returns the path to the local crypto directory for the peer.
 func (n *Network) peerLocalCryptoDir(p *Peer, cryptoType string) string {
 	org := n.Organization(p.Organization)
@@ -629,13 +658,7 @@ func (n *Network) GenerateConfigTree() {
 // the Network using the channel's Profile attribute. The transactions are
 // written to ${rootDir}/${Channel.Name}_tx.pb.
 func (n *Network) Bootstrap() {
-	_, err := n.DockerClient.CreateNetwork(
-		docker.CreateNetworkOptions{
-			Name:   n.NetworkID,
-			Driver: "bridge",
-		},
-	)
-	Expect(err).NotTo(HaveOccurred())
+	n.BoostrapDockerNetwork()
 
 	sess, err := n.Cryptogen(commands.Generate{
 		Config: n.CryptoConfigPath(),
@@ -929,6 +952,12 @@ func (n *Network) ConfigTxGen(command Command) (*gexec.Session, error) {
 func (n *Network) Discover(command Command) (*gexec.Session, error) {
 	cmd := NewCommand(n.Components.Discover(), command)
 	cmd.Args = append(cmd.Args, "--peerTLSCA", n.CACertsBundlePath())
+	return n.StartSession(cmd, command.SessionName())
+}
+
+// Detect starts a gexec.Session for the provided committee selection detect pk command.
+func (n *Network) Detect(command Command) (*gexec.Session, error) {
+	cmd := NewCommand(n.Components.Detect(), command)
 	return n.StartSession(cmd, command.SessionName())
 }
 
@@ -1443,6 +1472,16 @@ func (n *Network) StartSession(cmd *exec.Cmd, name string) (*gexec.Session, erro
 	)
 }
 
+func (n *Network) BoostrapDockerNetwork() {
+	_, err := n.DockerClient.CreateNetwork(
+		docker.CreateNetworkOptions{
+			Name:   n.NetworkID,
+			Driver: "bridge",
+		},
+	)
+	Expect(err).NotTo(HaveOccurred())
+}
+
 func (n *Network) GenerateCryptoConfig() {
 	crypto, err := os.Create(n.CryptoConfigPath())
 	Expect(err).NotTo(HaveOccurred())
@@ -1467,6 +1506,48 @@ func (n *Network) GenerateConfigTxConfig() {
 	pw := gexec.NewPrefixedWriter("[configtx.yaml] ", ginkgo.GinkgoWriter)
 	err = t.Execute(io.MultiWriter(config, pw), n)
 	Expect(err).NotTo(HaveOccurred())
+}
+
+func (n *Network) GenerateAndBoostrapCrypto() {
+	n.GenerateCryptoConfig()
+	sess, err := n.Cryptogen(commands.Generate{
+		Config: n.CryptoConfigPath(),
+		Output: n.CryptoPath(),
+	})
+	Expect(err).NotTo(HaveOccurred())
+	Eventually(sess, n.EventuallyTimeout).Should(gexec.Exit(0))
+	n.ConcatenateTLSCACertificates()
+}
+
+func (n *Network) GenerateAndBoostrapConfig() {
+	n.GenerateConfigTxConfig()
+	for _, o := range n.Orderers {
+		n.GenerateOrdererConfig(o)
+	}
+	for _, p := range n.Peers {
+		n.GenerateCoreConfig(p)
+	}
+
+	sess, err := n.ConfigTxGen(commands.OutputBlock{
+		ChannelID:   n.SystemChannel.Name,
+		Profile:     n.SystemChannel.Profile,
+		ConfigPath:  n.RootDir,
+		OutputBlock: n.OutputBlockPath(n.SystemChannel.Name),
+	})
+	Expect(err).NotTo(HaveOccurred())
+	Eventually(sess, n.EventuallyTimeout).Should(gexec.Exit(0))
+
+	for _, c := range n.Channels {
+		sess, err := n.ConfigTxGen(commands.CreateChannelTx{
+			ChannelID:             c.Name,
+			Profile:               c.Profile,
+			BaseProfile:           c.BaseProfile,
+			ConfigPath:            n.RootDir,
+			OutputCreateChannelTx: n.CreateChannelTxPath(c.Name),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(sess, n.EventuallyTimeout).Should(gexec.Exit(0))
+	}
 }
 
 func (n *Network) GenerateOrdererConfig(o *Orderer) {

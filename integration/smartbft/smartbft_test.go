@@ -88,8 +88,9 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 	Describe("smartbft network", func() {
 		It("smartbft multiple nodes stop start all nodes", func() {
 			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, StartPort(), components)
-			network.GenerateConfigTree()
-			network.Bootstrap()
+			network.BoostrapDockerNetwork()
+			network.GenerateAndBoostrapCrypto()
+			network.GenerateAndBoostrapConfig()
 
 			var ordererRunners []*ginkgomon.Runner
 			for _, orderer := range network.Orderers {
@@ -178,8 +179,9 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 
 		It("smartbft assisted synchronization no rotation", func() {
 			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, StartPort(), components)
-			network.GenerateConfigTree()
-			network.Bootstrap()
+			network.BoostrapDockerNetwork()
+			network.GenerateAndBoostrapCrypto()
+			network.GenerateAndBoostrapConfig()
 
 			var ordererRunners []*ginkgomon.Runner
 			for _, orderer := range network.Orderers {
@@ -296,8 +298,9 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 
 		It("smartbft autonomous synchronization", func() {
 			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, StartPort(), components)
-			network.GenerateConfigTree()
-			network.Bootstrap()
+			network.BoostrapDockerNetwork()
+			network.GenerateAndBoostrapCrypto()
+			network.GenerateAndBoostrapConfig()
 			network.EventuallyTimeout = time.Minute * 2
 
 			var ordererRunners []*ginkgomon.Runner
@@ -387,8 +390,9 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 
 		It("smartbft node addition and removal", func() {
 			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, StartPort(), components)
-			network.GenerateConfigTree()
-			network.Bootstrap()
+			network.BoostrapDockerNetwork()
+			network.GenerateAndBoostrapCrypto()
+			network.GenerateAndBoostrapConfig()
 
 			network.EventuallyTimeout *= 2
 
@@ -670,8 +674,9 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 
 		It("smartbft iterated addition and iterated removal", func() {
 			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, StartPort(), components)
-			network.GenerateConfigTree()
-			network.Bootstrap()
+			network.BoostrapDockerNetwork()
+			network.GenerateAndBoostrapCrypto()
+			network.GenerateAndBoostrapConfig()
 
 			var ordererRunners []*ginkgomon.Runner
 			for _, orderer := range network.Orderers {
@@ -830,8 +835,9 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 
 		It("smartbft multiple nodes view change", func() {
 			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, StartPort(), components)
-			network.GenerateConfigTree()
-			network.Bootstrap()
+			network.BoostrapDockerNetwork()
+			network.GenerateAndBoostrapCrypto()
+			network.GenerateAndBoostrapConfig()
 
 			var ordererRunners []*ginkgomon.Runner
 			for _, orderer := range network.Orderers {
@@ -911,8 +917,9 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 
 		It("smartbft reconfiguration prevents blacklisting", func() {
 			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, StartPort(), components)
-			network.GenerateConfigTree()
-			network.Bootstrap()
+			network.BoostrapDockerNetwork()
+			network.GenerateAndBoostrapCrypto()
+			network.GenerateAndBoostrapConfig()
 
 			network.EventuallyTimeout *= 2
 

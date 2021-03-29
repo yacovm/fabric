@@ -376,6 +376,7 @@ Orderer: &OrdererDefaults
               MSPID: OrdererOrg1
               Identity: path/to/OSN/signcert1
               ConsenterId: 1
+              SelectionPk: dGVzdAo=
             - Host: smartbft2.example.com
               Port: 7050
               ClientTLSCert: path/to/ClientTLSCert2
@@ -383,6 +384,7 @@ Orderer: &OrdererDefaults
               MSPID: OrdererOrg2
               Identity: path/to/OSN/signcert2
               ConsenterId: 2
+              SelectionPk: dGVzdAo=
             - Host: smartbft3.example.com
               Port: 7050
               ClientTLSCert: path/to/ClientTLSCert3
@@ -390,6 +392,7 @@ Orderer: &OrdererDefaults
               MSPID: OrdererOrg3
               Identity: path/to/OSN/signcert3
               ConsenterId: 3
+              SelectionPk: dGVzdAo=
             - Host: smartbft4.example.com
               Port: 7050
               ClientTLSCert: path/to/ClientTLSCert4
@@ -397,6 +400,7 @@ Orderer: &OrdererDefaults
               MSPID: OrdererOrg4
               Identity: path/to/OSN/signcert4
               ConsenterId: 4
+              SelectionPk: dGVzdAo=
 
     # Organizations lists the orgs participating on the orderer side of the
     # network.

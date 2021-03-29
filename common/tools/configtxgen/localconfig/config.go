@@ -525,6 +525,9 @@ loop:
 			if len(c.Identity) == 0 {
 				logger.Panicf("consenter info in %s configuration did not specify identity certificate", SmartBFT)
 			}
+			if len(c.SelectionPk) == 0 {
+				logger.Panicf("consenter info in %s configuration did not specify committee selection public key", SmartBFT)
+			}
 
 			// Path to the client TLS cert
 			clientCertPath := string(c.GetClientTlsCert())
