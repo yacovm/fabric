@@ -34,10 +34,16 @@ type Assembler struct {
 	RuntimeConfig   *atomic.Value
 	Logger          *flogging.FabricLogger
 	VerificationSeq func() uint64
+	Commit          func() []byte
 }
 
 func (a *Assembler) AssembleProposal(metadata []byte, requests [][]byte) (nextProp types.Proposal) {
 	rtc := a.RuntimeConfig.Load().(RuntimeConfig)
+
+	var commitment []byte
+	if rtc.CommitteeMetadata.shouldCommit(int32(rtc.id)) {
+		commitment = a.Commit()
+	}
 
 	lastConfigBlockNum := rtc.LastConfigBlock.Header.Number
 	lastBlock := rtc.LastBlock
@@ -55,16 +61,14 @@ func (a *Assembler) AssembleProposal(metadata []byte, requests [][]byte) (nextPr
 		lastConfigBlockNum = block.Header.Number
 	}
 
-	// TODO: populate this committee metadata
-	cm := &CommitteeMetadata{}
-
 	block.Metadata.Metadata[common.BlockMetadataIndex_LAST_CONFIG] = utils.MarshalOrPanic(&common.Metadata{
 		Value: utils.MarshalOrPanic(&common.LastConfig{Index: lastConfigBlockNum}),
 	})
 	block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(&common.Metadata{
 		Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
-			CommitteeMetadata: cm.Marshal(),
-			ConsenterMetadata: metadata,
+			CommitteeMetadata:    rtc.CommitteeMetadata.Marshal(),
+			CommittteeCommitment: commitment,
+			ConsenterMetadata:    metadata,
 			LastConfig: &common.LastConfig{
 				Index: lastConfigBlockNum,
 			},
@@ -137,30 +141,6 @@ func lastConfigBlockFromLedger(ledger Ledger) (*common.Block, error) {
 		return nil, err
 	}
 	return lastConfigBlock, nil
-}
-
-func PreviousConfigBlockFromLedgerOrPanic(ledger Ledger, logger Logger) *common.Block {
-	block, err := previousConfigBlockFromLedger(ledger)
-	if err != nil {
-		logger.Panicf("Failed retrieving previous config block: %v", err)
-	}
-	return block
-}
-
-func previousConfigBlockFromLedger(ledger Ledger) (*common.Block, error) {
-	previousBlockSeq := ledger.Height() - 2
-	if ledger.Height() == 1 {
-		previousBlockSeq = 0
-	}
-	previousBlock := ledger.Block(previousBlockSeq)
-	if previousBlock == nil {
-		return nil, errors.Errorf("unable to retrieve block [%d]", previousBlockSeq)
-	}
-	previousConfigBlock, err := cluster.LastConfigBlock(previousBlock, ledger)
-	if err != nil {
-		return nil, err
-	}
-	return previousConfigBlock, nil
 }
 
 func LastBlockFromLedgerOrPanic(ledger Ledger, logger Logger) *common.Block {

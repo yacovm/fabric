@@ -69,6 +69,14 @@ func GetMetadataFromBlockOrPanic(block *cb.Block, index cb.BlockMetadataIndex) *
 	return md
 }
 
+func GetOrdererblockMetadataOrPanic(block *cb.Block) *cb.OrdererBlockMetadata {
+	obm := &cb.OrdererBlockMetadata{}
+	if err := proto.Unmarshal(GetMetadataFromBlockOrPanic(block, cb.BlockMetadataIndex_SIGNATURES).Value, obm); err != nil {
+		panic(err)
+	}
+	return obm
+}
+
 // GetLastConfigIndexFromBlock retrieves the index of the last config block as
 // encoded in the block metadata
 func GetLastConfigIndexFromBlock(block *cb.Block) (uint64, error) {

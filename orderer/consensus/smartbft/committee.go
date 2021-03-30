@@ -11,9 +11,30 @@ import (
 )
 
 type CommitteeMetadata struct {
-	ConfigHash []byte
-	State      []byte
-	ReconShare []byte
+	StateBlockNumber   uint64
+	State              []byte
+	Committers         []int32
+	ExpectedCommitters int
+	CommitteeID        int32
+}
+
+func (cm *CommitteeMetadata) committed(id int32) bool {
+	for _, e := range cm.Committers {
+		if e == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (cm *CommitteeMetadata) shouldCommit(id int32) bool {
+	if cm == nil {
+		return false
+	}
+	if len(cm.Committers) >= cm.ExpectedCommitters {
+		return false
+	}
+	return !cm.committed(id)
 }
 
 func (cm *CommitteeMetadata) Unmarshal(bytes []byte) error {
@@ -25,7 +46,7 @@ func (cm *CommitteeMetadata) Unmarshal(bytes []byte) error {
 }
 
 func (cm *CommitteeMetadata) Marshal() []byte {
-	if len(cm.ConfigHash) == 0 && len(cm.State) == 0 && len(cm.ReconShare) == 0 {
+	if cm == nil || (cm.CommitteeID == 0 && len(cm.Committers) == 0 && cm.StateBlockNumber == 0 && len(cm.State) == 0) {
 		return nil
 	}
 	bytes, err := asn1.Marshal(*cm)

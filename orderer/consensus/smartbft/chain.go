@@ -88,6 +88,7 @@ type BFTChain struct {
 
 // NewChain creates new BFT Smart chain
 func NewChain(
+	privateKeyBytesHash []byte,
 	cv ConfigValidator,
 	selfID uint64,
 	config types.Configuration,
@@ -109,6 +110,11 @@ func NewChain(
 	logger := flogging.MustGetLogger("orderer.consensus.smartbft.chain").With(zap.String("channel", support.ChainID()))
 
 	committeeSelection := cs.NewCommitteeSelection(logger)
+	rndSeed := NewPRG(privateKeyBytesHash)
+	publicKey, privateKey, err := committeeSelection.GenerateKeyPair(rndSeed)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed generating committee selection key pair")
+	}
 
 	c := &BFTChain{
 		cs:               committeeSelection,
@@ -137,7 +143,7 @@ func NewChain(
 		logger: logger,
 		id:     selfID,
 	}
-	rtc, err := rtc.BlockCommitted(lastConfigBlock)
+	rtc, err = rtc.BlockCommitted(lastConfigBlock)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed constructing RuntimeConfig")
 	}
@@ -147,6 +153,34 @@ func NewChain(
 	}
 
 	c.RuntimeConfig.Store(rtc)
+
+	var nodes committee.Nodes
+	for _, id := range rtc.Nodes {
+		if len(rtc.ID2SelectionPK[id]) == 0 {
+			logger.Warnf("Node %d doesn't have a selection public key", id)
+			continue
+		}
+		pkStr := string(rtc.ID2SelectionPK[id])
+		pubKey, err := base64.StdEncoding.DecodeString(pkStr)
+		if err != nil {
+			logger.Warnf("Node %d's public key %s is not a base64 encoded string: %v", id, pkStr, err)
+			continue
+		}
+		nodes = append(nodes, committee.Node{
+			ID:     int32(id),
+			PubKey: pubKey,
+		})
+	}
+
+	if len(nodes) > 0 {
+		err = committeeSelection.Initialize(int32(selfID), privateKey, nodes)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed initializing committee selection instance")
+		}
+	}
+
+	logger.Infof("Initialized committee selection with for %d with public key %s", selfID, base64.StdEncoding.EncodeToString(publicKey))
+	logger.Infof("Nodes: %v", nodes)
 
 	c.verifier = buildVerifier(cv, c.RuntimeConfig, support, requestInspector, policyManager)
 	c.consensus = bftSmartConsensusBuild(c, requestInspector)
@@ -207,7 +241,22 @@ func bftSmartConsensusBuild(
 	channelDecorator := zap.String("channel", c.support.ChainID())
 	logger := flogging.MustGetLogger("orderer.consensus.smartbft.consensus").With(channelDecorator)
 
+	commitZKP := &atomic.Value{}
+	cmt := func() []byte {
+		feedback, _, err := c.cs.Process(rtc.CommitteeState, committee.Input{})
+		if err != nil {
+			logger.Errorf("Failed processing library: %v", err)
+		}
+		commitZKP.Store(feedback.Commitment.Proof)
+		if feedback.Commitment != nil {
+			logger.Infof("Created commit of %d bytes", len(feedback.Commitment.Data))
+			return feedback.Commitment.Data
+		}
+		logger.Infof("Nothing to commit")
+		return nil
+	}
 	c.assembler = &Assembler{
+		Commit:          cmt,
 		RuntimeConfig:   c.RuntimeConfig,
 		VerificationSeq: c.verifier.VerificationSequence,
 		Logger:          flogging.MustGetLogger("orderer.consensus.smartbft.assembler").With(channelDecorator),
@@ -240,7 +289,9 @@ func bftSmartConsensusBuild(
 			ConvertMessage: func(m *smartbftprotos.Message, channel string) *orderer.ConsensusRequest {
 				msg := bftMsgToClusterMsg(m, channel)
 				if prp := m.GetPrePrepare(); prp != nil {
-					msg.Metadata = nil // TODO: put here ZKP proof of commitment
+					if rtc.CommitteeMetadata.shouldCommit(int32(rtc.id)) {
+						msg.Metadata = commitZKP.Load().([]byte)
+					}
 				}
 				return msg
 			},

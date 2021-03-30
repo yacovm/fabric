@@ -49,7 +49,8 @@ type PolicyManagerRetriever func(channel string) policies.Manager
 
 // Consenter implementation of the BFT smart based consenter
 type Consenter struct {
-	CreateChain func(chainName string)
+	privateKeyBytesHash []byte
+	CreateChain         func(chainName string)
 	cluster.InactiveChainRegistry
 	GetPolicyManager PolicyManagerRetriever
 	Logger           *flogging.FabricLogger
@@ -66,6 +67,7 @@ type Consenter struct {
 
 // New creates Consenter of type smart bft
 func New(
+	privateKeyBytesHash []byte,
 	icr cluster.InactiveChainRegistry,
 	pmr PolicyManagerRetriever,
 	signerSerializer signerSerializer,
@@ -89,6 +91,7 @@ func New(
 	logger.Infof("WAL Directory is %s", walConfig.WALDir)
 
 	consenter := &Consenter{
+		privateKeyBytesHash:   privateKeyBytesHash,
 		InactiveChainRegistry: icr,
 		Registrar:             r,
 		GetPolicyManager:      pmr,
@@ -190,7 +193,7 @@ func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *co
 		Logger:                 c.Logger,
 	}
 
-	chain, err := NewChain(configValidator, selfID, config, path.Join(c.WALBaseDir, support.ChainID()), puller, c.Comm, c.SignerSerializer, c.GetPolicyManager(support.ChainID()), support, c.Metrics)
+	chain, err := NewChain(c.privateKeyBytesHash, configValidator, selfID, config, path.Join(c.WALBaseDir, support.ChainID()), puller, c.Comm, c.SignerSerializer, c.GetPolicyManager(support.ChainID()), support, c.Metrics)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed creating a new BFTChain")
 	}

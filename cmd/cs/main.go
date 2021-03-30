@@ -13,6 +13,8 @@ import (
 	"io/ioutil"
 	"os"
 
+	"github.com/hyperledger/fabric/orderer/consensus/smartbft"
+
 	cs "github.com/SmartBFT-Go/randomcommittees"
 	"github.com/hyperledger/fabric/bccsp/factory"
 	"github.com/hyperledger/fabric/cmd/common"
@@ -20,22 +22,6 @@ import (
 )
 
 var logger = flogging.MustGetLogger("selection.cli")
-
-type rnd struct {
-	seed   []byte
-	buffer []byte
-}
-
-func (r *rnd) Read(p []byte) (n int, err error) {
-	for len(r.buffer) < len(p) {
-		r.buffer = append(r.buffer, sha256Hash(r.seed)...)
-		r.seed = sha256Hash(r.seed)
-	}
-
-	n = copy(p, r.buffer)
-	r.buffer = r.buffer[n:]
-	return n, nil
-}
 
 func sha256Hash(bytes []byte) []byte {
 	h := sha256.New()
@@ -45,6 +31,7 @@ func sha256Hash(bytes []byte) []byte {
 
 func main() {
 	factory.InitFactories(nil)
+
 	cli := common.NewCLI("cs", "Command line tool to detect and print public key for committee selection")
 	cli.Command("detect", "detects public key", func(config common.Config) error {
 		keyFilePath := config.SignerConfig.KeyPath
@@ -58,9 +45,7 @@ func main() {
 			return err
 		}
 
-		rndSeed := &rnd{
-			seed: sha256Hash(privateKeyBytes),
-		}
+		rndSeed := smartbft.NewPRG(sha256Hash(privateKeyBytes))
 
 		selection := cs.NewCommitteeSelection(logger)
 		pk, _, err := selection.GenerateKeyPair(rndSeed)
