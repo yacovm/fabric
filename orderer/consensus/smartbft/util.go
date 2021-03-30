@@ -8,14 +8,19 @@ package smartbft
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"sort"
 	"time"
+
+	cs2 "github.com/SmartBFT-Go/randomcommittees"
+	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
 
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
@@ -325,13 +330,15 @@ func RemoteNodesFromConfigBlock(block *common.Block, selfID uint64, logger *flog
 
 	var nodeIDs []uint64
 	var remoteNodes []cluster.RemoteNode
-	id2Identies := map[uint64][]byte{}
+	id2SelectionPKs := map[uint64][]byte{}
+	id2Identities := map[uint64][]byte{}
 	for _, consenter := range m.Consenters {
 		sanitizedID, err := crypto.SanitizeIdentity(consenter.Identity)
 		if err != nil {
 			logger.Panicf("Failed to sanitize identity: %v", err)
 		}
-		id2Identies[consenter.ConsenterId] = sanitizedID
+		id2Identities[consenter.ConsenterId] = sanitizedID
+		id2SelectionPKs[consenter.ConsenterId] = consenter.SelectionPk
 		logger.Infof("%s %d ---> %s", bundle.ConfigtxValidator().ChainID(), consenter.ConsenterId, string(consenter.Identity))
 
 		nodeIDs = append(nodeIDs, consenter.ConsenterId)
@@ -371,14 +378,16 @@ func RemoteNodesFromConfigBlock(block *common.Block, selfID uint64, logger *flog
 	})
 
 	return &nodeConfig{
+		id2SectionPK:  id2SelectionPKs,
 		remoteNodes:   remoteNodes,
-		id2Identities: id2Identies,
+		id2Identities: id2Identities,
 		nodeIDs:       nodeIDs,
 	}, nil
 
 }
 
 type nodeConfig struct {
+	id2SectionPK  NodeIdentitiesByID
 	id2Identities NodeIdentitiesByID
 	remoteNodes   []cluster.RemoteNode
 	nodeIDs       []uint64
@@ -394,22 +403,41 @@ type RuntimeConfig struct {
 	LastCommittedBlockHash string
 	RemoteNodes            []cluster.RemoteNode
 	ID2Identities          NodeIdentitiesByID
+	ID2SelectionPK         NodeIdentitiesByID
 	LastBlock              *common.Block
 	LastConfigBlock        *common.Block
 	Nodes                  []uint64
+	CommitteeMetadata      *CommitteeMetadata
+	CommitteeState         committee.State
 }
 
 func (rtc RuntimeConfig) BlockCommitted(block *common.Block) (RuntimeConfig, error) {
 	if _, err := cluster.ConfigFromBlock(block); err == nil {
 		return rtc.configBlockCommitted(block)
 	}
+	cm, err := committeeMetadataFromBlock(block)
+	if err != nil {
+		return RuntimeConfig{}, err
+	}
+
+	var cs committee.State
+	if cm != nil {
+		cs, err = cs2.StateFromBytes(cm.State)
+		if err != nil {
+			return RuntimeConfig{}, err
+		}
+	}
+
 	return RuntimeConfig{
+		CommitteeState:         cs,
+		CommitteeMetadata:      cm,
 		BFTConfig:              rtc.BFTConfig,
 		id:                     rtc.id,
 		logger:                 rtc.logger,
 		LastCommittedBlockHash: hex.EncodeToString(block.Header.Hash()),
 		Nodes:                  rtc.Nodes,
 		ID2Identities:          rtc.ID2Identities,
+		ID2SelectionPK:         rtc.ID2SelectionPK,
 		RemoteNodes:            rtc.RemoteNodes,
 		LastBlock:              block,
 		LastConfigBlock:        rtc.LastConfigBlock,
@@ -427,7 +455,23 @@ func (rtc RuntimeConfig) configBlockCommitted(block *common.Block) (RuntimeConfi
 		return RuntimeConfig{}, err
 	}
 
+	cm, err := committeeMetadataFromBlock(block)
+	if err != nil {
+		return RuntimeConfig{}, err
+	}
+
+	var cs committee.State
+
+	if cm != nil {
+		cs, err = cs2.StateFromBytes(cm.State)
+		if err != nil {
+			return RuntimeConfig{}, err
+		}
+	}
+
 	return RuntimeConfig{
+		CommitteeState:         cs,
+		CommitteeMetadata:      cm,
 		BFTConfig:              bftConfig,
 		isConfig:               true,
 		id:                     rtc.id,
@@ -435,10 +479,24 @@ func (rtc RuntimeConfig) configBlockCommitted(block *common.Block) (RuntimeConfi
 		LastCommittedBlockHash: hex.EncodeToString(block.Header.Hash()),
 		Nodes:                  nodeConf.nodeIDs,
 		ID2Identities:          nodeConf.id2Identities,
+		ID2SelectionPK:         nodeConf.id2SectionPK,
 		RemoteNodes:            nodeConf.remoteNodes,
 		LastBlock:              block,
 		LastConfigBlock:        block,
 	}, nil
+}
+
+func committeeMetadataFromBlock(block *common.Block) (*CommitteeMetadata, error) {
+	if block.Header.Number == 0 {
+		return nil, nil
+	}
+
+	md := utils2.GetOrdererblockMetadataOrPanic(block).CommitteeMetadata
+	if len(md) == 0 {
+		return nil, nil
+	}
+	cm := &CommitteeMetadata{}
+	return cm, errors.Wrap(cm.Unmarshal(md), "failed extracting committee metadata")
 }
 
 func configBlockToBFTConfig(selfID uint64, block *common.Block) (types.Configuration, error) {
@@ -490,4 +548,42 @@ func isConfigBlock(block *common.Block) bool {
 		return false
 	}
 	return common.HeaderType(hdr.Type) == common.HeaderType_CONFIG
+}
+
+type PRG struct {
+	expandBuff func(ctr uint64) []byte
+	ctr        uint64
+	buffer     []byte
+}
+
+func NewPRG(seed []byte) *PRG {
+	// Expansion function is:
+	// HMAC(seed, SHA256(ctr))
+	expand := func(ctr uint64) []byte {
+		buff := make([]byte, 8)
+		binary.BigEndian.PutUint64(buff, ctr)
+
+		h := sha256.New()
+		h.Write(buff)
+		ctrHash := h.Sum(nil)
+
+		prf := hmac.New(sha256.New, seed)
+		prf.Write(ctrHash)
+		return prf.Sum(nil)
+	}
+
+	return &PRG{
+		expandBuff: expand,
+	}
+}
+
+func (r *PRG) Read(p []byte) (n int, err error) {
+	for len(r.buffer) < len(p) {
+		r.ctr++
+		r.buffer = append(r.buffer, r.expandBuff(r.ctr)...)
+	}
+
+	n = copy(p, r.buffer)
+	r.buffer = r.buffer[n:]
+	return n, nil
 }

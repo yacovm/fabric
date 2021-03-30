@@ -481,6 +481,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			for _, channel := range []string{"systemchannel", "testchannel1"} {
 				nwo.UpdateSmartBFTMetadata(network, peer, orderer, channel, func(md *smartbft.ConfigMetadata) {
 					md.Consenters = append(md.Consenters, &smartbft.Consenter{
+						SelectionPk: []byte(network.OrdererSelectionPK(orderer5)),
 						MspId:       "OrdererMSP",
 						ConsenterId: 5,
 						Identity: utils.MarshalOrPanic(&msp.SerializedIdentity{
@@ -636,6 +637,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			By("Adding back the node to the application channel")
 			nwo.UpdateSmartBFTMetadata(network, peer, network.Orderers[2], channel, func(md *smartbft.ConfigMetadata) {
 				md.Consenters = append(md.Consenters, &smartbft.Consenter{
+					SelectionPk: []byte(network.OrdererSelectionPK(orderer5)),
 					MspId:       "OrdererMSP",
 					ConsenterId: 5,
 					Identity: utils.MarshalOrPanic(&msp.SerializedIdentity{
@@ -751,6 +753,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 				for _, channel := range []string{"systemchannel", "testchannel1"} {
 					nwo.UpdateSmartBFTMetadata(network, peer, orderer, channel, func(md *smartbft.ConfigMetadata) {
 						md.Consenters = append(md.Consenters, &smartbft.Consenter{
+							SelectionPk: []byte(network.OrdererSelectionPK(newOrderer)),
 							MspId:       "OrdererMSP",
 							ConsenterId: uint64(5 + i),
 							Identity: utils.MarshalOrPanic(&msp.SerializedIdentity{
@@ -1008,6 +1011,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			for _, channel := range []string{"systemchannel", "testchannel1"} {
 				nwo.UpdateSmartBFTMetadata(network, peer, orderer, channel, func(md *smartbft.ConfigMetadata) {
 					md.Consenters = append(md.Consenters, &smartbft.Consenter{
+						SelectionPk: []byte(network.OrdererSelectionPK(orderer5)),
 						MspId:       "OrdererMSP",
 						ConsenterId: 5,
 						Identity: utils.MarshalOrPanic(&msp.SerializedIdentity{

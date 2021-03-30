@@ -222,6 +222,9 @@ func TestRuntimeConfig(t *testing.T) {
 			Data: [][]byte{
 				makeTx(nil, nil),
 			},
+		},
+		Metadata: &common.BlockMetadata{
+			Metadata: [][]byte{nil, nil, nil, nil},
 		}}
 
 	prevRTC := RuntimeConfig{

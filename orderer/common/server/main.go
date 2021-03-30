@@ -9,6 +9,9 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
+	"encoding/asn1"
+	"encoding/pem"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -16,8 +19,12 @@ import (
 	_ "net/http/pprof" // This is essentially the main package for the orderer
 	"os"
 	"os/signal"
+	"path/filepath"
+	"reflect"
 	"syscall"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric-lib-go/healthz"
@@ -668,6 +675,26 @@ func initializeMultichannelRegistrar(
 	dpmr := &DynamicPolicyManagerRegistry{}
 	callbacks = append(callbacks, dpmr.Update)
 
+	keystoreDir := filepath.Join(conf.General.LocalMSPDir, "keystore")
+	files, err := ioutil.ReadDir(keystoreDir)
+	if err != nil {
+		logger.Panicf("Failed reading directory %s: %v", keystoreDir, err)
+	}
+
+	var privateKeyBytes []byte
+	for _, f := range files {
+		privateKeyBytes, err = ioutil.ReadFile(filepath.Join(keystoreDir, f.Name()))
+		if err != nil {
+			logger.Panicf("Failed reading private key file %s: %v", f.Name(), err)
+		}
+		break
+	}
+	if len(privateKeyBytes) == 0 {
+		logger.Panicf("Did not detect a private key in %s", keystoreDir)
+	}
+
+	privateKeyBytesHash := util.ComputeSHA256(privateKeyBytes)
+
 	registrar := multichannel.NewRegistrar(*conf, lf, &localSigner{signer: signer}, metricsProvider, callbacks...)
 
 	consenters := make(map[string]consensus.Consenter)
@@ -682,7 +709,7 @@ func initializeMultichannelRegistrar(
 			}
 		case "smartbft":
 			{
-				icr = initializeSmartBFTConsenter(signer, dpmr, consenters, conf, lf, clusterDialer, bootstrapBlock, ri, srvConf, srv, registrar, metricsProvider)
+				icr = initializeSmartBFTConsenter(privateKeyBytesHash, signer, dpmr, consenters, conf, lf, clusterDialer, bootstrapBlock, ri, srvConf, srv, registrar, metricsProvider)
 			}
 		default:
 			logger.Panicf("Unknown cluster type consenter")
@@ -696,6 +723,75 @@ func initializeMultichannelRegistrar(
 	go kafkaMetrics.PollGoMetricsUntilStop(time.Minute, nil)
 	registrar.Initialize(consenters)
 	return registrar
+}
+
+func locateCertificate(dir string) ([]byte, error) {
+
+	_, err := os.Stat(dir)
+	if os.IsNotExist(err) {
+		return nil, err
+	}
+
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		return nil, errors.Wrapf(err, "could not read directory %s", dir)
+	}
+
+	for _, f := range files {
+		fullName := filepath.Join(dir, f.Name())
+
+		f, err := os.Stat(fullName)
+		if err != nil {
+			continue
+		}
+		if f.IsDir() {
+			continue
+		}
+
+		item, err := readPemFile(fullName)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed reading %s", fullName)
+			continue
+		}
+
+		return item, nil
+	}
+
+	return nil, errors.Errorf("did not detect any readable files in %s", dir)
+
+}
+
+func getSubjectKeyIdentifierFromCert(cert *x509.Certificate) ([]byte, error) {
+	var SKI []byte
+
+	for _, ext := range cert.Extensions {
+		// Subject Key Identifier is identified by the following ASN.1 tag
+		// subjectKeyIdentifier (2 5 29 14) (see https://tools.ietf.org/html/rfc3280.html)
+		if reflect.DeepEqual(ext.Id, asn1.ObjectIdentifier{2, 5, 29, 14}) {
+			_, err := asn1.Unmarshal(ext.Value, &SKI)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to unmarshal Subject Key Identifier")
+			}
+
+			return SKI, nil
+		}
+	}
+
+	return nil, errors.New("subjectKeyIdentifier not found in certificate")
+}
+
+func readPemFile(file string) ([]byte, error) {
+	bytes, err := ioutil.ReadFile(file)
+	if err != nil {
+		return nil, errors.Wrapf(err, "reading from file %s failed", file)
+	}
+
+	b, _ := pem.Decode(bytes)
+	if b == nil {
+		return nil, errors.Errorf("no pem content for file %s", file)
+	}
+
+	return bytes, nil
 }
 
 func initializeEtcdraftConsenter(
@@ -724,6 +820,7 @@ func initializeEtcdraftConsenter(
 }
 
 func initializeSmartBFTConsenter(
+	privateKeyBytesHash []byte,
 	signer crypto.SignerSupport,
 	dpmr *DynamicPolicyManagerRegistry,
 	consenters map[string]consensus.Consenter,
@@ -745,7 +842,7 @@ func initializeSmartBFTConsenter(
 	ri.channelLister = icr
 
 	go icr.run()
-	smartBFTConsenter := smartbft.New(icr, dpmr.Registry(), signer, clusterDialer, conf, srvConf, srv, registrar, metricsProvider)
+	smartBFTConsenter := smartbft.New(privateKeyBytesHash, icr, dpmr.Registry(), signer, clusterDialer, conf, srvConf, srv, registrar, metricsProvider)
 	consenters["smartbft"] = smartBFTConsenter
 
 	return smartBFTConsenter
