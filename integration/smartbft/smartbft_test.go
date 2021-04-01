@@ -1082,14 +1082,14 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Skipping verifying prev commits due to verification sequence advancing from 1 to 2 channel=testchannel1"))
 		})
 
-		It("smartbft upgrade BFT-2 to BFT-3", func() {
+		It("smartbft upgrade BFT-3 to BFT-4", func() {
 			wd, err := os.Getwd()
 			Expect(err).To(Not(HaveOccurred()))
 
 			archive, err := ioutil.ReadFile(filepath.Join(wd, "bft-pre-upgrade.tar.gz"))
 			Expect(err).To(Not(HaveOccurred()))
 
-			path := filepath.Join("/tmp", "e2e-smartbft-test254466452")
+			path := filepath.Join("/tmp", "e2e-smartbft-test031297471")
 			if _, err := os.Stat(path); err == nil {
 				os.RemoveAll(path)
 			}
@@ -1102,7 +1102,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			err = extractTarGZ(archive, path)
 			Expect(err).ToNot(HaveOccurred())
 
-			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, StartPort(), components)
+			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, 40000, components)
 
 			var ordererRunners []*ginkgomon.Runner
 			for _, orderer := range network.Orderers {
@@ -1118,13 +1118,10 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			peerProcesses = ifrit.Invoke(peerGroupRunner)
 			Eventually(peerProcesses.Ready(), network.EventuallyTimeout).Should(BeClosed())
 
-			network.PortsByOrdererID[network.Orderers[3].ID()] = map[nwo.PortName]uint16{
-				nwo.ListenPort: 39012,
-			}
 			peer := network.Peer("Org1", "peer0")
-			invokeQuery(network, peer, network.Orderers[3], "testchannel1", 70)
 			invokeQuery(network, peer, network.Orderers[3], "testchannel1", 60)
 			invokeQuery(network, peer, network.Orderers[3], "testchannel1", 50)
+			invokeQuery(network, peer, network.Orderers[3], "testchannel1", 40)
 		})
 	})
 })
