@@ -25,6 +25,7 @@ import (
 type Dispatcher interface {
 	DispatchSubmit(ctx context.Context, request *orderer.SubmitRequest) error
 	DispatchConsensus(ctx context.Context, request *orderer.ConsensusRequest) error
+	DispatchHeartbeat(ctx context.Context, request *orderer.HeartbeatRequest) error
 }
 
 //go:generate mockery -dir . -name StepStream -case underscore -output ./mocks/
@@ -93,6 +94,11 @@ func (s *Service) handleMessage(stream StepStream, addr string, exp *certificate
 		return s.handleSubmit(submitReq, stream, addr)
 	}
 
+	if heartbeatReq := request.GetHeartbeatRequest(); heartbeatReq != nil {
+		s.Logger.Debugf("Calling DispatchHeartbeat")
+		return s.Dispatcher.DispatchHeartbeat(stream.Context(), heartbeatReq)
+	}
+
 	// Else, it's a consensus message.
 	return s.Dispatcher.DispatchConsensus(stream.Context(), request.GetConsensusRequest())
 }
@@ -134,6 +140,10 @@ func extractChannel(msg *orderer.StepRequest) string {
 
 	if submitReq := msg.GetSubmitRequest(); submitReq != nil {
 		return submitReq.Channel
+	}
+
+	if heartbeatReq := msg.GetHeartbeatRequest(); heartbeatReq != nil {
+		return heartbeatReq.Channel
 	}
 
 	return ""

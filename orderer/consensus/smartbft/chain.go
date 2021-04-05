@@ -84,6 +84,7 @@ type BFTChain struct {
 	verifier         *Verifier
 	assembler        *Assembler
 	Metrics          *Metrics
+	heartbeatMonitor *HeartbeatMonitor
 }
 
 // NewChain creates new BFT Smart chain
@@ -184,6 +185,27 @@ func NewChain(
 
 	c.verifier = buildVerifier(cv, c.RuntimeConfig, support, requestInspector, policyManager)
 	c.consensus = bftSmartConsensusBuild(c, requestInspector)
+
+	// TODO setup heartbeat monitor with the right config
+	heartbeatTicker := time.NewTicker(1 * time.Second)
+	heartbeatTimeout := 10 * time.Second
+	heartbeatCount := uint64(5)
+	var role Role
+	if selfID%2 == 0 {
+		role = HeartbeatSender
+	} else {
+		role = HeartbeatReceiver
+	}
+	senders := make([]uint64, 0)
+	receivers := make([]uint64, 0)
+	for _, node := range nodes {
+		if node.ID%2 == 0 {
+			senders = append(senders, uint64(node.ID))
+		} else {
+			receivers = append(receivers, uint64(node.ID))
+		}
+	}
+	c.heartbeatMonitor = NewHeartbeatMonitor(c.consensus.Comm.(MessageSender), heartbeatTicker.C, logger, heartbeatTimeout, heartbeatCount, role, senders, receivers)
 
 	// Setup communication with list of remotes notes for the new channel
 	c.Comm.Configure(c.support.ChainID(), rtc.RemoteNodes)
@@ -379,6 +401,11 @@ func (c *BFTChain) HandleRequest(sender uint64, req []byte) {
 	c.consensus.SubmitRequest(req)
 }
 
+func (c *BFTChain) HandleHeartbeat(sender uint64) {
+	c.Logger.Debugf("HandleHeartbeat from %d", sender)
+	c.heartbeatMonitor.ProcessHeartbeat(sender)
+}
+
 func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature) types.Reconfig {
 	block, err := ProposalToBlock(proposal)
 	if err != nil {
@@ -442,6 +469,10 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 		c.support.WriteConfigBlock(block, nil)
 	} else {
 		c.support.WriteBlock(block, nil)
+	}
+
+	if c.Config.SelfID%2 != 0 {
+		c.Logger.Infof("The heartbeat monitor of node %d returned these suspects %v", c.Config.SelfID, c.heartbeatMonitor.GetSuspects()) // TODO actually use suspects
 	}
 
 	// TODO: call c.cs.Process() with the commitment from the block
@@ -548,10 +579,12 @@ func (c *BFTChain) Errored() <-chan struct{} {
 
 func (c *BFTChain) Start() {
 	c.consensus.Start()
+	c.heartbeatMonitor.Start()
 }
 
 func (c *BFTChain) Halt() {
 	c.Logger.Infof("Shutting down chain")
+	c.heartbeatMonitor.Close()
 	c.consensus.Stop()
 }
 

@@ -38,6 +38,7 @@ type ClusterClient interface {
 type RPC struct {
 	consensusLock sync.Mutex
 	submitLock    sync.Mutex
+	heartbeatLock sync.Mutex
 	Logger        *flogging.FabricLogger
 	Timeout       time.Duration
 	Channel       string
@@ -52,6 +53,7 @@ func NewStreamsByType() map[OperationType]map[uint64]*Stream {
 	m := make(map[OperationType]map[uint64]*Stream)
 	m[ConsensusOperation] = make(map[uint64]*Stream)
 	m[SubmitOperation] = make(map[uint64]*Stream)
+	m[HeartbeatOperation] = make(map[uint64]*Stream)
 	return m
 }
 
@@ -62,6 +64,7 @@ type OperationType int
 const (
 	ConsensusOperation OperationType = iota
 	SubmitOperation
+	HeartbeatOperation
 )
 
 // Consensus passes the given ConsensusRequest message to the raft.Node instance.
@@ -119,12 +122,45 @@ func (s *RPC) SendSubmit(destination uint64, request *orderer.SubmitRequest) err
 	return err
 }
 
+// SendHeartbeat sends a HeartbeatRequest to the given destination node.
+func (s *RPC) SendHeartbeat(destination uint64) error {
+	if s.Logger.IsEnabledFor(zapcore.DebugLevel) {
+		defer s.heartbeatSent(time.Now(), destination)
+	}
+
+	stream, err := s.getOrCreateStream(destination, HeartbeatOperation)
+	if err != nil {
+		return err
+	}
+
+	req := &orderer.StepRequest{
+		Payload: &orderer.StepRequest_HeartbeatRequest{
+			HeartbeatRequest: &orderer.HeartbeatRequest{
+				Channel: s.Channel,
+			},
+		},
+	}
+
+	s.heartbeatLock.Lock()
+	defer s.heartbeatLock.Unlock()
+
+	err = stream.Send(req)
+	if err != nil {
+		s.unMapStream(destination, HeartbeatOperation)
+	}
+	return err
+}
+
 func (s *RPC) submitSent(start time.Time, to uint64, msg *orderer.SubmitRequest) {
 	s.Logger.Debugf("Sending msg of %d bytes to %d on channel %s took %v", submitMsgLength(msg), to, s.Channel, time.Since(start))
 }
 
 func (s *RPC) consensusSent(start time.Time, to uint64, msg *orderer.ConsensusRequest) {
 	s.Logger.Debugf("Sending msg of %d bytes to %d on channel %s took %v", len(msg.Payload), to, s.Channel, time.Since(start))
+}
+
+func (s *RPC) heartbeatSent(start time.Time, to uint64) {
+	s.Logger.Debugf("Sending heartbeat to %d on channel %s took %v", to, s.Channel, time.Since(start))
 }
 
 // getProposeStream obtains a Submit stream for the given destination node

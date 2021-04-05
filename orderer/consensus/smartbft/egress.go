@@ -21,6 +21,7 @@ import (
 type RPC interface {
 	SendConsensus(dest uint64, msg *orderer.ConsensusRequest) error
 	SendSubmit(dest uint64, request *orderer.SubmitRequest) error
+	SendHeartbeat(dest uint64) error
 }
 
 type Logger interface {
@@ -63,6 +64,13 @@ func (e *Egress) SendTransaction(targetID uint64, request []byte) {
 		Payload: env,
 	}
 	e.RPC.SendSubmit(targetID, msg)
+}
+
+func (e *Egress) SendHeartbeat(targetID uint64) {
+	err := e.RPC.SendHeartbeat(targetID)
+	if err != nil {
+		e.Logger.Warnf("Failed sending heartbeat to %d: %v", targetID, err)
+	}
 }
 
 func bftMsgToClusterMsg(message *protos.Message, channel string) *orderer.ConsensusRequest {

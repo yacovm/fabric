@@ -106,6 +106,11 @@ func New(
 		CreateChain:           r.CreateChain,
 	}
 
+	ingress := &Ingreess{
+		Logger:        logger,
+		ChainSelector: consenter,
+	}
+
 	consenter.Comm = &cluster.Comm{
 		MinimumExpirationWarningInterval: cluster.MinimumExpirationWarningInterval,
 		CertExpWarningThreshold:          conf.General.Cluster.CertExpirationWarningThreshold,
@@ -115,10 +120,8 @@ func New(
 		Connections:                      cluster.NewConnectionStore(clusterDialer, metrics.EgressTLSConnectionCount),
 		Metrics:                          metrics,
 		ChanExt:                          consenter,
-		H: &Ingreess{
-			Logger:        logger,
-			ChainSelector: consenter,
-		},
+		H:                                ingress,
+		HeartbeatHandler:                 ingress,
 	}
 
 	svc := &cluster.Service{
@@ -230,6 +233,8 @@ func (c *Consenter) TargetChannel(message proto2.Message) string {
 	case *orderer.ConsensusRequest:
 		return req.Channel
 	case *orderer.SubmitRequest:
+		return req.Channel
+	case *orderer.HeartbeatRequest:
 		return req.Channel
 	default:
 		return ""

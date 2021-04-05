@@ -2,10 +2,10 @@
 package mocks
 
 import (
-	"sync"
+	sync "sync"
 
-	"github.com/hyperledger/fabric/orderer/consensus/smartbft"
-	"github.com/hyperledger/fabric/protos/common"
+	smartbft "github.com/hyperledger/fabric/orderer/consensus/smartbft"
+	common "github.com/hyperledger/fabric/protos/common"
 )
 
 type FakeBlockPuller struct {

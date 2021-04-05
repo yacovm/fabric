@@ -13,6 +13,11 @@ type MessageReceiver struct {
 	mock.Mock
 }
 
+// HandleHeartbeat provides a mock function with given fields: sender
+func (_m *MessageReceiver) HandleHeartbeat(sender uint64) {
+	_m.Called(sender)
+}
+
 // HandleMessage provides a mock function with given fields: sender, m, metadata
 func (_m *MessageReceiver) HandleMessage(sender uint64, m *smartbftprotos.Message, metadata []byte) {
 	_m.Called(sender, m, metadata)

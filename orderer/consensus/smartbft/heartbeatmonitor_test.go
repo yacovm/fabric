@@ -25,52 +25,52 @@ const (
 )
 
 func TestNewHeartbeatMonitor(t *testing.T) {
-	rpc := &mocks.RPC{}
+	messageSender := &mocks.MessageSender{}
 	scheduler := make(chan time.Time)
 	basicLog, err := zap.NewDevelopment()
 	assert.NoError(t, err)
 	logger := basicLog.Sugar()
-	hm := smartbft.NewHeartbeatMonitor(rpc, scheduler, logger, heartbeatTimeout, heartbeatCount, smartbft.HeartbeatReceiver, []uint64{1, 2, 3}, []uint64{11, 12, 13})
+	hm := smartbft.NewHeartbeatMonitor(messageSender, scheduler, logger, heartbeatTimeout, heartbeatCount, smartbft.HeartbeatReceiver, []uint64{1, 2, 3}, []uint64{11, 12, 13})
 	assert.NotNil(t, hm)
 	hm.Start()
 	hm.Close()
 }
 
 func TestHeartbeatMonitorSender(t *testing.T) {
-	rpc := &mocks.RPC{}
+	messageSender := &mocks.MessageSender{}
 	var sendWG sync.WaitGroup
 	sendWG.Add(3)
-	rpc.On("SendConsensus", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+	messageSender.On("SendHeartbeat", mock.Anything).Run(func(args mock.Arguments) {
 		sendWG.Done()
-	}).Return(nil)
+	})
 	scheduler := make(chan time.Time)
 	basicLog, err := zap.NewDevelopment()
 	assert.NoError(t, err)
 	logger := basicLog.Sugar()
-	hm := smartbft.NewHeartbeatMonitor(rpc, scheduler, logger, heartbeatTimeout, heartbeatCount, smartbft.HeartbeatSender, []uint64{1, 2, 3}, []uint64{11, 12, 13})
+	hm := smartbft.NewHeartbeatMonitor(messageSender, scheduler, logger, heartbeatTimeout, heartbeatCount, smartbft.HeartbeatSender, []uint64{1, 2, 3}, []uint64{11, 12, 13})
 	assert.NotNil(t, hm)
 	hm.Start()
-	rpc.AssertNotCalled(t, "SendConsensus", mock.Anything, mock.Anything)
+	messageSender.AssertNotCalled(t, "SendHeartbeat", mock.Anything, mock.Anything)
 	clock := fakeTime{}
 	clock.advanceTime(2, scheduler)
 	sendWG.Wait()
-	rpc.AssertNumberOfCalls(t, "SendConsensus", 3)
+	messageSender.AssertNumberOfCalls(t, "SendHeartbeat", 3)
 	sendWG.Add(3)
 	clock.advanceTime(1, scheduler)
 	sendWG.Wait()
-	rpc.AssertNumberOfCalls(t, "SendConsensus", 6)
+	messageSender.AssertNumberOfCalls(t, "SendHeartbeat", 6)
 	hm.Close()
 }
 
 func TestHeartbeatMonitorReceiver(t *testing.T) {
-	rpc := &mocks.RPC{}
+	messageSender := &mocks.MessageSender{}
 	var sendWG sync.WaitGroup
 	sendWG.Add(3)
 	scheduler := make(chan time.Time)
 	basicLog, err := zap.NewDevelopment()
 	assert.NoError(t, err)
 	logger := basicLog.Sugar()
-	hm := smartbft.NewHeartbeatMonitor(rpc, scheduler, logger, heartbeatTimeout, heartbeatCount, smartbft.HeartbeatReceiver, []uint64{1, 2, 3}, []uint64{11, 12, 13})
+	hm := smartbft.NewHeartbeatMonitor(messageSender, scheduler, logger, heartbeatTimeout, heartbeatCount, smartbft.HeartbeatReceiver, []uint64{1, 2, 3}, []uint64{11, 12, 13})
 	assert.NotNil(t, hm)
 	hm.Start()
 	assert.Equal(t, []uint64{1, 2, 3}, hm.GetSuspects()) // nobody sent any heartbeats yet and therefore all are suspects
