@@ -20,6 +20,7 @@ import (
 type MessageReceiver interface {
 	HandleMessage(sender uint64, m *protos.Message, metadata []byte)
 	HandleRequest(sender uint64, req []byte)
+	HandleHeartbeat(sender uint64)
 }
 
 //go:generate mockery -dir . -name ReceiverGetter -case underscore -output mocks
@@ -64,5 +65,16 @@ func (in *Ingreess) OnSubmit(channel string, sender uint64, request *orderer.Sub
 		return errors.Errorf("channel %s doesn't exist", channel)
 	}
 	receiver.HandleRequest(sender, utils.MarshalOrPanic(request.Payload))
+	return nil
+}
+
+// OnHeartbeat notifies the Ingreess for a reception of a heartbeat from a given sender on a given channel
+func (in *Ingreess) OnHeartbeat(channel string, sender uint64) error {
+	receiver := in.ChainSelector.ReceiverByChain(channel)
+	if receiver == nil {
+		in.Logger.Warningf("An attempt to send an heartbeat to a non existing channel (%s) was made by %d", channel, sender)
+		return errors.Errorf("channel %s doesn't exist", channel)
+	}
+	receiver.HandleHeartbeat(sender)
 	return nil
 }

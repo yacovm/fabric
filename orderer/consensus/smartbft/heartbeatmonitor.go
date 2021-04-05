@@ -27,8 +27,14 @@ const (
 	HeartbeatReceiver Role = true
 )
 
+//go:generate mockery -dir . -name MessageSender -case underscore -output mocks
+
+type MessageSender interface {
+	SendHeartbeat(dest uint64)
+}
+
 type HeartbeatMonitor struct {
-	rpc               RPC
+	messageSender     MessageSender
 	scheduler         <-chan time.Time
 	inc               chan uint64
 	role              Role
@@ -46,11 +52,11 @@ type HeartbeatMonitor struct {
 }
 
 // NewHeartbeatMonitor creates a new HeartbeatMonitor
-func NewHeartbeatMonitor(rpc RPC, scheduler <-chan time.Time, logger MonitorLogger, heartbeatTimeout time.Duration, heartbeatCount uint64, role Role, senders []uint64, receivers []uint64) *HeartbeatMonitor {
+func NewHeartbeatMonitor(messageSender MessageSender, scheduler <-chan time.Time, logger MonitorLogger, heartbeatTimeout time.Duration, heartbeatCount uint64, role Role, senders []uint64, receivers []uint64) *HeartbeatMonitor {
 	hm := &HeartbeatMonitor{
 		stopChan:          make(chan struct{}),
 		inc:               make(chan uint64),
-		rpc:               rpc,
+		messageSender:     messageSender,
 		scheduler:         scheduler,
 		logger:            logger,
 		hbTimeout:         heartbeatTimeout,
@@ -139,10 +145,7 @@ func (hm *HeartbeatMonitor) checkIfTimeToSend() {
 
 func (hm *HeartbeatMonitor) sendHeartbeat(targetID uint64) {
 	hm.logger.Debugf("Sending heartbeat to node %d", targetID)
-	err := hm.rpc.SendConsensus(targetID, nil) // TODO use SendHeartbeat
-	if err != nil {
-		hm.logger.Warnf("Failed sending to %d: %v", targetID, err)
-	}
+	hm.messageSender.SendHeartbeat(targetID)
 }
 
 // ProcessHeartbeat processes the heartbeat from the sender
@@ -154,6 +157,7 @@ func (hm *HeartbeatMonitor) ProcessHeartbeat(sender uint64) {
 }
 
 func (hm *HeartbeatMonitor) processHeartbeat(sender uint64) {
+	hm.logger.Debugf("Processing heartbeat from node %d", sender)
 	hm.monitorLock.Lock()
 	defer hm.monitorLock.Unlock()
 	for i, s := range hm.senders {

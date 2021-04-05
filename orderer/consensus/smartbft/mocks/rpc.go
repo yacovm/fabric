@@ -26,6 +26,20 @@ func (_m *RPC) SendConsensus(dest uint64, msg *orderer.ConsensusRequest) error {
 	return r0
 }
 
+// SendHeartbeat provides a mock function with given fields: dest
+func (_m *RPC) SendHeartbeat(dest uint64) error {
+	ret := _m.Called(dest)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(uint64) error); ok {
+		r0 = rf(dest)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // SendSubmit provides a mock function with given fields: dest, request
 func (_m *RPC) SendSubmit(dest uint64, request *orderer.SubmitRequest) error {
 	ret := _m.Called(dest, request)

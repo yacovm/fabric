@@ -52,6 +52,11 @@ type Handler interface {
 	OnSubmit(channel string, sender uint64, req *orderer.SubmitRequest) error
 }
 
+// HeartbeatHandler handles an heartbeat request
+type HeartbeatHandler interface {
+	OnHeartbeat(channel string, sender uint64) error
+}
+
 // RemoteNode represents a cluster member
 type RemoteNode struct {
 	// ID is unique among all members, and cannot be 0.
@@ -101,6 +106,7 @@ type Comm struct {
 	Logger                           *flogging.FabricLogger
 	ChanExt                          ChannelExtractor
 	H                                Handler
+	HeartbeatHandler                 HeartbeatHandler
 	Connections                      *ConnectionStore
 	Chan2Members                     MembersByChannel
 	Metrics                          *Metrics
@@ -129,6 +135,16 @@ func (c *Comm) DispatchConsensus(ctx context.Context, request *orderer.Consensus
 		return err
 	}
 	return c.H.OnConsensus(reqCtx.channel, reqCtx.sender, request)
+}
+
+// DispatchHeartbeat identifies the channel and sender of the heartbeat request and passes it
+// to the underlying Handler
+func (c *Comm) DispatchHeartbeat(ctx context.Context, request *orderer.HeartbeatRequest) error {
+	reqCtx, err := c.requestContext(ctx, request)
+	if err != nil {
+		return err
+	}
+	return c.HeartbeatHandler.OnHeartbeat(reqCtx.channel, reqCtx.sender)
 }
 
 // classifyRequest identifies the sender and channel of the request and returns

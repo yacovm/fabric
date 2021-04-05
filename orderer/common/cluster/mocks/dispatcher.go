@@ -28,6 +28,20 @@ func (_m *Dispatcher) DispatchConsensus(ctx context.Context, request *orderer.Co
 	return r0
 }
 
+// DispatchHeartbeat provides a mock function with given fields: ctx, request
+func (_m *Dispatcher) DispatchHeartbeat(ctx context.Context, request *orderer.HeartbeatRequest) error {
+	ret := _m.Called(ctx, request)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *orderer.HeartbeatRequest) error); ok {
+		r0 = rf(ctx, request)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // DispatchSubmit provides a mock function with given fields: ctx, request
 func (_m *Dispatcher) DispatchSubmit(ctx context.Context, request *orderer.SubmitRequest) error {
 	ret := _m.Called(ctx, request)

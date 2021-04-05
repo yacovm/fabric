@@ -26,6 +26,8 @@ message StepRequest {
         ConsensusRequest consensus_request = 1;
         // submit_request is a relay of a transaction.
         SubmitRequest submit_request = 2;
+        // heartbeat_request is a heartbeat.
+        HeartbeatRequest heartbeat_request = 3;
     }
 }
 
@@ -63,4 +65,9 @@ message SubmitResponse {
     common.Status status = 2;
     // Info string which may contain additional information about the returned status.
     string info = 3;
+}
+
+// HeartbeatRequest is a heartbeat sent to a committee member.
+message HeartbeatRequest {
+    string channel = 1;
 }
