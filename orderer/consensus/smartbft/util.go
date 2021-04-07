@@ -11,11 +11,13 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
+	"math/big"
 	"sort"
 	"time"
 
@@ -586,4 +588,52 @@ func (r *PRG) Read(p []byte) (n int, err error) {
 	n = copy(p, r.buffer)
 	r.buffer = r.buffer[n:]
 	return n, nil
+}
+
+func ProposalToBlock(proposal types.Proposal) (*common.Block, error) {
+	// initialize block with empty fields
+	block := &common.Block{
+		Data:     &common.BlockData{},
+		Metadata: &common.BlockMetadata{},
+	}
+
+	if len(proposal.Header) == 0 {
+		return nil, errors.New("proposal header cannot be nil")
+	}
+
+	hdr := &asn1Header{}
+
+	if _, err := asn1.Unmarshal(proposal.Header, hdr); err != nil {
+		return nil, errors.Wrap(err, "bad header")
+	}
+
+	block.Header = &common.BlockHeader{
+		Number:       hdr.Number.Uint64(),
+		PreviousHash: hdr.PreviousHash,
+		DataHash:     hdr.DataHash,
+	}
+
+	if len(proposal.Payload) == 0 {
+		return nil, errors.New("proposal payload cannot be nil")
+	}
+
+	tuple := &ByteBufferTuple{}
+	if err := tuple.FromBytes(proposal.Payload); err != nil {
+		return nil, errors.Wrap(err, "bad payload and metadata tuple")
+	}
+
+	if err := proto.Unmarshal(tuple.A, block.Data); err != nil {
+		return nil, errors.Wrap(err, "bad payload")
+	}
+
+	if err := proto.Unmarshal(tuple.B, block.Metadata); err != nil {
+		return nil, errors.Wrap(err, "bad metadata")
+	}
+	return block, nil
+}
+
+type asn1Header struct {
+	Number       *big.Int
+	PreviousHash []byte
+	DataHash     []byte
 }
