@@ -433,6 +433,7 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 		}
 
 		sigs = append(sigs, &common.MetadataSignature{
+			CommitteeAuxiliaryInput: sig.CommitteeAuxiliaryInput,
 			AuxiliaryInput: sig.AuxiliaryInput,
 			Signature:      s.Value,
 			// We do not put a signature header when we commit the block.

@@ -81,6 +81,7 @@ message MetadataSignature {
     uint64 signer_id = 3;
     bytes nonce = 4;
     bytes auxiliary_input = 5;
+    bytes committee_auxiliary_input = 6;
 }
 
 message Header {

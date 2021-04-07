@@ -366,7 +366,8 @@ func SignatureSetFromBlock(block *common.Block, id2identities map[uint64][]byte)
 			&common.SignedData{
 				Identity: identity,
 				Data: util.ConcatenateBytes(metadata.Value,
-					metadataSignature.SignatureHeader, block.Header.Bytes(), metadataSignature.AuxiliaryInput),
+					metadataSignature.SignatureHeader, block.Header.Bytes(),
+					metadataSignature.AuxiliaryInput, metadataSignature.CommitteeAuxiliaryInput),
 				Signature: metadataSignature.Signature,
 			},
 		)

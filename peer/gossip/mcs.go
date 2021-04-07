@@ -195,11 +195,12 @@ func (s *MSPMessageCryptoService) verifyHeaderWithMetadata(channelID string, hea
 			return fmt.Errorf("Failed unmarshalling signature header for block with id [%d] on channel [%s]: [%s]", header.Number, channelID, err)
 		}
 		aux := metadataSignature.AuxiliaryInput
+		committeeAux := metadataSignature.CommitteeAuxiliaryInput
 		signatureSet = append(
 			signatureSet,
 			&pcommon.SignedData{
 				Identity:  shdr.Creator,
-				Data:      util.ConcatenateBytes(metadata.Value, metadataSignature.SignatureHeader, header.Bytes(), aux),
+				Data:      util.ConcatenateBytes(metadata.Value, metadataSignature.SignatureHeader, header.Bytes(), aux, committeeAux),
 				Signature: metadataSignature.Signature,
 			},
 		)
