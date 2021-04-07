@@ -13,11 +13,11 @@ import (
 )
 
 type Signature struct {
-	Nonce                []byte
-	SignatureHeader      []byte
-	BlockHeader          []byte
-	OrdererBlockMetadata []byte
-	AuxiliaryInput       []byte
+	Nonce                   []byte
+	SignatureHeader         []byte
+	BlockHeader             []byte
+	OrdererBlockMetadata    []byte
+	AuxiliaryInput          []byte
 	CommitteeAuxiliaryInput []byte
 }
 
