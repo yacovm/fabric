@@ -183,9 +183,6 @@ func NewChain(
 	logger.Infof("Initialized committee selection with for %d with public key %s", selfID, base64.StdEncoding.EncodeToString(publicKey))
 	logger.Infof("Nodes: %v", nodes)
 
-	c.verifier = buildVerifier(cv, c.RuntimeConfig, support, requestInspector, policyManager)
-	c.consensus = bftSmartConsensusBuild(c, requestInspector)
-
 	// TODO setup heartbeat monitor with the right config
 	heartbeatTicker := time.NewTicker(1 * time.Second)
 	heartbeatTimeout := 10 * time.Second
@@ -206,6 +203,9 @@ func NewChain(
 		}
 	}
 	c.heartbeatMonitor = NewHeartbeatMonitor(c.consensus.Comm.(MessageSender), heartbeatTicker.C, logger, heartbeatTimeout, heartbeatCount, role, senders, receivers)
+
+	c.verifier = buildVerifier(cv, c.RuntimeConfig, support, requestInspector, policyManager)
+	c.consensus = bftSmartConsensusBuild(c, requestInspector)
 
 	// Setup communication with list of remotes notes for the new channel
 	c.Comm.Configure(c.support.ChainID(), rtc.RemoteNodes)
@@ -299,6 +299,7 @@ func bftSmartConsensusBuild(
 
 				return c.RuntimeConfig.Load().(RuntimeConfig).LastConfigBlock.Header.Number
 			},
+			HeartbeatMonitor: c.heartbeatMonitor,
 		},
 		Metadata:          latestMetadata,
 		WAL:               consensusWAL,
@@ -470,10 +471,6 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 		c.support.WriteConfigBlock(block, nil)
 	} else {
 		c.support.WriteBlock(block, nil)
-	}
-
-	if c.Config.SelfID%2 != 0 {
-		c.Logger.Infof("The heartbeat monitor of node %d returned these suspects %v", c.Config.SelfID, c.heartbeatMonitor.GetSuspects()) // TODO actually use suspects
 	}
 
 	// TODO: call c.cs.Process() with the commitment from the block

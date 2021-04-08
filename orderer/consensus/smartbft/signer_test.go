@@ -24,10 +24,13 @@ import (
 
 func TestSigner(t *testing.T) {
 	ss := &mocks.SignerSerializer{}
+	monitor := &mocks.HeartbeatSuspects{}
+	monitor.On("GetSuspects").Return(nil)
 	s := &smartbft.Signer{
 		SignerSerializer: ss,
 		Logger:           flogging.MustGetLogger("test"),
 		ID:               3,
+		HeartbeatMonitor: monitor,
 	}
 
 	t.Run("signing fails", func(t *testing.T) {
@@ -50,7 +53,8 @@ func TestSignProposal(t *testing.T) {
 	ss.On("NewSignatureHeader", mock.Anything).Return(&common.SignatureHeader{
 		Creator: []byte{0, 2, 4, 6},
 	}, nil)
-
+	monitor := &mocks.HeartbeatSuspects{}
+	monitor.On("GetSuspects").Return(nil)
 	s := &smartbft.Signer{
 		SignerSerializer: ss,
 		Logger:           flogging.MustGetLogger("test"),
@@ -58,6 +62,7 @@ func TestSignProposal(t *testing.T) {
 		LastConfigBlockNum: func(_ *common.Block) uint64 {
 			return 10
 		},
+		HeartbeatMonitor: monitor,
 	}
 
 	lastBlock := makeNonConfigBlock(19, 10)
@@ -110,11 +115,13 @@ func TestSignBadProposal(t *testing.T) {
 	ss := &mocks.SignerSerializer{}
 	ss.On("Sign", mock.Anything).Return([]byte{1, 2, 3}, nil).Once()
 	ss.On("Serialize", mock.Anything).Return([]byte{0, 2, 4, 6}, nil)
-
+	monitor := &mocks.HeartbeatSuspects{}
+	monitor.On("GetSuspects").Return(nil)
 	s := &smartbft.Signer{
 		SignerSerializer: ss,
 		Logger:           flogging.MustGetLogger("test"),
 		ID:               3,
+		HeartbeatMonitor: monitor,
 	}
 
 	f := func() {

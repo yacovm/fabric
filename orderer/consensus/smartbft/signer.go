@@ -10,6 +10,7 @@ import (
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/hyperledger/fabric/common/crypto"
 	"github.com/hyperledger/fabric/protos/common"
+	"github.com/hyperledger/fabric/protos/orderer/smartbft"
 	"github.com/hyperledger/fabric/protos/utils"
 )
 
@@ -20,11 +21,18 @@ type SignerSerializer interface {
 	crypto.IdentitySerializer
 }
 
+//go:generate mockery -dir . -name HeartbeatSuspects -case underscore -output ./mocks/
+
+type HeartbeatSuspects interface {
+	GetSuspects() []uint64
+}
+
 type Signer struct {
 	ID                 uint64
 	SignerSerializer   SignerSerializer
 	Logger             Logger
 	LastConfigBlockNum func(*common.Block) uint64
+	HeartbeatMonitor   HeartbeatSuspects
 }
 
 func (s *Signer) Sign(msg []byte) []byte {
@@ -45,11 +53,24 @@ func (s *Signer) SignProposal(proposal types.Proposal, auxiliaryInput []byte) *t
 
 	obm := utils.GetOrdererblockMetadataOrPanic(block)
 
+	var suspects []uint64
+	if s.ID%2 != 0 { // TODO get suspects from the committee nodes
+		suspects = s.HeartbeatMonitor.GetSuspects()
+	}
+	committeeFeedback := &smartbft.CommitteeFeedback{
+		Suspects: suspects,
+	}
+	aux, err := utils.Marshal(committeeFeedback)
+	if err != nil {
+		s.Logger.Panicf("Failed marshaling committee feedback: %v", err)
+	}
+
 	sig := Signature{
-		AuxiliaryInput:  auxiliaryInput,
-		Nonce:           nonce,
-		BlockHeader:     block.Header.Bytes(),
-		SignatureHeader: utils.MarshalOrPanic(s.newSignatureHeaderOrPanic(nonce)),
+		CommitteeAuxiliaryInput: aux,
+		AuxiliaryInput:          auxiliaryInput,
+		Nonce:                   nonce,
+		BlockHeader:             block.Header.Bytes(),
+		SignatureHeader:         utils.MarshalOrPanic(s.newSignatureHeaderOrPanic(nonce)),
 		OrdererBlockMetadata: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
 			LastConfig:        &common.LastConfig{Index: s.LastConfigBlockNum(block)},
 			ConsenterMetadata: proposal.Metadata,
