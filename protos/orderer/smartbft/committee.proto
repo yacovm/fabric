@@ -15,5 +15,5 @@ package smartbft;
 
 // CommitteeFeedback holds committee related info
 message CommitteeFeedback {
-  repeated uint64 suspects = 1;
+  repeated int32 suspects = 1;
 }

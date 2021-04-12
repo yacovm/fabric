@@ -53,9 +53,12 @@ func (s *Signer) SignProposal(proposal types.Proposal, auxiliaryInput []byte) *t
 
 	obm := utils.GetOrdererblockMetadataOrPanic(block)
 
-	var suspects []uint64
+	var suspects []int32
 	if s.ID%2 != 0 { // TODO get suspects from the committee nodes
-		suspects = s.HeartbeatMonitor.GetSuspects()
+		monitorSuspects := s.HeartbeatMonitor.GetSuspects()
+		for _, s := range monitorSuspects {
+			suspects = append(suspects, int32(s))
+		}
 	}
 	committeeFeedback := &smartbft.CommitteeFeedback{
 		Suspects: suspects,

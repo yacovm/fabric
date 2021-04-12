@@ -183,6 +183,9 @@ func NewChain(
 	logger.Infof("Initialized committee selection with for %d with public key %s", selfID, base64.StdEncoding.EncodeToString(publicKey))
 	logger.Infof("Nodes: %v", nodes)
 
+	c.verifier = buildVerifier(cv, c.RuntimeConfig, support, requestInspector, policyManager)
+	c.consensus = bftSmartConsensusBuild(c, requestInspector)
+
 	// TODO setup heartbeat monitor with the right config
 	heartbeatTicker := time.NewTicker(1 * time.Second)
 	heartbeatTimeout := 10 * time.Second
@@ -204,8 +207,19 @@ func NewChain(
 	}
 	c.heartbeatMonitor = NewHeartbeatMonitor(c.consensus.Comm.(MessageSender), heartbeatTicker.C, logger, heartbeatTimeout, heartbeatCount, role, senders, receivers)
 
-	c.verifier = buildVerifier(cv, c.RuntimeConfig, support, requestInspector, policyManager)
-	c.consensus = bftSmartConsensusBuild(c, requestInspector)
+	c.consensus.Signer = &Signer{
+		ID:               c.Config.SelfID,
+		Logger:           flogging.MustGetLogger("orderer.consensus.smartbft.signer").With(zap.String("channel", c.support.ChainID())),
+		SignerSerializer: c.SignerSerializer,
+		LastConfigBlockNum: func(block *common.Block) uint64 {
+			if isConfigBlock(block) {
+				return block.Header.Number
+			}
+
+			return c.RuntimeConfig.Load().(RuntimeConfig).LastConfigBlock.Header.Number
+		},
+		HeartbeatMonitor: c.heartbeatMonitor,
+	}
 
 	// Setup communication with list of remotes notes for the new channel
 	c.Comm.Configure(c.support.ChainID(), rtc.RemoteNodes)
@@ -288,19 +302,7 @@ func bftSmartConsensusBuild(
 		Config:   c.Config,
 		Logger:   logger,
 		Verifier: c.verifier,
-		Signer: &Signer{
-			ID:               c.Config.SelfID,
-			Logger:           flogging.MustGetLogger("orderer.consensus.smartbft.signer").With(channelDecorator),
-			SignerSerializer: c.SignerSerializer,
-			LastConfigBlockNum: func(block *common.Block) uint64 {
-				if isConfigBlock(block) {
-					return block.Header.Number
-				}
-
-				return c.RuntimeConfig.Load().(RuntimeConfig).LastConfigBlock.Header.Number
-			},
-			HeartbeatMonitor: c.heartbeatMonitor,
-		},
+		// Signer is initialized later (after heartbeat monitor)
 		Metadata:          latestMetadata,
 		WAL:               consensusWAL,
 		WALInitialContent: walInitState, // Read from WAL entries
