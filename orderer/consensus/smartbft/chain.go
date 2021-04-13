@@ -155,33 +155,15 @@ func NewChain(
 
 	c.RuntimeConfig.Store(rtc)
 
-	var nodes committee.Nodes
-	for _, id := range rtc.Nodes {
-		if len(rtc.ID2SelectionPK[id]) == 0 {
-			logger.Warnf("Node %d doesn't have a selection public key", id)
-			continue
-		}
-		pkStr := string(rtc.ID2SelectionPK[id])
-		pubKey, err := base64.StdEncoding.DecodeString(pkStr)
-		if err != nil {
-			logger.Warnf("Node %d's public key %s is not a base64 encoded string: %v", id, pkStr, err)
-			continue
-		}
-		nodes = append(nodes, committee.Node{
-			ID:     int32(id),
-			PubKey: pubKey,
-		})
-	}
-
-	if len(nodes) > 0 {
-		err = committeeSelection.Initialize(int32(selfID), privateKey, nodes)
+	if len(rtc.CommitteeConfig.Nodes) > 0 {
+		err = committeeSelection.Initialize(int32(selfID), privateKey, rtc.CommitteeConfig.Nodes)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed initializing committee selection instance")
 		}
 	}
 
 	logger.Infof("Initialized committee selection with for %d with public key %s", selfID, base64.StdEncoding.EncodeToString(publicKey))
-	logger.Infof("Nodes: %v", nodes)
+	logger.Infof("Nodes: %v", rtc.CommitteeConfig.Nodes)
 
 	c.verifier = buildVerifier(cv, c.RuntimeConfig, support, requestInspector, policyManager)
 	c.consensus = bftSmartConsensusBuild(c, requestInspector)
@@ -198,7 +180,7 @@ func NewChain(
 	}
 	senders := make([]uint64, 0)
 	receivers := make([]uint64, 0)
-	for _, node := range nodes {
+	for _, node := range rtc.CommitteeConfig.Nodes {
 		if node.ID%2 == 0 {
 			senders = append(senders, uint64(node.ID))
 		} else {

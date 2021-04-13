@@ -68,4 +68,27 @@ message Options {
   Rotation leader_rotation = 17;
 
   uint64 decisions_per_leader = 18;
+
+  CommitteeConfig committee_config = 19;
+}
+
+message CommitteeConfig {
+
+  uint32 committee_minimum_lifespan = 1;
+
+  uint64 failed_total_nodes_percentage = 2;
+
+  uint64 inverse_failure_chance = 3;
+
+  repeated int32 mandatory_nodes = 4;
+
+  repeated Weight weights = 5;
+
+  bool disabled = 6;
+
+}
+
+message Weight {
+    int32 id = 1;
+    uint32 weight = 2;
 }
