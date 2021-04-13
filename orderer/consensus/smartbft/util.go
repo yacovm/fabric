@@ -340,7 +340,13 @@ func RemoteNodesFromConfigBlock(block *common.Block, selfID uint64, logger *flog
 			logger.Panicf("Failed to sanitize identity: %v", err)
 		}
 		id2Identities[consenter.ConsenterId] = sanitizedID
-		id2SelectionPKs[consenter.ConsenterId] = consenter.SelectionPk
+
+		if len(consenter.SelectionPk) > 0 {
+			id2SelectionPKs[consenter.ConsenterId] = consenter.SelectionPk
+		} else {
+			logger.Warn("Node %d lacks a committee public key", consenter.ConsenterId)
+		}
+
 		logger.Infof("%s %d ---> %s", bundle.ConfigtxValidator().ChainID(), consenter.ConsenterId, string(consenter.Identity))
 
 		nodeIDs = append(nodeIDs, consenter.ConsenterId)
@@ -411,6 +417,7 @@ type RuntimeConfig struct {
 	Nodes                  []uint64
 	CommitteeMetadata      *CommitteeMetadata
 	CommitteeState         committee.State
+	CommitteeConfig        committee.Config
 }
 
 func (rtc RuntimeConfig) BlockCommitted(block *common.Block) (RuntimeConfig, error) {
@@ -443,6 +450,7 @@ func (rtc RuntimeConfig) BlockCommitted(block *common.Block) (RuntimeConfig, err
 		RemoteNodes:            rtc.RemoteNodes,
 		LastBlock:              block,
 		LastConfigBlock:        rtc.LastConfigBlock,
+		CommitteeConfig:        rtc.CommitteeConfig,
 	}, nil
 }
 
@@ -452,9 +460,14 @@ func (rtc RuntimeConfig) configBlockCommitted(block *common.Block) (RuntimeConfi
 		return rtc, errors.Wrap(err, "remote nodes cannot be computed, rejecting config block")
 	}
 
-	bftConfig, err := configBlockToBFTConfig(rtc.id, block)
+	committeeConfig, bftConfig, err := configBlockToBFTConfig(rtc.id, block)
 	if err != nil {
 		return RuntimeConfig{}, err
+	}
+
+	if committeeConfig == nil {
+		committeeConfig = defaultCommitteeConfig
+		rtc.logger.Infof("Committee config is not defined, using the default committee config %v", committeeConfig)
 	}
 
 	cm, err := committeeMetadataFromBlock(block)
@@ -472,6 +485,7 @@ func (rtc RuntimeConfig) configBlockCommitted(block *common.Block) (RuntimeConfi
 	}
 
 	return RuntimeConfig{
+		CommitteeConfig:        parseCommitteeConfig(nodeConf, committeeConfig, rtc.logger),
 		CommitteeState:         cs,
 		CommitteeMetadata:      cm,
 		BFTConfig:              bftConfig,
@@ -488,6 +502,64 @@ func (rtc RuntimeConfig) configBlockCommitted(block *common.Block) (RuntimeConfi
 	}, nil
 }
 
+func parseCommitteeConfig(nodeConf *nodeConfig, committeeConfig *smartbft.CommitteeConfig, logger Logger) committee.Config {
+	var nodes committee.Nodes
+	for _, n := range nodeConf.nodeIDs {
+		if pk, exists := nodeConf.id2SectionPK[n]; !exists {
+			logger.Warnf("Node %d doesn't have a public key")
+			continue
+		} else {
+			pkStr := string(pk)
+			pubKey, err := base64.StdEncoding.DecodeString(pkStr)
+			if err != nil {
+				logger.Warnf("Node %d's public key %s is not a base64 encoded string: %v", n, pkStr, err)
+				continue
+			}
+			nodes = append(nodes, committee.Node{
+				ID:     int32(n),
+				PubKey: pubKey,
+			})
+		}
+	}
+
+	if committeeConfig.Disabled && len(nodes) > 0 {
+		logger.Warnf("Committee nodes are configured, but committee selection is disabled")
+		nodes = nil
+	}
+
+	var weights []committee.Weight
+	for _, w := range committeeConfig.Weights {
+		if _, exists := nodeConf.id2SectionPK[uint64(w.Id)]; !exists {
+			logger.Warnf("Node %d has a weight but doesn't have a public key or is not a consenter", w.Id)
+			continue
+		}
+		weights = append(weights, committee.Weight{
+			ID:     w.Id,
+			Weight: int32(w.Weight),
+		})
+	}
+
+	var mandatoryNodes []int32
+	for _, n := range committeeConfig.MandatoryNodes {
+
+		if _, exists := nodeConf.id2SectionPK[uint64(n)]; !exists {
+			logger.Warnf("Node %d appears as a mandatory node but doesn't have a public key or is not a consenter", n)
+			continue
+		}
+
+		mandatoryNodes = append(mandatoryNodes, n)
+	}
+
+	return committee.Config{
+		InverseFailureChance:       int64(committeeConfig.InverseFailureChance),
+		FailedTotalNodesPercentage: int64(committeeConfig.FailedTotalNodesPercentage),
+		MinimumLifespan:            int32(committeeConfig.CommitteeMinimumLifespan),
+		Weights:                    weights,
+		MandatoryNodes:             mandatoryNodes,
+		Nodes:                      nodes,
+	}
+}
+
 func committeeMetadataFromBlock(block *common.Block) (*CommitteeMetadata, error) {
 	if block.Header.Number == 0 {
 		return nil, nil
@@ -501,31 +573,33 @@ func committeeMetadataFromBlock(block *common.Block) (*CommitteeMetadata, error)
 	return cm, errors.Wrap(cm.Unmarshal(md), "failed extracting committee metadata")
 }
 
-func configBlockToBFTConfig(selfID uint64, block *common.Block) (types.Configuration, error) {
+func configBlockToBFTConfig(selfID uint64, block *common.Block) (*smartbft.CommitteeConfig, types.Configuration, error) {
 	if block == nil || block.Data == nil || len(block.Data.Data) == 0 {
-		return types.Configuration{}, errors.New("empty block")
+		return nil, types.Configuration{}, errors.New("empty block")
 	}
 
 	env, err := utils2.UnmarshalEnvelope(block.Data.Data[0])
 	if err != nil {
-		return types.Configuration{}, err
+		return nil, types.Configuration{}, err
 	}
 	bundle, err := channelconfig.NewBundleFromEnvelope(env)
 	if err != nil {
-		return types.Configuration{}, err
+		return nil, types.Configuration{}, err
 	}
 
 	oc, ok := bundle.OrdererConfig()
 	if !ok {
-		return types.Configuration{}, errors.New("no orderer config")
+		return nil, types.Configuration{}, errors.New("no orderer config")
 	}
 
 	consensusMD := &smartbft.ConfigMetadata{}
 	if err := proto.Unmarshal(oc.ConsensusMetadata(), consensusMD); err != nil {
-		return types.Configuration{}, err
+		return nil, types.Configuration{}, err
 	}
 
-	return configFromMetadataOptions(selfID, consensusMD.Options)
+	consensusConfig, err := configFromMetadataOptions(selfID, consensusMD.Options)
+
+	return consensusMD.Options.CommitteeConfig, consensusConfig, err
 }
 
 func isConfigBlock(block *common.Block) bool {
@@ -589,6 +663,14 @@ func (r *PRG) Read(p []byte) (n int, err error) {
 	r.buffer = r.buffer[n:]
 	return n, nil
 }
+
+var (
+	defaultCommitteeConfig = &smartbft.CommitteeConfig{
+		FailedTotalNodesPercentage: 20,
+		InverseFailureChance:       1000000,
+		CommitteeMinimumLifespan:   1,
+	}
+)
 
 func ProposalToBlock(proposal types.Proposal) (*common.Block, error) {
 	// initialize block with empty fields
