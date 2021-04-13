@@ -1,0 +1,19 @@
+/*
+
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+
+*/
+
+syntax = "proto3";
+
+option go_package = "github.com/hyperledger/fabric/protos/orderer/smartbft";
+option java_package = "org.hyperledger.fabric.protos.orderer.smartbft";
+
+package smartbft;
+
+// CommitteeFeedback holds committee related info
+message CommitteeFeedback {
+  repeated int32 suspects = 1;
+}

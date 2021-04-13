@@ -333,7 +333,8 @@ func TestVerifyConsenterSig(t *testing.T) {
 			ss := &mocks.SignerSerializer{}
 			ss.On("Sign", mock.Anything).Return([]byte{1, 2, 3}, nil).Once()
 			ss.On("Serialize", mock.Anything).Return([]byte{0, 2, 4, 6}, nil)
-
+			monitor := &mocks.HeartbeatSuspects{}
+			monitor.On("GetSuspects").Return(nil)
 			s := &smartbft.Signer{
 				LastConfigBlockNum: func(_ *common.Block) uint64 {
 					return lastConfigBlock.Header.Number
@@ -341,6 +342,7 @@ func TestVerifyConsenterSig(t *testing.T) {
 				SignerSerializer: ss,
 				Logger:           flogging.MustGetLogger("test"),
 				ID:               3,
+				HeartbeatMonitor: monitor,
 			}
 
 			rtc := smartbft.RuntimeConfig{

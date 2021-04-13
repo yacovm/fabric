@@ -207,6 +207,20 @@ func NewChain(
 	}
 	c.heartbeatMonitor = NewHeartbeatMonitor(c.consensus.Comm.(MessageSender), heartbeatTicker.C, logger, heartbeatTimeout, heartbeatCount, role, senders, receivers)
 
+	c.consensus.Signer = &Signer{
+		ID:               c.Config.SelfID,
+		Logger:           flogging.MustGetLogger("orderer.consensus.smartbft.signer").With(zap.String("channel", c.support.ChainID())),
+		SignerSerializer: c.SignerSerializer,
+		LastConfigBlockNum: func(block *common.Block) uint64 {
+			if isConfigBlock(block) {
+				return block.Header.Number
+			}
+
+			return c.RuntimeConfig.Load().(RuntimeConfig).LastConfigBlock.Header.Number
+		},
+		HeartbeatMonitor: c.heartbeatMonitor,
+	}
+
 	// Setup communication with list of remotes notes for the new channel
 	c.Comm.Configure(c.support.ChainID(), rtc.RemoteNodes)
 
@@ -288,18 +302,7 @@ func bftSmartConsensusBuild(
 		Config:   c.Config,
 		Logger:   logger,
 		Verifier: c.verifier,
-		Signer: &Signer{
-			ID:               c.Config.SelfID,
-			Logger:           flogging.MustGetLogger("orderer.consensus.smartbft.signer").With(channelDecorator),
-			SignerSerializer: c.SignerSerializer,
-			LastConfigBlockNum: func(block *common.Block) uint64 {
-				if isConfigBlock(block) {
-					return block.Header.Number
-				}
-
-				return c.RuntimeConfig.Load().(RuntimeConfig).LastConfigBlock.Header.Number
-			},
-		},
+		// Signer is initialized later (after heartbeat monitor)
 		Metadata:          latestMetadata,
 		WAL:               consensusWAL,
 		WALInitialContent: walInitState, // Read from WAL entries
@@ -470,10 +473,6 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 		c.support.WriteConfigBlock(block, nil)
 	} else {
 		c.support.WriteBlock(block, nil)
-	}
-
-	if c.Config.SelfID%2 != 0 {
-		c.Logger.Infof("The heartbeat monitor of node %d returned these suspects %v", c.Config.SelfID, c.heartbeatMonitor.GetSuspects()) // TODO actually use suspects
 	}
 
 	// TODO: call c.cs.Process() with the commitment from the block

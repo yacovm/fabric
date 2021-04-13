@@ -185,5 +185,6 @@ func (hm *HeartbeatMonitor) GetSuspects() []uint64 {
 			suspects = append(suspects, hm.senders[i])
 		}
 	}
+	hm.logger.Infof("The suspects are %v", suspects)
 	return suspects
 }
