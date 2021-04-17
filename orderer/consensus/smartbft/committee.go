@@ -8,14 +8,49 @@ package smartbft
 
 import (
 	"encoding/asn1"
+	"encoding/base64"
+	"math"
+	"runtime/debug"
+	"sync"
+
+	"github.com/hyperledger/fabric/orderer/common/cluster"
+
+	cs "github.com/SmartBFT-Go/randomcommittees"
+	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
+	"github.com/golang/protobuf/proto"
+	"github.com/hyperledger/fabric/common/flogging"
+	"github.com/hyperledger/fabric/protos/common"
+	"github.com/hyperledger/fabric/protos/orderer/smartbft"
+	"github.com/pkg/errors"
 )
 
+// CommitteeMetadata encodes committee metadata
+// for a block.
 type CommitteeMetadata struct {
-	StateBlockNumber   uint64
-	State              []byte
-	Committers         []int32
-	ExpectedCommitters int
-	CommitteeID        int32
+	State            []byte          // State of this current committee.
+	Committers       []int32         // The identifiers of who committed in this committee
+	FinalStateIndex  int64           // The block number of the last finalized state that was used to pick this committee
+	CommitteeShiftAt int64           // The block number that contains reconstruction shares that reveal this committee
+	CommitteeAtShift committee.Nodes // The committee at the time of the shift to this committee
+	GenesisConfigAt  int64           // The block number of the first ever committee instance
+}
+
+func (cm *CommitteeMetadata) committeeState(oldState committee.State) (committee.State, error) {
+	var rawCommitteeState []byte
+	if cm != nil {
+		rawCommitteeState = cm.State
+	}
+
+	// If our state is not zero, it means we have some new commitments.
+	// Otherwise, our state may be zero.
+	// Then, we are either in a new committee or we are still in the current committee.
+	// If we're in the current committee, we shouldn't override the state.
+	// If this is a new committee we need to nil out the state.
+	if len(rawCommitteeState) > 0 || (cm != nil && len(cm.Committers) == 0) {
+		return cs.StateFromBytes(rawCommitteeState)
+	} else {
+		return oldState, nil
+	}
 }
 
 func (cm *CommitteeMetadata) committed(id int32) bool {
@@ -27,14 +62,23 @@ func (cm *CommitteeMetadata) committed(id int32) bool {
 	return false
 }
 
-func (cm *CommitteeMetadata) shouldCommit(id int32) bool {
+func (cm *CommitteeMetadata) shouldCommit(id int32, expectedCommitters int, logger committee.Logger) bool {
 	if cm == nil {
+		logger.Debugf("committee metadata is nil")
+		return true
+	}
+	if len(cm.Committers) >= expectedCommitters {
+		logger.Debugf("We have %d committers and %d are sufficient", len(cm.Committers), expectedCommitters)
 		return false
 	}
-	if len(cm.Committers) >= cm.ExpectedCommitters {
-		return false
+	logger.Debugf("We have %d committers and we need %d in total", len(cm.Committers), expectedCommitters)
+	didNotCommit := !cm.committed(id)
+	if didNotCommit {
+		logger.Debugf("%d has not committed yet", id)
+		return true
 	}
-	return !cm.committed(id)
+	logger.Debugf("%d has already committed", id)
+	return false
 }
 
 func (cm *CommitteeMetadata) Unmarshal(bytes []byte) error {
@@ -46,7 +90,7 @@ func (cm *CommitteeMetadata) Unmarshal(bytes []byte) error {
 }
 
 func (cm *CommitteeMetadata) Marshal() []byte {
-	if cm == nil || (cm.CommitteeID == 0 && len(cm.Committers) == 0 && cm.StateBlockNumber == 0 && len(cm.State) == 0) {
+	if cm == nil || (len(cm.Committers) == 0 && len(cm.State) == 0) {
 		return nil
 	}
 	bytes, err := asn1.Marshal(*cm)
@@ -54,4 +98,346 @@ func (cm *CommitteeMetadata) Marshal() []byte {
 		panic(err)
 	}
 	return bytes
+}
+
+type CommitteeTracker struct {
+	lock                sync.RWMutex
+	privateKey          committee.PrivateKey
+	self                int32
+	ledger              Ledger
+	logger              *flogging.FabricLogger
+	cachedLastCommittee committee.Nodes
+	genesisConfigAt     int64
+}
+
+func (ct *CommitteeTracker) CurrentCommittee() committee.Nodes {
+	cr := &CommitteeRetriever{
+		privateKey: ct.privateKey,
+		ledger:     ct.ledger,
+		self:       ct.self,
+		logger:     ct.logger,
+	}
+
+	committee, err := cr.CurrentCommittee()
+	if err != nil {
+		ct.logger.Panicf("Failed determining current committee: %v\n%s", err, debug.Stack())
+	}
+
+	return committee
+
+	return committee
+}
+
+func (ct *CommitteeTracker) MaybeCommitteeChanged(metadata *CommitteeMetadata) {
+	if metadata == nil {
+		return
+	}
+
+	if ct.genesisConfigAt == 0 {
+		ct.genesisConfigAt = metadata.GenesisConfigAt
+		return
+	}
+
+	if len(metadata.CommitteeAtShift) > 0 {
+		ct.lock.Lock()
+		ct.cachedLastCommittee = nil
+		ct.lock.Unlock()
+	}
+}
+
+// CommitteeRetriever retrieves the committee.
+type CommitteeRetriever struct {
+	self       int32
+	privateKey committee.PrivateKey
+	ledger     Ledger
+	logger     *flogging.FabricLogger
+}
+
+func (cr *CommitteeRetriever) CurrentState() committee.State {
+	lastBlock := LastBlockFromLedgerOrPanic(cr.ledger, cr.logger)
+	md, err := committeeMetadataFromBlock(lastBlock)
+	if err != nil {
+		cr.logger.Panicf("Failed extracting committee metadata from block %d: %v", lastBlock.Header.Number, err)
+	}
+
+	emptyState, err := cs.StateFromBytes(nil)
+	if err != nil {
+		cr.logger.Panicf("Failed initializing empty state: %v", err)
+	}
+
+	if md == nil {
+		cr.logger.Debugf("Committee metadata of current block is nil, returning an empty state")
+		return emptyState
+	}
+
+	var rawState []byte
+	if len(md.State) > 0 {
+		cr.logger.Debugf("Current block(%d) contains %d bytes of state", lastBlock.Header.Number, len(md.State))
+		rawState = md.State
+	} else if md.FinalStateIndex > md.CommitteeShiftAt {
+		cr.logger.Debugf("Current block(%d) has no state but its final state index (%d) is later than its last committee shift index (%d),"+
+			"retrieving the state from that block", lastBlock.Header.Number, md.FinalStateIndex, md.CommitteeShiftAt)
+		block := cr.ledger.Block(uint64(md.FinalStateIndex))
+		md, err := committeeMetadataFromBlock(block)
+		if err != nil {
+			cr.logger.Panicf("Failed extracting committee metadata from block %d: %v", block.Header.Number, err)
+		}
+		rawState = md.State
+	}
+
+	nonEmptyState, err := cs.StateFromBytes(rawState)
+	if err != nil {
+		cr.logger.Panicf("Failed initializing state: %v", err)
+	}
+
+	return nonEmptyState
+}
+
+// CurrentCommittee returns the current nodes of the committee,
+// and the latest state of the committee.
+// In case the committee selection is disabled, it returns an empty slice.
+func (cr *CommitteeRetriever) CurrentCommittee() (committee.Nodes, error) {
+	lastBlock := LastBlockFromLedgerOrPanic(cr.ledger, cr.logger)
+	lastConfigBlock := LastConfigBlockFromLedgerOrPanic(cr.ledger, cr.logger)
+	cr.logger.Debugf("Requesting committee for block %d where the latest config block is %d", lastBlock.Header.Number+1, lastConfigBlock.Header.Number)
+	committeeMetadataOfLastBlock, err := committeeMetadataFromBlock(lastBlock)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed extracting committee metadata from latest block")
+	}
+
+	config, err := consensusMDFromBlock(lastConfigBlock)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed extracting consensus config from latest config block")
+	}
+
+	nodeConf, err := RemoteNodesFromConfigBlock(lastConfigBlock, 0, cr.logger)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed extracting node config from latest config block")
+	}
+
+	noCommitteeSelection, err := cr.disabled(config, nodeConf)
+	if err != nil {
+		return nil, err
+	}
+
+	if noCommitteeSelection {
+		return nil, nil
+	}
+
+	if committeeMetadataOfLastBlock == nil {
+		genesisCommittee, err := cr.genesisCommittee(int64(lastBlock.Header.Number))
+		cr.logger.Debugf("Committee metadata of last block (%d) not defined yet, this is either a new channel or an upgrade from "+
+			"an older version, returning all candidate nodes, returning %v", lastBlock.Header.Number, genesisCommittee)
+		return genesisCommittee, err
+	}
+
+	reconstructionSharesBlock := cr.ledger.Block(uint64(committeeMetadataOfLastBlock.CommitteeShiftAt))
+
+	committeeMD, err := committeeMetadataFromBlock(reconstructionSharesBlock)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed extracting committee metadata from latest reconstruction share block")
+	}
+
+	// It might be that we have some metadata but we're still in the first committee ever,
+	// which includes all nodes.
+	// We can identify that by looking at the CommitteeShiftAt which will be zero.
+	if committeeMD == nil {
+		genesisCommittee, err := cr.genesisCommittee(committeeMetadataOfLastBlock.GenesisConfigAt)
+		cr.logger.Debugf("This is the first committee, returning %v", genesisCommittee)
+		return genesisCommittee, err
+	}
+
+	// Else, we have some committee metadata defined.
+	// We need to figure what is the latest state that was used
+	// to pick the committee.
+	// This resides in the FinalStateIndex.
+	// Afterwards we need to fetch the block where we have reconstruction shares.
+	cr.logger.Debugf("Will reconstruct the committee for block %d based on state from block %d and reconstruction shares "+
+		"from block %d", lastBlock.Header.Number+1, committeeMD.FinalStateIndex, committeeMD.CommitteeShiftAt)
+
+	signatureMetadata := &common.Metadata{}
+	if err := proto.Unmarshal(reconstructionSharesBlock.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], signatureMetadata); err != nil {
+		return nil, errors.Wrapf(err, "failed unmarshaling signatures from block %d", committeeMD.CommitteeShiftAt)
+	}
+
+	var reconShares []committee.ReconShare
+	for _, sigMD := range signatureMetadata.Signatures {
+		cf := &smartbft.CommitteeFeedback{}
+		if err := proto.Unmarshal(sigMD.CommitteeAuxiliaryInput, cf); err != nil {
+			return nil, errors.Wrap(err, "failed unmarshaling committee auxiliary input in signature")
+		}
+
+		for _, rawReconshare := range cf.Reconshares {
+			reconShare := committee.ReconShare{}
+			if _, err := asn1.Unmarshal(rawReconshare, &reconShare); err != nil {
+				return nil, errors.Wrapf(err, "failed unmarshaling reconshare %s", base64.StdEncoding.EncodeToString(rawReconshare))
+			}
+			reconShares = append(reconShares, reconShare)
+		}
+	}
+
+	consensusMD, err := consensusMDFromBlock(lastConfigBlock)
+	if err != nil {
+		return nil, err
+	}
+
+	var committeeConfig *smartbft.CommitteeConfig
+	if consensusMD.Options != nil {
+		committeeConfig = consensusMD.Options.CommitteeConfig
+	}
+
+	if committeeConfig == nil {
+		committeeConfig = defaultCommitteeConfig
+	}
+
+	cfg := parseCommitteeConfig(nodeConf, committeeConfig, cr.logger)
+
+	committeeSelection := cs.NewCommitteeSelection(cr.logger)
+	cr.logger.Infof("Determining committee for block %d with nodes %v", lastBlock.Header.Number+1, committeeMD.CommitteeAtShift.IDs())
+	if err := committeeSelection.Initialize(math.MaxInt32, cr.privateKey, committeeMD.CommitteeAtShift); err != nil {
+		return nil, errors.Wrap(err, "failed initializing committee")
+	}
+	currentCommitteeState, err := cr.latestState(committeeMD.FinalStateIndex)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed fetching latest state from block %d", committeeMetadataOfLastBlock.CommitteeShiftAt)
+	}
+	feedback, _, err := committeeSelection.Process(currentCommitteeState, committee.Input{
+		NextConfig:  cfg,
+		ReconShares: reconShares,
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed deciding the next committee")
+	}
+
+	if len(feedback.NextCommittee) == 0 {
+		return nil, errors.Errorf("next committee is an empty set")
+	}
+
+	id2pubKey := make(map[int32][]byte)
+
+	for _, node := range cfg.Nodes {
+		id2pubKey[node.ID] = node.PubKey
+	}
+
+	var nodes committee.Nodes
+	for _, id := range feedback.NextCommittee {
+		nodes = append(nodes, committee.Node{
+			ID:     id,
+			PubKey: id2pubKey[id],
+		})
+	}
+
+	cr.logger.Debugf("Returning %v", nodes.IDs())
+	return nodes, nil
+
+}
+
+func (cr *CommitteeRetriever) genesisCommittee(genesisConfig int64) (committee.Nodes, error) {
+	cr.logger.Infof("Retrieving committee of genesis config at block %d", genesisConfig)
+	block := cr.ledger.Block(uint64(genesisConfig))
+	if block == nil {
+		cr.logger.Panicf("Failed retrieving last block")
+	}
+	lastConfigBlock, err := cluster.LastConfigBlock(block, cr.ledger)
+	if err != nil {
+		return nil, err
+	}
+	nodeConf, err := RemoteNodesFromConfigBlock(lastConfigBlock, 0, cr.logger)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed extracting node config from latest config block")
+	}
+	return nodeConf.Nodes(cr.logger), nil
+}
+
+func (cr *CommitteeRetriever) latestState(finalStateIndex int64) (committee.State, error) {
+	lastStateBlock := cr.ledger.Block(uint64(finalStateIndex))
+
+	committeeMD, err := committeeMetadataFromBlock(lastStateBlock)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed extracting committee metadata from latest state block")
+	}
+
+	var rawState []byte
+
+	if committeeMD != nil {
+		rawState = committeeMD.State
+	}
+
+	state, err := cs.StateFromBytes(rawState)
+	if err != nil {
+		cr.logger.Warnf("Found invalid state: %s", base64.StdEncoding.EncodeToString(committeeMD.State))
+		return nil, errors.Wrap(err, "failed initializing committee state")
+	}
+	return state, nil
+}
+
+func (cr *CommitteeRetriever) disabled(config *smartbft.ConfigMetadata, nodeConf *nodeConfig) (bool, error) {
+	if config.Options.CommitteeConfig == nil {
+		cr.logger.Debugf("Committee selection is not set, returning an empty committee")
+		return true, nil
+	}
+
+	if config.Options.CommitteeConfig.Disabled {
+		cr.logger.Debugf("Committee selection is disabled, returning an empty committee")
+		return true, nil
+	}
+
+	if len(nodeConf.id2SectionPK) < 4 {
+		cr.logger.Debugf("We only have %d selection public keys defined, returning an empty committee")
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func CommitteeMetadataForProposal(
+	logger *flogging.FabricLogger,
+	commitment, newState []byte,
+	prevCommitteeMD *CommitteeMetadata,
+	blockNum int64,
+	expectedCommitters int,
+	committeeMinimumLifespan uint32,
+	currentCommittee committee.Nodes,
+	id int32,
+) *CommitteeMetadata {
+	committeeMD := &CommitteeMetadata{}
+
+	if prevCommitteeMD == nil {
+		committeeMD.GenesisConfigAt = blockNum - 1
+	}
+
+	if prevCommitteeMD != nil {
+		committeeMD.Committers = make([]int32, len(prevCommitteeMD.Committers))
+		copy(committeeMD.Committers, prevCommitteeMD.Committers)
+		committeeMD.CommitteeShiftAt = prevCommitteeMD.CommitteeShiftAt
+		committeeMD.FinalStateIndex = prevCommitteeMD.FinalStateIndex
+
+		// If we shifted committees in the previous block, this is a new committee.
+		// So wipe out all the previous committers.
+		if committeeMD.CommitteeShiftAt == blockNum-1 {
+			committeeMD.Committers = nil
+		}
+	}
+
+	// We are committing
+	if len(commitment) > 0 && committeeMD.shouldCommit(id, expectedCommitters, logger) {
+		committeeMD.State = newState
+		committeeMD.Committers = append(committeeMD.Committers, id)
+		if len(committeeMD.Committers) == expectedCommitters {
+			committeeMD.FinalStateIndex = blockNum
+		}
+	}
+
+	finalStateIndex := committeeMD.FinalStateIndex
+
+	// This might be the last block of the committee, so we need to prepare for the committee change.
+	// We encode the block number where the committee ends, and the committee itself at that point.
+	// This, alongside the FinalStateIndex and reconstruction shares collected from the signatures
+	// at the block commit, is enough information for the committee selection library deduce the next committee.
+	if finalStateIndex > 0 && blockNum-finalStateIndex > int64(committeeMinimumLifespan) {
+		committeeMD.CommitteeShiftAt = blockNum
+		committeeMD.CommitteeAtShift = currentCommittee
+	}
+
+	return committeeMD
 }

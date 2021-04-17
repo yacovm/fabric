@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
+
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
 	"github.com/golang/protobuf/proto"
@@ -355,6 +357,8 @@ func TestVerifyConsenterSig(t *testing.T) {
 			runtimeConfig.Store(rtc)
 
 			assembler := &smartbft.Assembler{
+				CurrentCommittee: func() committee.Nodes { return nil },
+				MaybeCommit:      func() ([]byte, []byte) { return nil, nil },
 				VerificationSeq: func() uint64 {
 					return testCase.verificationSequence
 				},
@@ -375,6 +379,9 @@ func TestVerifyConsenterSig(t *testing.T) {
 			}
 
 			v := &smartbft.Verifier{
+				VerifyReconShares: func(reconShares []committee.ReconShare) error {
+					return nil
+				},
 				RuntimeConfig:         runtimeConfig,
 				Logger:                logger,
 				Ledger:                ledger,
@@ -538,15 +545,18 @@ func TestVerifyProposal(t *testing.T) {
 		t.Run(testCase.description, func(t *testing.T) {
 			runtimeConfig := &atomic.Value{}
 			rtc := smartbft.RuntimeConfig{
-				LastCommittedBlockHash: lastHash,
-				LastBlock:              testCase.lastBlock,
-				LastConfigBlock:        testCase.lastConfigBlock,
+				OnCommitteeMetadataUpdate: func(_ *smartbft.CommitteeMetadata) {},
+				LastCommittedBlockHash:    lastHash,
+				LastBlock:                 testCase.lastBlock,
+				LastConfigBlock:           testCase.lastConfigBlock,
 			}
 
 			runtimeConfig.Store(rtc)
 
 			assembler := &smartbft.Assembler{
-				RuntimeConfig: &atomic.Value{},
+				CurrentCommittee: func() committee.Nodes { return nil },
+				MaybeCommit:      func() ([]byte, []byte) { return nil, nil },
+				RuntimeConfig:    &atomic.Value{},
 				VerificationSeq: func() uint64 {
 					return testCase.verificationSequence
 				},

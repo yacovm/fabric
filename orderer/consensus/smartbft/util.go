@@ -21,7 +21,6 @@ import (
 	"sort"
 	"time"
 
-	cs2 "github.com/SmartBFT-Go/randomcommittees"
 	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
 
 	"github.com/SmartBFT-Go/consensus/pkg/types"
@@ -342,7 +341,13 @@ func RemoteNodesFromConfigBlock(block *common.Block, selfID uint64, logger *flog
 		id2Identities[consenter.ConsenterId] = sanitizedID
 
 		if len(consenter.SelectionPk) > 0 {
-			id2SelectionPKs[consenter.ConsenterId] = consenter.SelectionPk
+			pkStr := string(consenter.SelectionPk)
+			pubKey, err := base64.StdEncoding.DecodeString(pkStr)
+			if err != nil {
+				logger.Warnf("Node %d's public key %s is not a base64 encoded string: %v", consenter.ConsenterId, pkStr, err)
+				continue
+			}
+			id2SelectionPKs[consenter.ConsenterId] = pubKey
 		} else {
 			logger.Warn("Node %d lacks a committee public key", consenter.ConsenterId)
 		}
@@ -401,23 +406,40 @@ type nodeConfig struct {
 	nodeIDs       []uint64
 }
 
+func (nc *nodeConfig) Nodes(logger Logger) committee.Nodes {
+	var nodes committee.Nodes
+	for _, n := range nc.nodeIDs {
+		if pk, exists := nc.id2SectionPK[n]; !exists {
+			logger.Warnf("Node %d doesn't have a public key")
+			continue
+		} else {
+			nodes = append(nodes, committee.Node{
+				ID:     int32(n),
+				PubKey: pk,
+			})
+		}
+	}
+
+	return nodes
+}
+
 // RuntimeConfig defines the configuration of the consensus
 // that is related to runtime.
 type RuntimeConfig struct {
-	BFTConfig              types.Configuration
-	isConfig               bool
-	logger                 *flogging.FabricLogger
-	id                     uint64
-	LastCommittedBlockHash string
-	RemoteNodes            []cluster.RemoteNode
-	ID2Identities          NodeIdentitiesByID
-	ID2SelectionPK         NodeIdentitiesByID
-	LastBlock              *common.Block
-	LastConfigBlock        *common.Block
-	Nodes                  []uint64
-	CommitteeMetadata      *CommitteeMetadata
-	CommitteeState         committee.State
-	CommitteeConfig        committee.Config
+	BFTConfig                 types.Configuration
+	isConfig                  bool
+	logger                    *flogging.FabricLogger
+	id                        uint64
+	LastCommittedBlockHash    string
+	RemoteNodes               []cluster.RemoteNode
+	ID2Identities             NodeIdentitiesByID
+	LastBlock                 *common.Block
+	LastConfigBlock           *common.Block
+	Nodes                     []uint64
+	CommitteeMetadata         *CommitteeMetadata
+	OnCommitteeMetadataUpdate func(*CommitteeMetadata)
+	OnCommitteeChange         func()
+	committeeMinimumLifespan  uint32
 }
 
 func (rtc RuntimeConfig) BlockCommitted(block *common.Block) (RuntimeConfig, error) {
@@ -429,28 +451,26 @@ func (rtc RuntimeConfig) BlockCommitted(block *common.Block) (RuntimeConfig, err
 		return RuntimeConfig{}, err
 	}
 
-	var cs committee.State
-	if cm != nil {
-		cs, err = cs2.StateFromBytes(cm.State)
-		if err != nil {
-			return RuntimeConfig{}, err
-		}
+	if cm != nil && cm.CommitteeShiftAt == int64(block.Header.Number) {
+		rtc.OnCommitteeChange()
 	}
 
+	defer rtc.OnCommitteeMetadataUpdate(cm)
+
 	return RuntimeConfig{
-		CommitteeState:         cs,
-		CommitteeMetadata:      cm,
-		BFTConfig:              rtc.BFTConfig,
-		id:                     rtc.id,
-		logger:                 rtc.logger,
-		LastCommittedBlockHash: hex.EncodeToString(block.Header.Hash()),
-		Nodes:                  rtc.Nodes,
-		ID2Identities:          rtc.ID2Identities,
-		ID2SelectionPK:         rtc.ID2SelectionPK,
-		RemoteNodes:            rtc.RemoteNodes,
-		LastBlock:              block,
-		LastConfigBlock:        rtc.LastConfigBlock,
-		CommitteeConfig:        rtc.CommitteeConfig,
+		OnCommitteeChange:         rtc.OnCommitteeChange,
+		CommitteeMetadata:         cm,
+		BFTConfig:                 rtc.BFTConfig,
+		id:                        rtc.id,
+		logger:                    rtc.logger,
+		LastCommittedBlockHash:    hex.EncodeToString(block.Header.Hash()),
+		Nodes:                     rtc.Nodes,
+		ID2Identities:             rtc.ID2Identities,
+		RemoteNodes:               rtc.RemoteNodes,
+		LastBlock:                 block,
+		LastConfigBlock:           rtc.LastConfigBlock,
+		committeeMinimumLifespan:  rtc.committeeMinimumLifespan,
+		OnCommitteeMetadataUpdate: rtc.OnCommitteeMetadataUpdate,
 	}, nil
 }
 
@@ -475,30 +495,27 @@ func (rtc RuntimeConfig) configBlockCommitted(block *common.Block) (RuntimeConfi
 		return RuntimeConfig{}, err
 	}
 
-	var cs committee.State
+	defer rtc.OnCommitteeMetadataUpdate(cm)
 
-	if cm != nil {
-		cs, err = cs2.StateFromBytes(cm.State)
-		if err != nil {
-			return RuntimeConfig{}, err
-		}
+	if cm != nil && cm.CommitteeShiftAt == int64(block.Header.Number) {
+		rtc.OnCommitteeChange()
 	}
 
 	return RuntimeConfig{
-		CommitteeConfig:        parseCommitteeConfig(nodeConf, committeeConfig, rtc.logger),
-		CommitteeState:         cs,
-		CommitteeMetadata:      cm,
-		BFTConfig:              bftConfig,
-		isConfig:               true,
-		id:                     rtc.id,
-		logger:                 rtc.logger,
-		LastCommittedBlockHash: hex.EncodeToString(block.Header.Hash()),
-		Nodes:                  nodeConf.nodeIDs,
-		ID2Identities:          nodeConf.id2Identities,
-		ID2SelectionPK:         nodeConf.id2SectionPK,
-		RemoteNodes:            nodeConf.remoteNodes,
-		LastBlock:              block,
-		LastConfigBlock:        block,
+		OnCommitteeChange:         rtc.OnCommitteeChange,
+		OnCommitteeMetadataUpdate: rtc.OnCommitteeMetadataUpdate,
+		CommitteeMetadata:         cm,
+		BFTConfig:                 bftConfig,
+		isConfig:                  true,
+		id:                        rtc.id,
+		logger:                    rtc.logger,
+		LastCommittedBlockHash:    hex.EncodeToString(block.Header.Hash()),
+		Nodes:                     nodeConf.nodeIDs,
+		ID2Identities:             nodeConf.id2Identities,
+		RemoteNodes:               nodeConf.remoteNodes,
+		LastBlock:                 block,
+		LastConfigBlock:           block,
+		committeeMinimumLifespan:  committeeConfig.CommitteeMinimumLifespan,
 	}, nil
 }
 
@@ -507,17 +524,12 @@ func parseCommitteeConfig(nodeConf *nodeConfig, committeeConfig *smartbft.Commit
 	for _, n := range nodeConf.nodeIDs {
 		if pk, exists := nodeConf.id2SectionPK[n]; !exists {
 			logger.Warnf("Node %d doesn't have a public key")
-			continue
+			nodes = nil
+			break
 		} else {
-			pkStr := string(pk)
-			pubKey, err := base64.StdEncoding.DecodeString(pkStr)
-			if err != nil {
-				logger.Warnf("Node %d's public key %s is not a base64 encoded string: %v", n, pkStr, err)
-				continue
-			}
 			nodes = append(nodes, committee.Node{
 				ID:     int32(n),
-				PubKey: pubKey,
+				PubKey: pk,
 			})
 		}
 	}
@@ -531,7 +543,8 @@ func parseCommitteeConfig(nodeConf *nodeConfig, committeeConfig *smartbft.Commit
 	for _, w := range committeeConfig.Weights {
 		if _, exists := nodeConf.id2SectionPK[uint64(w.Id)]; !exists {
 			logger.Warnf("Node %d has a weight but doesn't have a public key or is not a consenter", w.Id)
-			continue
+			nodes = nil
+			break
 		}
 		weights = append(weights, committee.Weight{
 			ID:     w.Id,
@@ -544,7 +557,8 @@ func parseCommitteeConfig(nodeConf *nodeConfig, committeeConfig *smartbft.Commit
 
 		if _, exists := nodeConf.id2SectionPK[uint64(n)]; !exists {
 			logger.Warnf("Node %d appears as a mandatory node but doesn't have a public key or is not a consenter", n)
-			continue
+			nodes = nil
+			break
 		}
 
 		mandatoryNodes = append(mandatoryNodes, n)
@@ -573,32 +587,45 @@ func committeeMetadataFromBlock(block *common.Block) (*CommitteeMetadata, error)
 	return cm, errors.Wrap(cm.Unmarshal(md), "failed extracting committee metadata")
 }
 
-func configBlockToBFTConfig(selfID uint64, block *common.Block) (*smartbft.CommitteeConfig, types.Configuration, error) {
+func consensusMDFromBlock(block *common.Block) (*smartbft.ConfigMetadata, error) {
 	if block == nil || block.Data == nil || len(block.Data.Data) == 0 {
-		return nil, types.Configuration{}, errors.New("empty block")
+		return nil, errors.New("empty block")
 	}
 
 	env, err := utils2.UnmarshalEnvelope(block.Data.Data[0])
 	if err != nil {
-		return nil, types.Configuration{}, err
+		return nil, err
 	}
 	bundle, err := channelconfig.NewBundleFromEnvelope(env)
 	if err != nil {
-		return nil, types.Configuration{}, err
+		return nil, err
 	}
 
 	oc, ok := bundle.OrdererConfig()
 	if !ok {
-		return nil, types.Configuration{}, errors.New("no orderer config")
+		return nil, errors.New("no orderer config")
 	}
 
 	consensusMD := &smartbft.ConfigMetadata{}
 	if err := proto.Unmarshal(oc.ConsensusMetadata(), consensusMD); err != nil {
-		return nil, types.Configuration{}, err
+		return nil, err
 	}
 
-	consensusConfig, err := configFromMetadataOptions(selfID, consensusMD.Options)
+	if consensusMD.Options != nil {
+		if consensusMD.Options.CommitteeConfig == nil {
+			consensusMD.Options.CommitteeConfig = defaultCommitteeConfig
+		}
+	}
 
+	return consensusMD, nil
+}
+
+func configBlockToBFTConfig(selfID uint64, block *common.Block) (*smartbft.CommitteeConfig, types.Configuration, error) {
+	consensusMD, err := consensusMDFromBlock(block)
+	if err != nil {
+		return nil, types.Configuration{}, err
+	}
+	consensusConfig, err := configFromMetadataOptions(selfID, consensusMD.Options)
 	return consensusMD.Options.CommitteeConfig, consensusConfig, err
 }
 

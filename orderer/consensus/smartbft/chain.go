@@ -69,22 +69,26 @@ type signerSerializer interface {
 // BFTChain implements Chain interface to wire with
 // BFT smart library
 type BFTChain struct {
-	cs               committee.Selection
-	RuntimeConfig    *atomic.Value
-	Channel          string
-	Config           types.Configuration
-	BlockPuller      BlockPuller
-	Comm             cluster.Communicator
-	SignerSerializer signerSerializer
-	PolicyManager    policies.Manager
-	Logger           *flogging.FabricLogger
-	WALDir           string
-	consensus        *smartbft.Consensus
-	support          consensus.ConsenterSupport
-	verifier         *Verifier
-	assembler        *Assembler
-	Metrics          *Metrics
-	heartbeatMonitor *HeartbeatMonitor
+	committeePrivateKey committee.PrivateKey
+	ct                  *CommitteeTracker
+	commitZKP           *atomic.Value
+	cv                  ConfigValidator
+	cs                  committee.Selection
+	RuntimeConfig       *atomic.Value
+	Channel             string
+	Config              types.Configuration
+	BlockPuller         BlockPuller
+	Comm                cluster.Communicator
+	SignerSerializer    signerSerializer
+	PolicyManager       policies.Manager
+	Logger              *flogging.FabricLogger
+	WALDir              string
+	consensus           *smartbft.Consensus
+	support             consensus.ConsenterSupport
+	verifier            *Verifier
+	assembler           *Assembler
+	Metrics             *Metrics
+	heartbeatMonitor    *HeartbeatMonitor
 }
 
 // NewChain creates new BFT Smart chain
@@ -110,39 +114,72 @@ func NewChain(
 
 	logger := flogging.MustGetLogger("orderer.consensus.smartbft.chain").With(zap.String("channel", support.ChainID()))
 
-	committeeSelection := cs.NewCommitteeSelection(logger)
+	committeeLogger := flogging.MustGetLogger("orderer.consensus.smartbft.committee").With(zap.String("channel", support.ChainID()))
+
+	committeeSelection := cs.NewCommitteeSelection(committeeLogger)
 	rndSeed := NewPRG(privateKeyBytesHash)
 	publicKey, privateKey, err := committeeSelection.GenerateKeyPair(rndSeed)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed generating committee selection key pair")
 	}
 
+	commitZKP := &atomic.Value{}
+	commitZKP.Store([]byte{}) // Store an empty slice for type safety
 	c := &BFTChain{
-		cs:               committeeSelection,
-		RuntimeConfig:    &atomic.Value{},
-		Channel:          support.ChainID(),
-		Config:           config,
-		WALDir:           walDir,
-		Comm:             comm,
-		support:          support,
-		SignerSerializer: signerSerializer,
-		PolicyManager:    policyManager,
-		BlockPuller:      blockPuller,
-		Logger:           logger,
+		committeePrivateKey: privateKey,
+		commitZKP:           commitZKP,
+		cv:                  cv,
+		cs:                  committeeSelection,
+		RuntimeConfig:       &atomic.Value{},
+		Channel:             support.ChainID(),
+		Config:              config,
+		WALDir:              walDir,
+		Comm:                comm,
+		support:             support,
+		SignerSerializer:    signerSerializer,
+		PolicyManager:       policyManager,
+		BlockPuller:         blockPuller,
+		Logger:              logger,
 		Metrics: &Metrics{
 			ClusterSize:          metrics.ClusterSize.With("channel", support.ChainID()),
 			CommittedBlockNumber: metrics.CommittedBlockNumber.With("channel", support.ChainID()),
 			IsLeader:             metrics.IsLeader.With("channel", support.ChainID()),
 			LeaderID:             metrics.LeaderID.With("channel", support.ChainID()),
 		},
+		ct: &CommitteeTracker{
+			privateKey: privateKey,
+			logger:     logger,
+			self:       int32(selfID),
+			ledger:     support,
+		},
 	}
 
 	lastBlock := LastBlockFromLedgerOrPanic(support, c.Logger)
 	lastConfigBlock := LastConfigBlockFromLedgerOrPanic(support, c.Logger)
 
+	cr := &CommitteeRetriever{
+		privateKey: privateKey,
+		logger:     logger,
+		self:       int32(selfID),
+		ledger:     support,
+	}
+
+	currentCommittee, err := cr.CurrentCommittee()
+	if err != nil {
+		logger.Errorf("Failed initializing chain: %v", err)
+		return nil, err
+	}
+
 	rtc := RuntimeConfig{
-		logger: logger,
-		id:     selfID,
+		OnCommitteeChange: func() {
+			err = committeeSelection.Initialize(int32(selfID), privateKey, c.ct.CurrentCommittee())
+			if err != nil {
+				logger.Panicf("Failed initializing committee selection library: %v", err)
+			}
+		},
+		OnCommitteeMetadataUpdate: c.ct.MaybeCommitteeChanged,
+		logger:                    logger,
+		id:                        selfID,
 	}
 	rtc, err = rtc.BlockCommitted(lastConfigBlock)
 	if err != nil {
@@ -155,18 +192,19 @@ func NewChain(
 
 	c.RuntimeConfig.Store(rtc)
 
-	if len(rtc.CommitteeConfig.Nodes) > 0 {
-		err = committeeSelection.Initialize(int32(selfID), privateKey, rtc.CommitteeConfig.Nodes)
+	if len(currentCommittee) > 0 {
+		err = committeeSelection.Initialize(int32(selfID), privateKey, currentCommittee)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed initializing committee selection instance")
 		}
+		logger.Infof("Initialized committee selection with for %d with public key %s", selfID, base64.StdEncoding.EncodeToString(publicKey))
+		logger.Infof("Nodes: %v", currentCommittee)
+	} else {
+		logger.Infof("No nodes in current committee")
 	}
 
-	logger.Infof("Initialized committee selection with for %d with public key %s", selfID, base64.StdEncoding.EncodeToString(publicKey))
-	logger.Infof("Nodes: %v", rtc.CommitteeConfig.Nodes)
-
-	c.verifier = buildVerifier(cv, c.RuntimeConfig, support, requestInspector, policyManager)
-	c.consensus = bftSmartConsensusBuild(c, requestInspector)
+	c.verifier = buildVerifier(committeeSelection, cv, c.RuntimeConfig, support, requestInspector, policyManager)
+	c.consensus = bftSmartConsensusBuild(c.ct, c, requestInspector)
 
 	// TODO setup heartbeat monitor with the right config
 	heartbeatTicker := time.NewTicker(1 * time.Second)
@@ -180,7 +218,7 @@ func NewChain(
 	}
 	senders := make([]uint64, 0)
 	receivers := make([]uint64, 0)
-	for _, node := range rtc.CommitteeConfig.Nodes {
+	for _, node := range currentCommittee {
 		if node.ID%2 == 0 {
 			senders = append(senders, uint64(node.ID))
 		} else {
@@ -201,6 +239,13 @@ func NewChain(
 			return c.RuntimeConfig.Load().(RuntimeConfig).LastConfigBlock.Header.Number
 		},
 		HeartbeatMonitor: c.heartbeatMonitor,
+		CreateReconShares: func() []committee.ReconShare {
+			feedback, _, err := c.cs.Process(c.committeeState(), committee.Input{})
+			if err != nil {
+				c.Logger.Panicf("Failed creating reconstruction shares: %v", err)
+			}
+			return feedback.ReconShares
+		},
 	}
 
 	// Setup communication with list of remotes notes for the new channel
@@ -216,6 +261,7 @@ func NewChain(
 }
 
 func bftSmartConsensusBuild(
+	ct *CommitteeTracker,
 	c *BFTChain,
 	requestInspector *RequestInspector,
 ) *smartbft.Consensus {
@@ -259,25 +305,12 @@ func bftSmartConsensusBuild(
 	channelDecorator := zap.String("channel", c.support.ChainID())
 	logger := flogging.MustGetLogger("orderer.consensus.smartbft.consensus").With(channelDecorator)
 
-	commitZKP := &atomic.Value{}
-	cmt := func() []byte {
-		feedback, _, err := c.cs.Process(rtc.CommitteeState, committee.Input{})
-		if err != nil {
-			logger.Errorf("Failed processing library: %v", err)
-		}
-		commitZKP.Store(feedback.Commitment.Proof)
-		if feedback.Commitment != nil {
-			logger.Infof("Created commit of %d bytes", len(feedback.Commitment.Data))
-			return feedback.Commitment.Data
-		}
-		logger.Infof("Nothing to commit")
-		return nil
-	}
 	c.assembler = &Assembler{
-		Commit:          cmt,
-		RuntimeConfig:   c.RuntimeConfig,
-		VerificationSeq: c.verifier.VerificationSequence,
-		Logger:          flogging.MustGetLogger("orderer.consensus.smartbft.assembler").With(channelDecorator),
+		CurrentCommittee: ct.CurrentCommittee,
+		MaybeCommit:      c.maybeCommit,
+		RuntimeConfig:    c.RuntimeConfig,
+		VerificationSeq:  c.verifier.VerificationSequence,
+		Logger:           flogging.MustGetLogger("orderer.consensus.smartbft.assembler").With(channelDecorator),
 	}
 
 	consensus := &smartbft.Consensus{
@@ -296,8 +329,13 @@ func bftSmartConsensusBuild(
 			ConvertMessage: func(m *smartbftprotos.Message, channel string) *orderer.ConsensusRequest {
 				msg := bftMsgToClusterMsg(m, channel)
 				if prp := m.GetPrePrepare(); prp != nil {
-					if rtc.CommitteeMetadata.shouldCommit(int32(rtc.id)) {
-						msg.Metadata = commitZKP.Load().([]byte)
+					zkp := c.commitZKP.Load().([]byte)
+					// Remove the ZKP in the end, we don't need it anymore
+					// after we send it.
+					defer c.commitZKP.Store([]byte{})
+
+					if len(zkp) > 0 {
+						msg.Metadata = zkp
 					}
 				}
 				return msg
@@ -329,6 +367,7 @@ func bftSmartConsensusBuild(
 }
 
 func buildVerifier(
+	cs committee.Selection,
 	cv ConfigValidator,
 	runtimeConfig *atomic.Value,
 	support consensus.ConsenterSupport,
@@ -354,6 +393,14 @@ func buildVerifier(
 			Logger:        logger,
 		},
 		Ledger: support,
+		VerifyReconShares: func(reconShares []committee.ReconShare) error {
+			for _, rcs := range reconShares {
+				if err := cs.VerifyReconShare(rcs); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
 	}
 }
 
@@ -369,16 +416,39 @@ func (c *BFTChain) HandleMessage(sender uint64, m *smartbftprotos.Message, metad
 			}
 
 		}
-		if cmt := m.GetCommit(); cmt != nil {
-			err := c.cs.VerifyReconShare(committee.ReconShare{}) // TODO: actually extract the ReconShare and ZKP from the commitment
-			if err != nil {
-				c.Logger.Warningf("Failed verifying ReconShare of commit: %v", err)
-				return
-			}
-		}
 	*/
 
 	c.consensus.HandleMessage(sender, m)
+}
+
+func (c *BFTChain) maybeCommit() ([]byte, []byte) {
+	rtc := c.RuntimeConfig.Load().(RuntimeConfig)
+
+	currentCommittee := c.ct.CurrentCommittee()
+	expectedCommitters := (len(currentCommittee)-1)/3 + 1
+
+	if !rtc.CommitteeMetadata.shouldCommit(int32(rtc.id), expectedCommitters, c.Logger) {
+		return nil, nil
+	}
+
+	state := c.committeeState()
+	feedback, _, err := c.cs.Process(state, committee.Input{})
+	if err != nil {
+		c.Logger.Panicf("Failed processing library: %v", err)
+	}
+	c.commitZKP.Store(feedback.Commitment.Proof)
+	if feedback.Commitment != nil {
+		c.Logger.Infof("Created commit of %d bytes", len(feedback.Commitment.Data))
+		_, newState, err := c.cs.Process(state, committee.Input{
+			Commitments: []committee.Commitment{*feedback.Commitment},
+		})
+		if err != nil {
+			c.Logger.Panicf("Failed processing library: %v", err)
+		}
+		return feedback.Commitment.Data, newState.ToBytes()
+	}
+	c.Logger.Infof("Nothing to commit")
+	return nil, nil
 }
 
 func (c *BFTChain) HandleRequest(sender uint64, req []byte) {
@@ -489,6 +559,17 @@ func (c *BFTChain) reportIsLeader(proposal *types.Proposal) {
 
 }
 
+func (c *BFTChain) committeeState() committee.State {
+	cr := &CommitteeRetriever{
+		logger:     c.Logger,
+		ledger:     c.support,
+		privateKey: c.committeePrivateKey,
+		self:       int32(c.Config.SelfID),
+	}
+
+	return cr.CurrentState()
+}
+
 func (c *BFTChain) updateRuntimeConfig(block *common.Block) types.Reconfig {
 	prevRTC := c.RuntimeConfig.Load().(RuntimeConfig)
 	newRTC, err := prevRTC.BlockCommitted(block)
@@ -500,6 +581,11 @@ func (c *BFTChain) updateRuntimeConfig(block *common.Block) types.Reconfig {
 	c.RuntimeConfig.Store(newRTC)
 	if utils.IsConfigBlock(block) {
 		c.Comm.Configure(c.Channel, newRTC.RemoteNodes)
+	}
+
+	err = c.cs.Initialize(int32(c.Config.SelfID), c.committeePrivateKey, c.ct.CurrentCommittee())
+	if err != nil {
+		c.Logger.Panicf("Failed initializing committee after commit: %v", err)
 	}
 
 	membershipDidNotChange := reflect.DeepEqual(newRTC.Nodes, prevRTC.Nodes)
@@ -525,15 +611,17 @@ func (c *BFTChain) Order(env *common.Envelope, configSeq uint64) error {
 }
 
 func (c *BFTChain) Configure(config *common.Envelope, configSeq uint64) error {
-	// TODO: check configuration update validity
+	var err error
 	seq := c.support.Sequence()
 	if configSeq < seq {
 		c.Logger.Warnf("Normal message was validated against %d, although current config seq has advanced (%d)", configSeq, seq)
-		if configEnv, _, err := c.support.ProcessConfigMsg(config); err != nil {
+		if config, _, err = c.support.ProcessConfigMsg(config); err != nil {
 			return errors.Errorf("bad normal message: %s", err)
-		} else {
-			return c.submit(configEnv, configSeq)
 		}
+	}
+
+	if err := c.cv.ValidateConfig(config); err != nil {
+		return errors.Wrap(err, "illegal config update attempted")
 	}
 
 	return c.submit(config, configSeq)

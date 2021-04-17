@@ -9,6 +9,8 @@ package smartbft_test
 import (
 	"testing"
 
+	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
+
 	"sync/atomic"
 
 	"github.com/SmartBFT-Go/consensus/pkg/types"
@@ -72,6 +74,8 @@ func TestAssembler(t *testing.T) {
 			logger := flogging.MustGetLogger("test")
 
 			assembler := &smartbft.Assembler{
+				CurrentCommittee: func() committee.Nodes { return nil },
+				MaybeCommit:      func() ([]byte, []byte) { return nil, nil },
 				VerificationSeq: func() uint64 {
 					return 10
 				},
@@ -80,8 +84,9 @@ func TestAssembler(t *testing.T) {
 			}
 
 			rtc := smartbft.RuntimeConfig{
-				LastBlock:       smartbft.LastBlockFromLedgerOrPanic(ledger, logger),
-				LastConfigBlock: smartbft.LastConfigBlockFromLedgerOrPanic(ledger, logger),
+				OnCommitteeMetadataUpdate: func(metadata *smartbft.CommitteeMetadata) {},
+				LastBlock:                 smartbft.LastBlockFromLedgerOrPanic(ledger, logger),
+				LastConfigBlock:           smartbft.LastConfigBlockFromLedgerOrPanic(ledger, logger),
 			}
 			assembler.RuntimeConfig.Store(rtc)
 

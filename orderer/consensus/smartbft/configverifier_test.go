@@ -10,6 +10,8 @@ import (
 	"io/ioutil"
 	"testing"
 
+	mock2 "github.com/hyperledger/fabric/orderer/common/blockcutter/mock"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/orderer/consensus/smartbft"
@@ -284,6 +286,11 @@ func TestValidateConfig(t *testing.T) {
 			b.On("ConfigtxValidator").Return(ctv)
 			ctv.On("ProposeConfigUpdate", mock.Anything, mock.Anything).
 				Return(testCase.proposeConfigUpdateReturns, testCase.proposeConfigUpdaterr)
+			b.On("OrdererConfig").Return(&mock2.OrdererConfig{
+				ConsensusMetadataStub: func() []byte {
+					return nil
+				},
+			}, true)
 			err = cbv.ValidateConfig(env)
 			if testCase.expectedError == "" {
 				assert.NoError(t, err)

@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
+
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
@@ -75,6 +77,8 @@ func TestSignProposal(t *testing.T) {
 	logger := flogging.MustGetLogger("test")
 
 	assembler := &smartbft.Assembler{
+		CurrentCommittee: func() committee.Nodes { return nil },
+		MaybeCommit:      func() ([]byte, []byte) { return nil, nil },
 		VerificationSeq: func() uint64 {
 			return 0
 		},
@@ -83,8 +87,9 @@ func TestSignProposal(t *testing.T) {
 	}
 
 	rtc := smartbft.RuntimeConfig{
-		LastBlock:       smartbft.LastBlockFromLedgerOrPanic(ledger, logger),
-		LastConfigBlock: smartbft.LastConfigBlockFromLedgerOrPanic(ledger, logger),
+		OnCommitteeMetadataUpdate: func(_ *smartbft.CommitteeMetadata) {},
+		LastBlock:                 smartbft.LastBlockFromLedgerOrPanic(ledger, logger),
+		LastConfigBlock:           smartbft.LastConfigBlockFromLedgerOrPanic(ledger, logger),
 	}
 
 	assembler.RuntimeConfig.Store(rtc)

@@ -7,7 +7,11 @@ SPDX-License-Identifier: Apache-2.0
 package smartbft
 
 import (
+	"encoding/asn1"
+	"encoding/base64"
+
 	"github.com/SmartBFT-Go/consensus/pkg/types"
+	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/crypto"
 	"github.com/hyperledger/fabric/protos/common"
@@ -34,6 +38,7 @@ type Signer struct {
 	Logger             Logger
 	LastConfigBlockNum func(*common.Block) uint64
 	HeartbeatMonitor   HeartbeatSuspects
+	CreateReconShares  func() []committee.ReconShare
 }
 
 func (s *Signer) Sign(msg []byte) []byte {
@@ -54,6 +59,23 @@ func (s *Signer) SignProposal(proposal types.Proposal, auxiliaryInput []byte) *t
 
 	obm := utils.GetOrdererblockMetadataOrPanic(block)
 
+	cm := &CommitteeMetadata{}
+	if err := cm.Unmarshal(obm.CommitteeMetadata); err != nil {
+		s.Logger.Panicf("Failed unmarshaling committee metadata on an agreed upon block: %v", err)
+	}
+
+	var reconShares [][]byte
+	// This is the last block of the committee, so include reconstruction shares.
+	if cm.CommitteeShiftAt == int64(block.Header.Number) {
+		for _, rcs := range s.CreateReconShares() {
+			rawReconshare, err := asn1.Marshal(rcs)
+			if err != nil {
+				s.Logger.Panicf("Failed serializing reconstruction share: %v", err)
+			}
+			reconShares = append(reconShares, rawReconshare)
+		}
+	}
+
 	var suspects []int32
 	if s.ID%2 != 0 { // TODO get suspects from the committee nodes
 		monitorSuspects := s.HeartbeatMonitor.GetSuspects()
@@ -62,7 +84,8 @@ func (s *Signer) SignProposal(proposal types.Proposal, auxiliaryInput []byte) *t
 		}
 	}
 	committeeFeedback := &smartbft.CommitteeFeedback{
-		Suspects: suspects,
+		Reconshares: reconShares,
+		Suspects:    suspects,
 	}
 	aux, err := utils.Marshal(committeeFeedback)
 	if err != nil {
@@ -71,11 +94,13 @@ func (s *Signer) SignProposal(proposal types.Proposal, auxiliaryInput []byte) *t
 
 	signatureMetadata := &common.Metadata{}
 	if err := proto.Unmarshal(block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], signatureMetadata); err != nil {
-		panic(err)
+		s.Logger.Panicf("Failed unmarshaling Metadata from %s",
+			base64.StdEncoding.EncodeToString(block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES]))
+
 	}
 	ordererMDFromBlock := &common.OrdererBlockMetadata{}
 	if err := proto.Unmarshal(signatureMetadata.Value, ordererMDFromBlock); err != nil {
-		panic(err)
+		s.Logger.Panicf("Failed unmarshaling OrdererBlockMetadata from %s", base64.StdEncoding.EncodeToString(signatureMetadata.Value))
 	}
 
 	sig := Signature{
@@ -85,10 +110,11 @@ func (s *Signer) SignProposal(proposal types.Proposal, auxiliaryInput []byte) *t
 		BlockHeader:             block.Header.Bytes(),
 		SignatureHeader:         utils.MarshalOrPanic(s.newSignatureHeaderOrPanic(nonce)),
 		OrdererBlockMetadata: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
-			LastConfig:        &common.LastConfig{Index: s.LastConfigBlockNum(block)},
-			ConsenterMetadata: proposal.Metadata,
-			CommitteeMetadata: obm.CommitteeMetadata,
-			HeartbeatSuspects: ordererMDFromBlock.HeartbeatSuspects,
+			CommittteeCommitment: ordererMDFromBlock.CommittteeCommitment,
+			LastConfig:           &common.LastConfig{Index: s.LastConfigBlockNum(block)},
+			ConsenterMetadata:    proposal.Metadata,
+			CommitteeMetadata:    obm.CommitteeMetadata,
+			HeartbeatSuspects:    ordererMDFromBlock.HeartbeatSuspects,
 		}),
 	}
 

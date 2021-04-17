@@ -19,19 +19,20 @@ type Orderer struct {
 }
 
 type General struct {
-	LedgerType     string                 `yaml:"LedgerType,omitempty"`
-	ListenAddress  string                 `yaml:"ListenAddress,omitempty"`
-	ListenPort     int                    `yaml:"ListenPort,omitempty"`
-	TLS            *OrdererTLS            `yaml:"TLS,omitempty"`
-	Keepalive      *OrdererKeepalive      `yaml:"Keepalive,omitempty"`
-	GenesisMethod  string                 `yaml:"GenesisMethod,omitempty"`
-	GenesisProfile string                 `yaml:"GenesisProfile,omitempty"`
-	GenesisFile    string                 `yaml:"GenesisFile,omitempty"`
-	LocalMSPDir    string                 `yaml:"LocalMSPDir,omitempty"`
-	LocalMSPID     string                 `yaml:"LocalMSPID,omitempty"`
-	Profile        *OrdererProfile        `yaml:"Profile,omitempty"`
-	BCCSP          *BCCSP                 `yaml:"BCCSP,omitempty"`
-	Authentication *OrdererAuthentication `yaml:"Authentication,omitempty"`
+	CommitteeSelectionDisabled bool                   `yaml:"CommitteeSelectionDisabled,omitempty"`
+	LedgerType                 string                 `yaml:"LedgerType,omitempty"`
+	ListenAddress              string                 `yaml:"ListenAddress,omitempty"`
+	ListenPort                 int                    `yaml:"ListenPort,omitempty"`
+	TLS                        *OrdererTLS            `yaml:"TLS,omitempty"`
+	Keepalive                  *OrdererKeepalive      `yaml:"Keepalive,omitempty"`
+	GenesisMethod              string                 `yaml:"GenesisMethod,omitempty"`
+	GenesisProfile             string                 `yaml:"GenesisProfile,omitempty"`
+	GenesisFile                string                 `yaml:"GenesisFile,omitempty"`
+	LocalMSPDir                string                 `yaml:"LocalMSPDir,omitempty"`
+	LocalMSPID                 string                 `yaml:"LocalMSPID,omitempty"`
+	Profile                    *OrdererProfile        `yaml:"Profile,omitempty"`
+	BCCSP                      *BCCSP                 `yaml:"BCCSP,omitempty"`
+	Authentication             *OrdererAuthentication `yaml:"Authentication,omitempty"`
 
 	ExtraProperties map[string]interface{} `yaml:",inline,omitempty"`
 }
