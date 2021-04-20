@@ -8,6 +8,7 @@ package smartbft
 
 import (
 	"github.com/SmartBFT-Go/consensus/pkg/types"
+	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/crypto"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/orderer/smartbft"
@@ -68,6 +69,15 @@ func (s *Signer) SignProposal(proposal types.Proposal, auxiliaryInput []byte) *t
 		s.Logger.Panicf("Failed marshaling committee feedback: %v", err)
 	}
 
+	signatureMetadata := &common.Metadata{}
+	if err := proto.Unmarshal(block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], signatureMetadata); err != nil {
+		panic(err)
+	}
+	ordererMDFromBlock := &common.OrdererBlockMetadata{}
+	if err := proto.Unmarshal(signatureMetadata.Value, ordererMDFromBlock); err != nil {
+		panic(err)
+	}
+
 	sig := Signature{
 		CommitteeAuxiliaryInput: aux,
 		AuxiliaryInput:          auxiliaryInput,
@@ -78,6 +88,7 @@ func (s *Signer) SignProposal(proposal types.Proposal, auxiliaryInput []byte) *t
 			LastConfig:        &common.LastConfig{Index: s.LastConfigBlockNum(block)},
 			ConsenterMetadata: proposal.Metadata,
 			CommitteeMetadata: obm.CommitteeMetadata,
+			HeartbeatSuspects: ordererMDFromBlock.HeartbeatSuspects,
 		}),
 	}
 

@@ -719,3 +719,37 @@ type asn1Header struct {
 	PreviousHash []byte
 	DataHash     []byte
 }
+
+// removeDuplicates takes a list and returns a list with the same values but without duplicates
+func removeDuplicates(list []int32) []int32 {
+	keys := make(map[int32]bool)
+	var noDupsList []int32
+	for _, entry := range list {
+		if _, val := keys[entry]; !val {
+			keys[entry] = true
+			noDupsList = append(noDupsList, entry)
+		}
+	}
+	return noDupsList
+}
+
+// agreedSuspects gets a list of all suspects (a concatenation of all suspects lists)
+// it returns the suspects that appear at least f+1 times in the given least
+func agreedSuspects(allSuspects []int32, f int32) []int32 {
+	votes := make(map[int32]int32)
+
+	for _, s := range allSuspects {
+		votes[s]++
+	}
+
+	var agreedSuspects []int32
+	for s, v := range votes {
+		if v >= f+1 {
+			agreedSuspects = append(agreedSuspects, s)
+		}
+	}
+
+	sort.Slice(agreedSuspects, func(i, j int) bool { return agreedSuspects[i] < agreedSuspects[j] })
+
+	return agreedSuspects
+}
