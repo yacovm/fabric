@@ -288,4 +288,5 @@ func TestAgreedSuspects(t *testing.T) {
 	assert.Equal(t, []int32{1, 2}, agreedSuspects([]int32{1, 2, 1, 3, 2}, 1))
 	assert.Equal(t, []int32{3}, agreedSuspects([]int32{1, 2, 1, 3, 2, 3, 3}, 2))
 	assert.Equal(t, []int32{1}, agreedSuspects([]int32{3, 2, 1, 3, 2, 1, 1}, 2))
+	assert.Equal(t, []int32{1, 2, 3}, agreedSuspects([]int32{3, 2, 1, 3, 2, 1, 3, 2, 1}, 2))
 }

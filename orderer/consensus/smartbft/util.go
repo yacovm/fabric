@@ -739,10 +739,6 @@ func agreedSuspects(allSuspects []int32, f int32) []int32 {
 	votes := make(map[int32]int32)
 
 	for _, s := range allSuspects {
-		if _, ok := votes[s]; !ok {
-			votes[s] = 1
-			continue
-		}
 		votes[s]++
 	}
 
@@ -752,6 +748,8 @@ func agreedSuspects(allSuspects []int32, f int32) []int32 {
 			agreedSuspects = append(agreedSuspects, s)
 		}
 	}
+
+	sort.Slice(agreedSuspects, func(i, j int) bool { return agreedSuspects[i] < agreedSuspects[j] })
 
 	return agreedSuspects
 }
