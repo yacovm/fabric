@@ -188,4 +188,5 @@ message OrdererBlockMetadata {
     bytes consenter_metadata = 2;
     bytes committee_metadata = 3;
     bytes committtee_commitment = 4;
+    repeated int32 heartbeat_suspects = 5;
 }

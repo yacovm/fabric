@@ -8,13 +8,14 @@ package smartbft
 
 import (
 	"encoding/asn1"
-
 	"sync/atomic"
 
 	"github.com/SmartBFT-Go/consensus/pkg/types"
+	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
 	"github.com/hyperledger/fabric/protos/common"
+	"github.com/hyperledger/fabric/protos/orderer/smartbft"
 	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/pkg/errors"
 )
@@ -61,6 +62,8 @@ func (a *Assembler) AssembleProposal(metadata []byte, requests [][]byte) (nextPr
 		lastConfigBlockNum = block.Header.Number
 	}
 
+	suspects := assembleSuspectsList(lastBlock)
+
 	block.Metadata.Metadata[common.BlockMetadataIndex_LAST_CONFIG] = utils.MarshalOrPanic(&common.Metadata{
 		Value: utils.MarshalOrPanic(&common.LastConfig{Index: lastConfigBlockNum}),
 	})
@@ -72,6 +75,7 @@ func (a *Assembler) AssembleProposal(metadata []byte, requests [][]byte) (nextPr
 			LastConfig: &common.LastConfig{
 				Index: lastConfigBlockNum,
 			},
+			HeartbeatSuspects: suspects,
 		}),
 	})
 
@@ -150,6 +154,28 @@ func LastBlockFromLedgerOrPanic(ledger Ledger, logger Logger) *common.Block {
 		logger.Panicf("Failed retrieving last block")
 	}
 	return lastBlock
+}
+
+func assembleSuspectsList(lastBlock *common.Block) []int32 {
+	blockMetadataSignatures := &common.Metadata{}
+	if err := proto.Unmarshal(lastBlock.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], blockMetadataSignatures); err != nil {
+		panic(err)
+	}
+
+	sigs := blockMetadataSignatures.Signatures
+	var allSuspects []int32
+	for _, sig := range sigs {
+		aux := sig.CommitteeAuxiliaryInput
+		committeeFeedback := &smartbft.CommitteeFeedback{}
+		if err := proto.Unmarshal(aux, committeeFeedback); err != nil {
+			panic(err)
+		}
+		list := committeeFeedback.Suspects
+		cleanList := removeDuplicates(list)
+		allSuspects = append(allSuspects, cleanList...)
+	}
+
+	return agreedSuspects(allSuspects, 1) // TODO use f
 }
 
 type ByteBufferTuple struct {
