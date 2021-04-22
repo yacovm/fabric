@@ -7,7 +7,10 @@ SPDX-License-Identifier: Apache-2.0
 package smartbft
 
 import (
+	"encoding/base64"
 	"fmt"
+
+	"github.com/hyperledger/fabric/protos/orderer/smartbft"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/channelconfig"
@@ -162,6 +165,10 @@ func (cbv *ConfigBlockValidator) verifyConfigUpdateMsg(outEnv *common.Envelope, 
 		}
 	}
 
+	if err := cbv.verifyCommittee(confEnv.Config); err != nil {
+		return err
+	}
+
 	// Extract the Config from the result of ProposeConfigUpdate, and compare it
 	// with the pending config.
 	if proto.Equal(confEnv.Config, expectedConfigEnv.Config) {
@@ -169,4 +176,45 @@ func (cbv *ConfigBlockValidator) verifyConfigUpdateMsg(outEnv *common.Envelope, 
 	}
 	cbv.Logger.Errorf("Pending Config is %v, but it should be %v", confEnv.Config, expectedConfigEnv.Config)
 	return errors.Errorf("pending config does not match calculated expected config")
+}
+
+func (cbv *ConfigBlockValidator) verifyCommittee(config *common.Config) error {
+	bundle, err := channelconfig.NewBundle(cbv.ValidatingChannel, config)
+	if err != nil {
+		cbv.Logger.Warnf("cannot construct new config from last update: %v", err)
+		return err
+	}
+	oc, ok := bundle.OrdererConfig()
+	if !ok {
+		return errors.New("config does not contain orderer config")
+	}
+	if len(oc.ConsensusMetadata()) == 0 {
+		return nil
+	}
+	configMD := &smartbft.ConfigMetadata{}
+	if err := proto.Unmarshal(oc.ConsensusMetadata(), configMD); err != nil {
+		cbv.Logger.Warnf("Failed unmarshaling config metadata from %s", base64.StdEncoding.EncodeToString(oc.ConsensusMetadata()))
+		return errors.Wrap(err, "failed unmarshaling config metadata")
+	}
+	if configMD.Options == nil || configMD.Options.CommitteeConfig == nil {
+		return nil
+	}
+	conf := configMD.Options.CommitteeConfig
+	if conf.Disabled {
+		return nil
+	}
+
+	var consentersWithoutSelectionPK int
+	for _, consenter := range configMD.Consenters {
+		if len(consenter.SelectionPk) == 0 {
+			consentersWithoutSelectionPK++
+		}
+	}
+
+	if consentersWithoutSelectionPK == 0 || consentersWithoutSelectionPK == len(configMD.Consenters) {
+		return nil
+	}
+
+	return errors.Errorf("we have %d consenters but only %d are defined with public keys",
+		len(configMD.Consenters), consentersWithoutSelectionPK)
 }

@@ -683,7 +683,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			var ordererRunners []*ginkgomon.Runner
 			for _, orderer := range network.Orderers {
 				runner := network.OrdererRunner(orderer)
-				runner.Command.Env = append(runner.Command.Env, "FABRIC_LOGGING_SPEC=orderer.consensus.smartbft=debug:policies.ImplicitOrderer=debug")
+				runner.Command.Env = append(runner.Command.Env, "FABRIC_LOGGING_SPEC=orderer.consensus.smartbft=debug:orderer.consensus.smartbft.committee=debug")
 				ordererRunners = append(ordererRunners, runner)
 				proc := ifrit.Invoke(runner)
 				ordererProcesses = append(ordererProcesses, proc)
@@ -717,7 +717,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			assertBlockValidationPolicy(network, peer, network.Orderers[0], channel, common.Policy_IMPLICIT_ORDERER)
 
 			for i := 0; i < 6; i++ {
-				fmt.Fprintf(GinkgoWriter, "adding orderer %d", i+5)
+				By(fmt.Sprintf("Adding orderer %d", i+5))
 
 				name := fmt.Sprintf("orderer%d", i+5)
 

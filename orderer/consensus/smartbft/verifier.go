@@ -8,10 +8,15 @@ package smartbft
 
 import (
 	"bytes"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/hex"
 	"sync"
 	"sync/atomic"
+
+	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
+
+	"github.com/hyperledger/fabric/protos/orderer/smartbft"
 
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
@@ -77,6 +82,7 @@ type Verifier struct {
 	Ledger                Ledger
 	Logger                *flogging.FabricLogger
 	ConfigValidator       ConfigValidator
+	VerifyReconShares     func(reconShares []committee.ReconShare) error
 }
 
 func (v *Verifier) AuxiliaryData(msg []byte) []byte {
@@ -184,7 +190,8 @@ func (v *Verifier) verifyRequest(rawRequest []byte, noConfigAllowed bool) (types
 }
 
 func (v *Verifier) VerifyConsenterSig(signature types.Signature, prop types.Proposal) ([]byte, error) {
-	id2Identity := v.RuntimeConfig.Load().(RuntimeConfig).ID2Identities
+	rtc := v.RuntimeConfig.Load().(RuntimeConfig)
+	id2Identity := rtc.ID2Identities
 
 	identity, exists := id2Identity[signature.ID]
 	if !exists {
@@ -207,6 +214,28 @@ func (v *Verifier) VerifyConsenterSig(signature types.Signature, prop types.Prop
 
 	if err := v.verifySignatureIsBoundToProposal(sig, identity, prop); err != nil {
 		return nil, err
+	}
+
+	committeeAux := &smartbft.CommitteeFeedback{}
+	if err := proto.Unmarshal(sig.AuxiliaryInput, committeeAux); err != nil {
+		return nil, errors.Wrap(err, "commitee auxiliary input is not a valid CommitteeFeedback")
+	}
+
+	var reconShares []committee.ReconShare
+	for _, raw := range committeeAux.Reconshares {
+		rcs := committee.ReconShare{}
+		if _, err := asn1.Unmarshal(raw, &rcs); err != nil {
+			return nil, errors.Wrapf(err, "%d sent a malformed ReconShare: %v", signature.ID, err)
+		}
+
+		if rcs.From != int32(signature.ID) {
+			return nil, errors.Errorf("ceconstruction share claims to be from %d but %d sent it", rcs.From, signature.ID)
+		}
+		reconShares = append(reconShares, rcs)
+	}
+
+	if err := v.VerifyReconShares(reconShares); err != nil {
+		return nil, errors.Wrap(err, "failed verifying reconstruction shares")
 	}
 
 	expectedMsgToBeSigned := util.ConcatenateBytes(sig.OrdererBlockMetadata, sig.SignatureHeader, sig.BlockHeader, sig.AuxiliaryInput, sig.CommitteeAuxiliaryInput)

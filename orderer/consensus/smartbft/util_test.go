@@ -228,8 +228,9 @@ func TestRuntimeConfig(t *testing.T) {
 		}}
 
 	prevRTC := RuntimeConfig{
-		logger: flogging.MustGetLogger("test"),
-		id:     1,
+		OnCommitteeMetadataUpdate: func(*CommitteeMetadata) {},
+		logger:                    flogging.MustGetLogger("test"),
+		id:                        1,
 	}
 
 	// Commit a config block

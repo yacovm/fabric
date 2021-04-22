@@ -8,6 +8,9 @@ package smartbft
 
 import (
 	"encoding/asn1"
+
+	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
+
 	"sync/atomic"
 
 	"github.com/SmartBFT-Go/consensus/pkg/types"
@@ -32,19 +35,15 @@ type Ledger interface {
 }
 
 type Assembler struct {
-	RuntimeConfig   *atomic.Value
-	Logger          *flogging.FabricLogger
-	VerificationSeq func() uint64
-	Commit          func() []byte
+	RuntimeConfig    *atomic.Value
+	Logger           *flogging.FabricLogger
+	VerificationSeq  func() uint64
+	MaybeCommit      func() ([]byte, []byte)
+	CurrentCommittee func() committee.Nodes
 }
 
 func (a *Assembler) AssembleProposal(metadata []byte, requests [][]byte) (nextProp types.Proposal) {
 	rtc := a.RuntimeConfig.Load().(RuntimeConfig)
-
-	var commitment []byte
-	if rtc.CommitteeMetadata.shouldCommit(int32(rtc.id)) {
-		commitment = a.Commit()
-	}
 
 	lastConfigBlockNum := rtc.LastConfigBlock.Header.Number
 	lastBlock := rtc.LastBlock
@@ -63,13 +62,14 @@ func (a *Assembler) AssembleProposal(metadata []byte, requests [][]byte) (nextPr
 	}
 
 	suspects := assembleSuspectsList(lastBlock)
+	commitment, newCommitteeMetadata := a.committeeCommitmentAndMetadata(int64(block.Header.Number))
 
 	block.Metadata.Metadata[common.BlockMetadataIndex_LAST_CONFIG] = utils.MarshalOrPanic(&common.Metadata{
 		Value: utils.MarshalOrPanic(&common.LastConfig{Index: lastConfigBlockNum}),
 	})
 	block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(&common.Metadata{
 		Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
-			CommitteeMetadata:    rtc.CommitteeMetadata.Marshal(),
+			CommitteeMetadata:    newCommitteeMetadata,
 			CommittteeCommitment: commitment,
 			ConsenterMetadata:    metadata,
 			LastConfig: &common.LastConfig{
@@ -92,6 +92,28 @@ func (a *Assembler) AssembleProposal(metadata []byte, requests [][]byte) (nextPr
 	}
 
 	return prop
+}
+
+func (a *Assembler) committeeCommitmentAndMetadata(blockNum int64) ([]byte, []byte) {
+	rtc := a.RuntimeConfig.Load().(RuntimeConfig)
+	// The committee state is the state *after* the commit!
+	// In case there is no commit in this round, the state encoded
+	// in the committee is nil, because we don't have any new
+	// information.
+	// The last state in the committee is indexed by the 'FinalStateIndex'
+	// which encodes the block number where the last commit resides in.
+	commitment, newState := a.MaybeCommit()
+
+	currentCommittee := a.CurrentCommittee()
+	expectedCommitters := (len(currentCommittee)-1)/3 + 1
+	committeeMD := CommitteeMetadataForProposal(a.Logger, commitment, newState, rtc.CommitteeMetadata, blockNum,
+		expectedCommitters,
+		rtc.committeeMinimumLifespan, currentCommittee, int32(rtc.id))
+
+	a.Logger.Infof("Creating committee metadata: %+v", committeeMD)
+
+	return commitment, committeeMD.Marshal()
+
 }
 
 func singleConfigTxOrSeveralNonConfigTx(requests [][]byte, logger Logger) [][]byte {

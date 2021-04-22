@@ -9,6 +9,7 @@ package nwo
 const DefaultOrdererTemplate = `---
 {{ with $w := . -}}
 General:
+  CommitteeSelectionDisabled: false
   LedgerType: file
   ListenAddress: 127.0.0.1
   ListenPort: {{ .OrdererPort Orderer "Listen" }}
