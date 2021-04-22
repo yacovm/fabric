@@ -59,6 +59,10 @@ func blockWithConfigEnvelope() *common.Block {
 	}
 }
 
+func noopCommitteeWrapper(_ string, m map[string]*discovery.Endpoints) map[string]*discovery.Endpoints {
+	return m
+}
+
 func TestMSPIDMapping(t *testing.T) {
 	randString := func() string {
 		buff := make([]byte, 10)
@@ -114,7 +118,7 @@ func TestMSPIDMapping(t *testing.T) {
 	fakeBlockGetter := &mocks.ConfigBlockGetter{}
 	fakeBlockGetter.GetCurrConfigBlockReturnsOnCall(0, block)
 
-	cs := config.NewDiscoverySupport(fakeBlockGetter)
+	cs := config.NewDiscoverySupport(fakeBlockGetter, noopCommitteeWrapper)
 	res, err := cs.Config("mychannel")
 
 	actualKeys := make(map[string]struct{})
@@ -140,7 +144,7 @@ func TestSupportGreenPath(t *testing.T) {
 	fakeBlockGetter := &mocks.ConfigBlockGetter{}
 	fakeBlockGetter.GetCurrConfigBlockReturnsOnCall(0, nil)
 
-	cs := config.NewDiscoverySupport(fakeBlockGetter)
+	cs := config.NewDiscoverySupport(fakeBlockGetter, noopCommitteeWrapper)
 	res, err := cs.Config("test")
 	assert.Nil(t, res)
 	assert.Equal(t, "could not get last config block for channel test", err.Error())
@@ -157,7 +161,7 @@ func TestSupportGreenPath(t *testing.T) {
 
 func TestSupportBadConfig(t *testing.T) {
 	fakeBlockGetter := &mocks.ConfigBlockGetter{}
-	cs := config.NewDiscoverySupport(fakeBlockGetter)
+	cs := config.NewDiscoverySupport(fakeBlockGetter, noopCommitteeWrapper)
 
 	fakeBlockGetter.GetCurrConfigBlockReturnsOnCall(0, &common.Block{
 		Data: &common.BlockData{},
@@ -309,7 +313,7 @@ func TestOrdererEndpoints(t *testing.T) {
 		assert.NoError(t, err)
 
 		fakeBlockGetter := &mocks.ConfigBlockGetter{}
-		cs := config.NewDiscoverySupport(fakeBlockGetter)
+		cs := config.NewDiscoverySupport(fakeBlockGetter, noopCommitteeWrapper)
 
 		fakeBlockGetter.GetCurrConfigBlockReturnsOnCall(0, block)
 
@@ -327,7 +331,7 @@ func TestOrdererEndpoints(t *testing.T) {
 		assert.NoError(t, err)
 
 		fakeBlockGetter := &mocks.ConfigBlockGetter{}
-		cs := config.NewDiscoverySupport(fakeBlockGetter)
+		cs := config.NewDiscoverySupport(fakeBlockGetter, noopCommitteeWrapper)
 
 		fakeBlockGetter.GetCurrConfigBlockReturnsOnCall(0, block)
 
@@ -348,7 +352,7 @@ func TestOrdererEndpoints(t *testing.T) {
 		assert.NoError(t, err)
 
 		fakeBlockGetter := &mocks.ConfigBlockGetter{}
-		cs := config.NewDiscoverySupport(fakeBlockGetter)
+		cs := config.NewDiscoverySupport(fakeBlockGetter, noopCommitteeWrapper)
 
 		fakeBlockGetter.GetCurrConfigBlockReturnsOnCall(0, block)
 

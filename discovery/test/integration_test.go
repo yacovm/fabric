@@ -431,7 +431,9 @@ func createSupport(t *testing.T, dir string, lc *lifeCycle) *support {
 
 	fakeBlockGetter := &mocks.ConfigBlockGetter{}
 	fakeBlockGetter.GetCurrConfigBlockReturns(createGenesisBlock(filepath.Join(dir, "crypto-config")))
-	confSup := config.NewDiscoverySupport(fakeBlockGetter)
+	confSup := config.NewDiscoverySupport(fakeBlockGetter, func(_ string, _ map[string]*Endpoints) map[string]*Endpoints {
+		return nil
+	})
 	return &support{
 		Support:         discsupport.NewDiscoverySupport(acl, gSup, ea, confSup, acl),
 		mspWrapper:      mspManagerWrapper,

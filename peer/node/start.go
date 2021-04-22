@@ -17,6 +17,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hyperledger/fabric/common/channelconfig"
+	"github.com/hyperledger/fabric/orderer/consensus/smartbft"
+	smartbft2 "github.com/hyperledger/fabric/protos/orderer/smartbft"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/cauthdsl"
 	ccdef "github.com/hyperledger/fabric/common/chaincode"
@@ -497,7 +501,11 @@ func registerDiscoveryService(peerServer *comm.GRPCServer, polMgr policies.Chann
 	gSup := gossip.NewDiscoverySupport(service.GetGossipService())
 	ccSup := ccsupport.NewDiscoverySupport(lc)
 	ea := endorsement.NewEndorsementAnalyzer(gSup, ccSup, acl, lc)
-	confSup := config.NewDiscoverySupport(config.CurrentConfigBlockGetterFunc(peer.GetCurrConfigBlock))
+	cew := &CommitteeEndpointWrapper{
+		supporters: make(map[string]*committeeSupport),
+		logger:     logger,
+	}
+	confSup := config.NewDiscoverySupport(config.CurrentConfigBlockGetterFunc(peer.GetCurrConfigBlock), cew.endpoints)
 	support := discsupport.NewDiscoverySupport(acl, gSup, ea, confSup, acl)
 	svc := discovery.NewService(discovery.Config{
 		TLS:                          peerServer.TLSEnabled(),
@@ -1043,4 +1051,163 @@ func (r *reset) ProcessProposal(ctx context.Context, signedProp *pb.SignedPropos
 		return nil, errors.New("endorse requests are blocked while ledgers are being rebuilt")
 	}
 	return r.next.ProcessProposal(ctx, signedProp)
+}
+
+type committeeSupport struct {
+	lock   sync.RWMutex
+	cec    committeeEndpointConverter
+	height uint64
+	leger  smartbft.Ledger
+}
+
+type committeeEndpointConverter func(channel string, m map[string]*discprotos.Endpoints) map[string]*discprotos.Endpoints
+
+type CommitteeEndpointWrapper struct {
+	lock       sync.RWMutex
+	supporters map[string]*committeeSupport
+	logger     *flogging.FabricLogger
+}
+
+func (cew *CommitteeEndpointWrapper) endpoints(channel string, m map[string]*discprotos.Endpoints) map[string]*discprotos.Endpoints {
+	cew.lock.RLock()
+	sup := cew.supporters[channel]
+	cew.lock.RUnlock()
+
+	if sup == nil {
+		cew.lock.Lock()
+		sup = &committeeSupport{
+			leger: &blockRetriever{channel: channel},
+		}
+		cew.supporters[channel] = sup
+		cew.lock.Unlock()
+	}
+
+	sup.lock.RLock()
+	currHeight := sup.leger.Height()
+	prevHeight := sup.height
+	f := sup.cec
+	sup.lock.RUnlock()
+
+	if currHeight > prevHeight {
+		sup.lock.Lock()
+		f = cew.endpointCommitteeFilter(sup)
+		sup.cec = f
+		sup.height = currHeight
+		sup.lock.Unlock()
+	}
+
+	return f(channel, m)
+}
+
+func (cew *CommitteeEndpointWrapper) endpointCommitteeFilter(sup *committeeSupport) func(string, map[string]*discprotos.Endpoints) map[string]*discprotos.Endpoints {
+	cr := &smartbft.CommitteeRetriever{
+		Logger: flogging.MustGetLogger("peer.discovery.committee"),
+		Ledger: sup.leger,
+	}
+
+	lastConfigBlock := smartbft.LastConfigBlockFromLedgerOrPanic(sup.leger, cew.logger)
+	md := consensusMD(lastConfigBlock)
+
+	nodes, err := cr.CurrentCommittee()
+	if err != nil {
+		cew.logger.Panicf("Failed determining current committee: %v", err)
+	}
+
+	cew.logger.Debugf("Current committee:")
+
+	committeeIDs := make(map[uint64]struct{})
+
+	for _, id := range nodes.IDs() {
+		committeeIDs[uint64(id)] = struct{}{}
+	}
+
+	consensusMD := &smartbft2.ConfigMetadata{}
+	if err := proto.Unmarshal(md, consensusMD); err != nil {
+		cew.logger.Panicf("Failed unmarshaling consensus metadata from latest config block: %v", err)
+	}
+
+	endpointsInCommittee := make(map[string]struct{})
+
+	for _, c := range consensusMD.Consenters {
+		endpoint := fmt.Sprintf("%s:%d", c.Host, c.Port)
+		if _, exists := committeeIDs[c.ConsenterId]; exists {
+			endpointsInCommittee[endpoint] = struct{}{}
+			cew.logger.Debugf("%d with endpoint %s is in the committee", c.ConsenterId, endpoint)
+		} else {
+			cew.logger.Debugf("%d with endpoint %s is not in the committee", c.ConsenterId, endpoint)
+		}
+	}
+
+	return func(channel string, m map[string]*discprotos.Endpoints) map[string]*discprotos.Endpoints {
+		res := make(map[string]*discprotos.Endpoints)
+
+		for orgName, v := range m {
+			for _, endpoint := range v.Endpoint {
+				if _, exists := endpointsInCommittee[fmt.Sprintf("%s:%d", endpoint.Host, endpoint.Port)]; !exists {
+					continue
+				}
+				endpoints, exists := res[orgName]
+				if !exists {
+					endpoint = &discprotos.Endpoint{}
+				}
+				endpoints.Endpoint = append(endpoints.Endpoint, &discprotos.Endpoint{
+					Host: endpoint.Host,
+					Port: endpoint.Port,
+				})
+				res[orgName] = endpoints
+			}
+		}
+
+		if len(res) == 0 {
+			cew.logger.Infof("No endpoint has a matching consenter, skipping filtering")
+			return m
+		}
+
+		return res
+	}
+
+}
+
+func consensusMD(lastConfigBlock *cb.Block) []byte {
+
+	if lastConfigBlock.Data == nil || len(lastConfigBlock.Data.Data) == 0 {
+		logger.Panicf("Empty config block")
+	}
+	env := &cb.Envelope{}
+	if err := proto.Unmarshal(lastConfigBlock.Data.Data[0], env); err != nil {
+		logger.Panicf("Failed to unmarshal the genesis block's envelope: %v", err)
+	}
+	bundle, err := channelconfig.NewBundleFromEnvelope(env)
+	if err != nil {
+		logger.Panicf("Failed creating bundle from the config block: %v", err)
+	}
+	ordConf, exists := bundle.OrdererConfig()
+	if !exists {
+		logger.Panicf("Orderer config doesn't exist in bundle derived from config block")
+	}
+	return ordConf.ConsensusMetadata()
+}
+
+type blockRetriever struct {
+	channel string
+}
+
+func (b *blockRetriever) Height() uint64 {
+	bci, err := peer.GetLedger(b.channel).GetBlockchainInfo()
+	if err != nil {
+		panic(err)
+	}
+	return bci.Height
+}
+
+func (b *blockRetriever) Block(number uint64) *common2.Block {
+	i, err := peer.GetLedger(b.channel).GetBlocksIterator(number)
+	if err != nil {
+		panic(err)
+	}
+	qr, err := i.Next()
+	if err != nil {
+		panic(err)
+	}
+	return qr.(*common2.Block)
 }
