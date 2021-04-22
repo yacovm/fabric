@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"reflect"
 	"sort"
@@ -64,20 +65,29 @@ func (cs *CommitteeSelection) Initialize(ID int32, privateKey committee.PrivateK
 		cs.Logger.Debugf("Skipping initialization because nodes haven't changed")
 		return nil
 	}
-	cs.nodes = nodes
 
-	sk := suite.Scalar()
-	if err := sk.UnmarshalBinary(privateKey); err != nil {
-		return fmt.Errorf("failed unmarshaling secret key: %v", err)
+	var sk kyber.Scalar
+
+	if len(privateKey) == 0 {
+		cs.Logger.Debugf("Initializing a non committee member instance")
+	} else {
+		sk = suite.Scalar()
+		if err := sk.UnmarshalBinary(privateKey); err != nil {
+			return fmt.Errorf("failed unmarshaling secret key: %v", err)
+		}
 	}
 
-	cs.sk = sk
-	cs.pk = suite.Point().Mul(cs.sk, h)
-	cs.id = ID
+	cs.resetState()
+
+	cs.nodes = nodes
+
+	if len(privateKey) > 0 {
+		cs.sk = sk
+		cs.pk = suite.Point().Mul(cs.sk, h)
+		cs.id = ID
+	}
 
 	cs.Logger.Infof("ID: %d, nodes: %s", ID, nodes)
-
-	cs.ids2Index = make(map[int32]int)
 
 	var nodeConfig []string
 	for i, node := range nodes {
@@ -85,7 +95,6 @@ func (cs *CommitteeSelection) Initialize(ID int32, privateKey committee.PrivateK
 		nodeConfig = append(nodeConfig, fmt.Sprintf("%d --> %d", i, node.ID))
 	}
 
-	cs.pubKeys = nil
 	// Initialize public keys in EC point form
 	for _, pubKey := range nodes.PubKeys() {
 		pk := suite.Point()
@@ -96,6 +105,14 @@ func (cs *CommitteeSelection) Initialize(ID int32, privateKey committee.PrivateK
 	}
 
 	return nil
+}
+
+func (cs *CommitteeSelection) resetState() {
+	cs.sk = nil
+	cs.pk = nil
+	cs.id = math.MaxInt32
+	cs.ids2Index = make(map[int32]int)
+	cs.pubKeys = nil
 }
 
 func (cs *CommitteeSelection) ourIndex() (int, bool) {
