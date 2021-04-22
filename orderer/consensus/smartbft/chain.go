@@ -158,10 +158,8 @@ func NewChain(
 	lastConfigBlock := LastConfigBlockFromLedgerOrPanic(support, c.Logger)
 
 	cr := &CommitteeRetriever{
-		privateKey: privateKey,
-		logger:     logger,
-		self:       int32(selfID),
-		ledger:     support,
+		Logger: logger,
+		Ledger: support,
 	}
 
 	currentCommittee, err := cr.CurrentCommittee()
@@ -561,10 +559,8 @@ func (c *BFTChain) reportIsLeader(proposal *types.Proposal) {
 
 func (c *BFTChain) committeeState() committee.State {
 	cr := &CommitteeRetriever{
-		logger:     c.Logger,
-		ledger:     c.support,
-		privateKey: c.committeePrivateKey,
-		self:       int32(c.Config.SelfID),
+		Logger: c.Logger,
+		Ledger: c.support,
 	}
 
 	return cr.CurrentState()

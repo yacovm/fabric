@@ -41,11 +41,14 @@ func (f CurrentConfigBlockGetterFunc) GetCurrConfigBlock(channel string) *common
 // that is related to configuration
 type DiscoverySupport struct {
 	CurrentConfigBlockGetter
+	CommitteeEndpointWrapper func(string, map[string]*discovery.Endpoints) map[string]*discovery.Endpoints
 }
 
 // NewDiscoverySupport creates a new DiscoverySupport
-func NewDiscoverySupport(getLastConfigBlock CurrentConfigBlockGetter) *DiscoverySupport {
+func NewDiscoverySupport(getLastConfigBlock CurrentConfigBlockGetter,
+	committeeEndpointWrapper func(string, map[string]*discovery.Endpoints) map[string]*discovery.Endpoints) *DiscoverySupport {
 	return &DiscoverySupport{
+		CommitteeEndpointWrapper: committeeEndpointWrapper,
 		CurrentConfigBlockGetter: getLastConfigBlock,
 	}
 }
@@ -97,7 +100,7 @@ func (s *DiscoverySupport) Config(channel string) (*discovery.ConfigResult, erro
 	if err != nil {
 		return nil, errors.Wrap(err, "failed computing orderer addresses")
 	}
-	res.Orderers = ordererEndpoints
+	res.Orderers = s.CommitteeEndpointWrapper(channel, ordererEndpoints)
 
 	if err := appendMSPConfigs(ordererGrp, appGrp, res.Msps); err != nil {
 		return nil, errors.WithStack(err)
