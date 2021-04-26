@@ -134,6 +134,28 @@ func makeNonConfigBlock(seq, lastConfigSeq uint64) *common.Block {
 	}
 }
 
+func makeNonConfigBlockWithCommitteeMetadata(seq, lastConfigSeq uint64) *common.Block {
+	return &common.Block{
+		Header: &common.BlockHeader{
+			Number: seq,
+		},
+		Data: &common.BlockData{
+			Data: [][]byte{nonConfigTx},
+		},
+		Metadata: &common.BlockMetadata{
+			Metadata: [][]byte{
+				utils.MarshalOrPanic(&common.Metadata{
+					Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
+						CommittteeCommitment: nil,
+						LastConfig: &common.LastConfig{
+							Index: lastConfigSeq,
+						},
+					}),
+				})},
+		},
+	}
+}
+
 func makeConfigBlock(seq uint64) *common.Block {
 	return &common.Block{
 		Header: &common.BlockHeader{

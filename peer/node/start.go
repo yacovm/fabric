@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	cs "github.com/SmartBFT-Go/randomcommittees"
+
 	"github.com/hyperledger/fabric/common/channelconfig"
 	"github.com/hyperledger/fabric/orderer/consensus/smartbft"
 	smartbft2 "github.com/hyperledger/fabric/protos/orderer/smartbft"
@@ -1101,8 +1103,9 @@ func (cew *CommitteeEndpointWrapper) endpoints(channel string, m map[string]*dis
 
 func (cew *CommitteeEndpointWrapper) endpointCommitteeFilter(sup *committeeSupport) func(string, map[string]*discprotos.Endpoints) map[string]*discprotos.Endpoints {
 	cr := &smartbft.CommitteeRetriever{
-		Logger: flogging.MustGetLogger("peer.discovery.committee"),
-		Ledger: sup.leger,
+		NewCommitteeSelection: cs.NewCommitteeSelection,
+		Logger:                flogging.MustGetLogger("peer.discovery.committee"),
+		Ledger:                sup.leger,
 	}
 
 	lastConfigBlock := smartbft.LastConfigBlockFromLedgerOrPanic(sup.leger, cew.logger)

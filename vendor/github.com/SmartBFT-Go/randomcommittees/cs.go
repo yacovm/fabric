@@ -12,7 +12,7 @@ import (
 	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
 )
 
-func NewCommitteeSelection(logger committee.Logger) *cs.CommitteeSelection {
+func NewCommitteeSelection(logger committee.Logger) committee.Selection {
 	return &cs.CommitteeSelection{
 		SelectCommittee: func(config committee.Config, seed []byte) []int32 {
 			failureChance := big.NewRat(1, config.InverseFailureChance)
