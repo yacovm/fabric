@@ -404,6 +404,14 @@ func buildVerifier(
 
 func (c *BFTChain) HandleMessage(sender uint64, m *smartbftprotos.Message, metadata []byte) {
 	c.Logger.Debugf("Message from %d", sender)
+
+	if prp := m.GetPrePrepare(); prp != nil {
+		if !c.verifySuspects(prp) {
+			c.Logger.Warningf("Failed verifying suspects in pre-prepare")
+			return
+		}
+	}
+
 	/*
 		if prp := m.GetPrePrepare(); prp != nil {
 
@@ -417,6 +425,72 @@ func (c *BFTChain) HandleMessage(sender uint64, m *smartbftprotos.Message, metad
 	*/
 
 	c.consensus.HandleMessage(sender, m)
+}
+
+func (c *BFTChain) getSuspectsFromSignatures(signatures []*smartbftprotos.Signature) []int32 {
+	var allSuspects []int32
+	for _, signature := range signatures {
+		sig := &Signature{}
+		if err := sig.Unmarshal(signature.Msg); err != nil {
+			c.Logger.Warningf("Failed unmarshaling signature")
+			continue
+		}
+		aux := sig.CommitteeAuxiliaryInput
+		committeeFeedback := &smartbft2.CommitteeFeedback{}
+		if err := proto.Unmarshal(aux, committeeFeedback); err != nil {
+			c.Logger.Warningf("Failed unmarshaling committeeFeedback")
+			continue
+		}
+		list := committeeFeedback.Suspects
+		cleanList := removeDuplicates(list)
+		allSuspects = append(allSuspects, cleanList...)
+	}
+	return agreedSuspects(allSuspects, 1) // TODO use f
+}
+
+func (c *BFTChain) getSuspectsFromBlock(proposal *smartbftprotos.Proposal) (bool, []int32) {
+	tuple := &ByteBufferTuple{}
+	if err := tuple.FromBytes(proposal.Payload); err != nil {
+		c.Logger.Warningf("Failed reading proposal payload")
+		return false, nil
+	}
+	metadata := &common.BlockMetadata{}
+	if err := proto.Unmarshal(tuple.B, metadata); err != nil {
+		c.Logger.Warningf("Failed unmarshaling block metadata")
+		return false, nil
+	}
+	signatureMetadata := &common.Metadata{}
+	if err := proto.Unmarshal(metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], signatureMetadata); err != nil {
+		c.Logger.Warningf("Failed unmarshaling block signature metadata")
+		return false, nil
+
+	}
+	ordererMDFromBlock := &common.OrdererBlockMetadata{}
+	if err := proto.Unmarshal(signatureMetadata.Value, ordererMDFromBlock); err != nil {
+		c.Logger.Warningf("Failed unmarshaling orderer block metadata")
+		return false, nil
+	}
+	return true, ordererMDFromBlock.HeartbeatSuspects
+}
+
+func (c *BFTChain) verifySuspects(prp *smartbftprotos.PrePrepare) bool {
+	agreedSuspects := c.getSuspectsFromSignatures(prp.PrevCommitSignatures)
+	success, blockSuspects := c.getSuspectsFromBlock(prp.Proposal)
+	if !success {
+		c.Logger.Warningf("Couldn't read suspects from block")
+		return false
+	}
+	if len(agreedSuspects) != len(blockSuspects) {
+		c.Logger.Warningf("Length of suspects list don't match, according to the signatures the length should be %d, while in the block the length is %d", len(agreedSuspects), len(blockSuspects))
+		return false
+	}
+	for i, s := range agreedSuspects {
+		if blockSuspects[i] != s {
+			c.Logger.Warningf("Suspect doesn't match, according to the signatures the %d'th suspect should be %d, while in the block the suspect is %d", i, s, blockSuspects[i])
+			return false
+		}
+	}
+	return true
 }
 
 func (c *BFTChain) maybeCommit() ([]byte, []byte) {
