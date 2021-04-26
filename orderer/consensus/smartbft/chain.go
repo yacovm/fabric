@@ -432,13 +432,13 @@ func (c *BFTChain) getSuspectsFromSignatures(signatures []*smartbftprotos.Signat
 	for _, signature := range signatures {
 		sig := &Signature{}
 		if err := sig.Unmarshal(signature.Msg); err != nil {
-			c.Logger.Warningf("Failed unmarshaling signature")
+			c.Logger.Warningf("Failed unmarshaling signature, error: %v", err)
 			continue
 		}
 		aux := sig.CommitteeAuxiliaryInput
 		committeeFeedback := &smartbft2.CommitteeFeedback{}
 		if err := proto.Unmarshal(aux, committeeFeedback); err != nil {
-			c.Logger.Warningf("Failed unmarshaling committeeFeedback")
+			c.Logger.Warningf("Failed unmarshaling committeeFeedback, error: %v", err)
 			continue
 		}
 		list := committeeFeedback.Suspects
@@ -451,23 +451,27 @@ func (c *BFTChain) getSuspectsFromSignatures(signatures []*smartbftprotos.Signat
 func (c *BFTChain) getSuspectsFromBlock(proposal *smartbftprotos.Proposal) (bool, []int32) {
 	tuple := &ByteBufferTuple{}
 	if err := tuple.FromBytes(proposal.Payload); err != nil {
-		c.Logger.Warningf("Failed reading proposal payload")
+		c.Logger.Warningf("Failed reading proposal payload, error: %v", err)
 		return false, nil
 	}
 	metadata := &common.BlockMetadata{}
 	if err := proto.Unmarshal(tuple.B, metadata); err != nil {
-		c.Logger.Warningf("Failed unmarshaling block metadata")
+		c.Logger.Warningf("Failed unmarshaling block metadata, error: %v", err)
+		return false, nil
+	}
+	if metadata == nil || len(metadata.Metadata) < len(common.BlockMetadataIndex_name) {
+		c.Logger.Warningf("Block metadata is either missing or contains too few entries")
 		return false, nil
 	}
 	signatureMetadata := &common.Metadata{}
 	if err := proto.Unmarshal(metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], signatureMetadata); err != nil {
-		c.Logger.Warningf("Failed unmarshaling block signature metadata")
+		c.Logger.Warningf("Failed unmarshaling block signature metadata, error: %v", err)
 		return false, nil
 
 	}
 	ordererMDFromBlock := &common.OrdererBlockMetadata{}
 	if err := proto.Unmarshal(signatureMetadata.Value, ordererMDFromBlock); err != nil {
-		c.Logger.Warningf("Failed unmarshaling orderer block metadata")
+		c.Logger.Warningf("Failed unmarshaling orderer block metadata, error: %v", err)
 		return false, nil
 	}
 	return true, ordererMDFromBlock.HeartbeatSuspects
