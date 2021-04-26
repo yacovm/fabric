@@ -761,7 +761,7 @@ func removeDuplicates(list []int32) []int32 {
 }
 
 // agreedSuspects gets a list of all suspects (a concatenation of all suspects lists)
-// it returns the suspects that appear at least f+1 times in the given least
+// it returns the suspects that appear at least f+1 times in the given list (sorted)
 func agreedSuspects(allSuspects []int32, f int32) []int32 {
 	votes := make(map[int32]int32)
 
