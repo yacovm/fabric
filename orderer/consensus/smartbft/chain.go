@@ -147,10 +147,9 @@ func NewChain(
 			LeaderID:             metrics.LeaderID.With("channel", support.ChainID()),
 		},
 		ct: &CommitteeTracker{
-			privateKey: privateKey,
-			logger:     logger,
-			self:       int32(selfID),
-			ledger:     support,
+			logger: logger,
+			self:   int32(selfID),
+			ledger: support,
 		},
 	}
 
@@ -158,8 +157,9 @@ func NewChain(
 	lastConfigBlock := LastConfigBlockFromLedgerOrPanic(support, c.Logger)
 
 	cr := &CommitteeRetriever{
-		Logger: logger,
-		Ledger: support,
+		NewCommitteeSelection: cs.NewCommitteeSelection,
+		Logger:                logger,
+		Ledger:                support,
 	}
 
 	currentCommittee, err := cr.CurrentCommittee()
@@ -637,8 +637,9 @@ func (c *BFTChain) reportIsLeader(proposal *types.Proposal) {
 
 func (c *BFTChain) committeeState() committee.State {
 	cr := &CommitteeRetriever{
-		Logger: c.Logger,
-		Ledger: c.support,
+		NewCommitteeSelection: cs.NewCommitteeSelection,
+		Logger:                c.Logger,
+		Ledger:                c.support,
 	}
 
 	return cr.CurrentState()

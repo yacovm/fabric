@@ -102,7 +102,6 @@ func (cm *CommitteeMetadata) Marshal() []byte {
 
 type CommitteeTracker struct {
 	lock                sync.RWMutex
-	privateKey          committee.PrivateKey
 	self                int32
 	ledger              Ledger
 	logger              *flogging.FabricLogger
@@ -112,8 +111,9 @@ type CommitteeTracker struct {
 
 func (ct *CommitteeTracker) CurrentCommittee() committee.Nodes {
 	cr := &CommitteeRetriever{
-		Ledger: ct.ledger,
-		Logger: ct.logger,
+		NewCommitteeSelection: cs.NewCommitteeSelection,
+		Ledger:                ct.ledger,
+		Logger:                ct.logger,
 	}
 
 	committee, err := cr.CurrentCommittee()
@@ -143,10 +143,17 @@ func (ct *CommitteeTracker) MaybeCommitteeChanged(metadata *CommitteeMetadata) {
 	}
 }
 
+//go:generate mockery -dir . -name CommitteeSelection -case underscore -output mocks
+
+type CommitteeSelection interface {
+	committee.Selection
+}
+
 // CommitteeRetriever retrieves the committee.
 type CommitteeRetriever struct {
-	Ledger Ledger
-	Logger *flogging.FabricLogger
+	NewCommitteeSelection func(logger committee.Logger) committee.Selection
+	Ledger                Ledger
+	Logger                *flogging.FabricLogger
 }
 
 func (cr *CommitteeRetriever) CurrentState() committee.State {
@@ -217,6 +224,7 @@ func (cr *CommitteeRetriever) CurrentCommittee() (committee.Nodes, error) {
 	}
 
 	if noCommitteeSelection {
+		cr.Logger.Debugf("Committee selection is disabled, returning all nodes")
 		return nil, nil
 	}
 
@@ -288,7 +296,7 @@ func (cr *CommitteeRetriever) CurrentCommittee() (committee.Nodes, error) {
 
 	cfg := parseCommitteeConfig(nodeConf, committeeConfig, cr.Logger)
 
-	committeeSelection := cs.NewCommitteeSelection(cr.Logger)
+	committeeSelection := cr.NewCommitteeSelection(cr.Logger)
 	cr.Logger.Infof("Determining committee for block %d with nodes %v", lastBlock.Header.Number+1, committeeMD.CommitteeAtShift.IDs())
 	if err := committeeSelection.Initialize(math.MaxInt32, nil, committeeMD.CommitteeAtShift); err != nil {
 		return nil, errors.Wrap(err, "failed initializing committee")
@@ -328,9 +336,9 @@ func (cr *CommitteeRetriever) CurrentCommittee() (committee.Nodes, error) {
 
 }
 
-func (cr *CommitteeRetriever) genesisCommittee(genesisConfig int64) (committee.Nodes, error) {
-	cr.Logger.Infof("Retrieving committee of genesis config at block %d", genesisConfig)
-	block := cr.Ledger.Block(uint64(genesisConfig))
+func (cr *CommitteeRetriever) genesisCommittee(lastBlockIndex int64) (committee.Nodes, error) {
+	cr.Logger.Infof("Retrieving committee of genesis config at block %d", lastBlockIndex)
+	block := cr.Ledger.Block(uint64(lastBlockIndex))
 	if block == nil {
 		cr.Logger.Panicf("Failed retrieving last block")
 	}
@@ -369,17 +377,17 @@ func (cr *CommitteeRetriever) latestState(finalStateIndex int64) (committee.Stat
 
 func (cr *CommitteeRetriever) disabled(config *smartbft.ConfigMetadata, nodeConf *nodeConfig) (bool, error) {
 	if config.Options.CommitteeConfig == nil {
-		cr.Logger.Debugf("Committee selection is not set, returning an empty committee")
+		cr.Logger.Debugf("Committee selection is not set")
 		return true, nil
 	}
 
 	if config.Options.CommitteeConfig.Disabled {
-		cr.Logger.Debugf("Committee selection is disabled, returning an empty committee")
+		cr.Logger.Debugf("Committee selection is disabled,")
 		return true, nil
 	}
 
 	if len(nodeConf.id2SectionPK) < 4 {
-		cr.Logger.Debugf("We only have %d selection public keys defined, returning an empty committee")
+		cr.Logger.Debugf("We only have %d selection public keys defined", len(nodeConf.id2SectionPK))
 		return true, nil
 	}
 

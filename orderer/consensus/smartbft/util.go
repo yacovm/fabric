@@ -349,10 +349,10 @@ func RemoteNodesFromConfigBlock(block *common.Block, selfID uint64, logger *flog
 			}
 			id2SelectionPKs[consenter.ConsenterId] = pubKey
 		} else {
-			logger.Warn("Node %d lacks a committee public key", consenter.ConsenterId)
+			logger.Warnf("Node %d lacks a committee public key", consenter.ConsenterId)
 		}
 
-		logger.Infof("%s %d ---> %s", bundle.ConfigtxValidator().ChainID(), consenter.ConsenterId, string(consenter.Identity))
+		logger.Debugf("%s %d ---> %s", bundle.ConfigtxValidator().ChainID(), consenter.ConsenterId, string(consenter.Identity))
 
 		nodeIDs = append(nodeIDs, consenter.ConsenterId)
 
@@ -410,7 +410,7 @@ func (nc *nodeConfig) Nodes(logger Logger) committee.Nodes {
 	var nodes committee.Nodes
 	for _, n := range nc.nodeIDs {
 		if pk, exists := nc.id2SectionPK[n]; !exists {
-			logger.Warnf("Node %d doesn't have a public key")
+			logger.Warnf("Node %d doesn't have a public key", n)
 			continue
 		} else {
 			nodes = append(nodes, committee.Node{
@@ -523,7 +523,7 @@ func parseCommitteeConfig(nodeConf *nodeConfig, committeeConfig *smartbft.Commit
 	var nodes committee.Nodes
 	for _, n := range nodeConf.nodeIDs {
 		if pk, exists := nodeConf.id2SectionPK[n]; !exists {
-			logger.Warnf("Node %d doesn't have a public key")
+			logger.Warnf("Node %d doesn't have a public key", n)
 			nodes = nil
 			break
 		} else {
