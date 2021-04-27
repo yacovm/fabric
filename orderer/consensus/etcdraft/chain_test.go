@@ -3555,6 +3555,9 @@ func newChain(timeout time.Duration, channel string, dataDir string, id uint64, 
 		b.Metadata.Metadata[common.BlockMetadataIndex_LAST_CONFIG] = utils.MarshalOrPanic(&common.Metadata{
 			Value: lastConfigValue,
 		})
+		b.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(&common.Metadata{
+			Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{LastConfig: &common.LastConfig{Index: c.lastConfigBlockNumber}}),
+		})
 
 		c.ledger[b.Header.Number] = b
 		if c.ledgerHeight < b.Header.Number+1 {
@@ -3578,6 +3581,9 @@ func newChain(timeout time.Duration, channel string, dataDir string, id uint64, 
 		lastConfigValue := utils.MarshalOrPanic(&common.LastConfig{Index: c.lastConfigBlockNumber})
 		b.Metadata.Metadata[common.BlockMetadataIndex_LAST_CONFIG] = utils.MarshalOrPanic(&common.Metadata{
 			Value: lastConfigValue,
+		})
+		b.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(&common.Metadata{
+			Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{LastConfig: &common.LastConfig{Index: c.lastConfigBlockNumber}}),
 		})
 
 		c.ledger[b.Header.Number] = b

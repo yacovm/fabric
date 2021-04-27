@@ -36,14 +36,22 @@ func TestNewBlockPuller(t *testing.T) {
 	blockBytes, err := ioutil.ReadFile("testdata/mychannel.block")
 	assert.NoError(t, err)
 
-	goodConfigBlock := &common.Block{}
+	goodConfigBlock := &common.Block{
+		Header: &common.BlockHeader{Number: 42},
+	}
 	assert.NoError(t, proto.Unmarshal(blockBytes, goodConfigBlock))
 
 	lastBlock := &common.Block{
+		Header: &common.BlockHeader{Number: 99},
 		Metadata: &common.BlockMetadata{
-			Metadata: [][]byte{{}, utils.MarshalOrPanic(&common.Metadata{
-				Value: utils.MarshalOrPanic(&common.LastConfig{Index: 42}),
-			})},
+			Metadata: [][]byte{
+				utils.MarshalOrPanic(&common.Metadata{
+					Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
+						LastConfig: &common.LastConfig{Index: 42},
+					}),
+				}), utils.MarshalOrPanic(&common.Metadata{
+					Value: utils.MarshalOrPanic(&common.LastConfig{Index: 42}),
+				})},
 		},
 	}
 

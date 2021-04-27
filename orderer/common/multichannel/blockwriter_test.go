@@ -109,15 +109,18 @@ func TestBlockLastConfig(t *testing.T) {
 		lastConfigSeq: lastConfigSeq,
 	}
 
+	lastBlock := cb.NewBlock(newBlockNum-1, []byte("foo"))
 	block := cb.NewBlock(newBlockNum, []byte("foo"))
 	bw.addLastConfigSignature(block)
+	bw.lastBlock = lastBlock
+	bw.addBlockSignature(block)
 
 	assert.Equal(t, newBlockNum, bw.lastConfigBlockNum)
 	assert.Equal(t, newConfigSeq, bw.lastConfigSeq)
 
-	md := utils.GetMetadataFromBlockOrPanic(block, cb.BlockMetadataIndex_LAST_CONFIG)
+	md := utils.GetMetadataFromBlockOrPanic(block, cb.BlockMetadataIndex_SIGNATURES)
 	assert.NotNil(t, md.Value, "Value not be empty in this case")
-	assert.Nil(t, md.Signatures, "Should have no signatures")
+	assert.NotNil(t, md.Signatures, "Should have no signatures")
 
 	lc := utils.GetLastConfigIndexFromBlockOrPanic(block)
 	assert.Equal(t, newBlockNum, lc)

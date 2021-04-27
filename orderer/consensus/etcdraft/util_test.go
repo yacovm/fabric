@@ -162,8 +162,13 @@ func TestEndpointconfigFromFromSupport(t *testing.T) {
 		{
 			name: "Last config block cannot be retrieved",
 			blockAtHeight: &common.Block{
+				Header: &common.BlockHeader{Number: 43},
 				Metadata: &common.BlockMetadata{
-					Metadata: [][]byte{{}, utils.MarshalOrPanic(&common.Metadata{
+					Metadata: [][]byte{utils.MarshalOrPanic(&common.Metadata{
+						Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{LastConfig: &common.LastConfig{
+							Index: 42,
+						}}),
+					}), utils.MarshalOrPanic(&common.Metadata{
 						Value: utils.MarshalOrPanic(&common.LastConfig{Index: 42}),
 					})},
 				},
@@ -174,8 +179,13 @@ func TestEndpointconfigFromFromSupport(t *testing.T) {
 		{
 			name: "Last config block is retrieved but it is invalid",
 			blockAtHeight: &common.Block{
+				Header: &common.BlockHeader{Number: 43},
 				Metadata: &common.BlockMetadata{
-					Metadata: [][]byte{{}, utils.MarshalOrPanic(&common.Metadata{
+					Metadata: [][]byte{utils.MarshalOrPanic(&common.Metadata{
+						Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{LastConfig: &common.LastConfig{
+							Index: 42,
+						}}),
+					}), utils.MarshalOrPanic(&common.Metadata{
 						Value: utils.MarshalOrPanic(&common.LastConfig{Index: 42}),
 					})},
 				},
@@ -187,8 +197,13 @@ func TestEndpointconfigFromFromSupport(t *testing.T) {
 		{
 			name: "Last config block is retrieved and is valid",
 			blockAtHeight: &common.Block{
+				Header: &common.BlockHeader{Number: 43},
 				Metadata: &common.BlockMetadata{
-					Metadata: [][]byte{{}, utils.MarshalOrPanic(&common.Metadata{
+					Metadata: [][]byte{utils.MarshalOrPanic(&common.Metadata{
+						Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{LastConfig: &common.LastConfig{
+							Index: 42,
+						}}),
+					}), utils.MarshalOrPanic(&common.Metadata{
 						Value: utils.MarshalOrPanic(&common.LastConfig{Index: 42}),
 					})},
 				},
@@ -228,8 +243,13 @@ func TestNewBlockPuller(t *testing.T) {
 	assert.NoError(t, proto.Unmarshal(blockBytes, goodConfigBlock))
 
 	lastBlock := &common.Block{
+		Header: &common.BlockHeader{Number: 43},
 		Metadata: &common.BlockMetadata{
-			Metadata: [][]byte{{}, utils.MarshalOrPanic(&common.Metadata{
+			Metadata: [][]byte{utils.MarshalOrPanic(&common.Metadata{
+				Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{LastConfig: &common.LastConfig{
+					Index: 42,
+				}}),
+			}), utils.MarshalOrPanic(&common.Metadata{
 				Value: utils.MarshalOrPanic(&common.LastConfig{Index: 42}),
 			})},
 		},
@@ -378,7 +398,11 @@ func TestEvictionSuspector(t *testing.T) {
 	configBlock := &common.Block{
 		Header: &common.BlockHeader{Number: 9},
 		Metadata: &common.BlockMetadata{
-			Metadata: [][]byte{{}, {}, {}, {}},
+			Metadata: [][]byte{utils.MarshalOrPanic(&common.Metadata{
+				Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{LastConfig: &common.LastConfig{
+					Index: 9,
+				}}),
+			}), {}, {}, {}},
 		},
 	}
 	configBlock.Metadata.Metadata[common.BlockMetadataIndex_LAST_CONFIG] = utils.MarshalOrPanic(&common.Metadata{

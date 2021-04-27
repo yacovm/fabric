@@ -267,6 +267,9 @@ func TestExtractSysChanLastConfig(t *testing.T) {
 	nextBlock.Metadata.Metadata[common.BlockMetadataIndex_LAST_CONFIG] = utils.MarshalOrPanic(&common.Metadata{
 		Value: utils.MarshalOrPanic(&common.LastConfig{Index: rl.Height()}),
 	})
+	nextBlock.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(&common.Metadata{
+		Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{LastConfig: &common.LastConfig{Index: rl.Height()}}),
+	})
 	err = rl.Append(nextBlock)
 	require.NoError(t, err)
 
