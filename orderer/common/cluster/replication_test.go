@@ -381,6 +381,13 @@ func TestReplicateChainsChannelClassificationFailure(t *testing.T) {
 	block30WithConfigBlockOf21.Metadata.Metadata[common.BlockMetadataIndex_LAST_CONFIG] = utils.MarshalOrPanic(&common.Metadata{
 		Value: utils.MarshalOrPanic(&common.LastConfig{Index: 21}),
 	})
+	block30WithConfigBlockOf21.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(&common.Metadata{
+		Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
+			LastConfig: &common.LastConfig{
+				Index: 21,
+			},
+		}),
+	})
 
 	osn := newClusterNode(t)
 	defer osn.stop()
@@ -454,6 +461,13 @@ func TestReplicateChainsGreenPath(t *testing.T) {
 	block30WithConfigBlockOf21 := common.NewBlock(30, nil)
 	block30WithConfigBlockOf21.Metadata.Metadata[common.BlockMetadataIndex_LAST_CONFIG] = utils.MarshalOrPanic(&common.Metadata{
 		Value: utils.MarshalOrPanic(&common.LastConfig{Index: 21}),
+	})
+	block30WithConfigBlockOf21.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(&common.Metadata{
+		Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
+			LastConfig: &common.LastConfig{
+				Index: 21,
+			},
+		}),
 	})
 
 	osn := newClusterNode(t)
@@ -759,7 +773,7 @@ func TestParticipant(t *testing.T) {
 			latestBlockSeq: uint64(99),
 			latestBlock: &common.Block{
 				Metadata: &common.BlockMetadata{
-					Metadata: [][]byte{{1, 2, 3}},
+					Metadata: [][]byte{},
 				},
 			},
 			expectedError: "no metadata in block",
@@ -771,12 +785,13 @@ func TestParticipant(t *testing.T) {
 			},
 			latestBlockSeq: uint64(99),
 			latestBlock: &common.Block{
+				Header: &common.BlockHeader{Number: 99},
 				Metadata: &common.BlockMetadata{
 					Metadata: [][]byte{{1, 2, 3}, {1, 2, 3}},
 				},
 			},
 			expectedError: "error unmarshaling metadata from" +
-				" block at index [LAST_CONFIG]: proto: common.Metadata: illegal tag 0 (wire type 1)",
+				" block at index [SIGNATURES]: proto: common.Metadata: illegal tag 0 (wire type 1)",
 		},
 		{
 			name: "Pulled block's metadata is valid and has a last config",
@@ -785,8 +800,13 @@ func TestParticipant(t *testing.T) {
 			},
 			latestBlockSeq: uint64(99),
 			latestBlock: &common.Block{
+				Header: &common.BlockHeader{Number: 42},
 				Metadata: &common.BlockMetadata{
-					Metadata: [][]byte{{1, 2, 3}, utils.MarshalOrPanic(&common.Metadata{
+					Metadata: [][]byte{utils.MarshalOrPanic(&common.Metadata{
+						Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
+							LastConfig: &common.LastConfig{Index: 42},
+						}),
+					}), utils.MarshalOrPanic(&common.Metadata{
 						Value: utils.MarshalOrPanic(&common.LastConfig{
 							Index: 42,
 						}),
@@ -814,8 +834,13 @@ func TestParticipant(t *testing.T) {
 			},
 			latestBlockSeq: uint64(99),
 			latestBlock: &common.Block{
+				Header: &common.BlockHeader{Number: 99},
 				Metadata: &common.BlockMetadata{
-					Metadata: [][]byte{{1, 2, 3}, utils.MarshalOrPanic(&common.Metadata{
+					Metadata: [][]byte{utils.MarshalOrPanic(&common.Metadata{
+						Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
+							LastConfig: &common.LastConfig{Index: 42},
+						}),
+					}), utils.MarshalOrPanic(&common.Metadata{
 						Value: utils.MarshalOrPanic(&common.LastConfig{
 							Index: 42,
 						}),
@@ -1565,6 +1590,9 @@ func simulateNonParticipantChannelPull(osn *deliverServer) {
 	lastBlock := common.NewBlock(1, nil)
 	lastBlock.Metadata.Metadata[common.BlockMetadataIndex_LAST_CONFIG] = utils.MarshalOrPanic(&common.Metadata{
 		Value: utils.MarshalOrPanic(&common.LastConfig{Index: 0}),
+	})
+	lastBlock.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(&common.Metadata{
+		Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{LastConfig: &common.LastConfig{Index: 0}}),
 	})
 	// We first present a channel with a last block of 'lastBlock', that points to
 	// the genesis block

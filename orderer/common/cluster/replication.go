@@ -520,7 +520,7 @@ func latestHeightAndEndpoint(puller ChainPuller) (string, uint64, error) {
 }
 
 func lastConfigFromBlock(block *common.Block) (uint64, error) {
-	if block.Metadata == nil || len(block.Metadata.Metadata) <= int(common.BlockMetadataIndex_LAST_CONFIG) {
+	if block.Metadata == nil || len(block.Metadata.Metadata) <= int(common.BlockMetadataIndex_SIGNATURES) {
 		return 0, errors.New("no metadata in block")
 	}
 	return utils.GetLastConfigIndexFromBlock(block)

@@ -84,6 +84,10 @@ func TestConfigTx(t *testing.T) {
 
 		block := blockledger.CreateNextBlock(rl, []*cb.Envelope{makeNormalTx(genesisconfig.TestChainID, 7)})
 		block.Metadata.Metadata[cb.BlockMetadataIndex_LAST_CONFIG] = utils.MarshalOrPanic(&cb.Metadata{Value: utils.MarshalOrPanic(&cb.LastConfig{Index: 7})})
+		block.Metadata.Metadata[cb.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(&cb.Metadata{Value: utils.MarshalOrPanic(&cb.OrdererBlockMetadata{
+			LastConfig: &cb.LastConfig{Index: 7},
+		})})
+
 		rl.Append(block)
 
 		pctx := configTx(rl)

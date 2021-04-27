@@ -538,7 +538,11 @@ func createBlockChain(start, end uint64) []*common.Block {
 			SignatureHeader: utils.MarshalOrPanic(sHdr),
 		}
 		block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(&common.Metadata{
-			Value: nil,
+			Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
+				LastConfig: &common.LastConfig{
+					Index: 1,
+				},
+			}),
 			Signatures: []*common.MetadataSignature{
 				blockSignature,
 			},
@@ -866,15 +870,18 @@ func TestLastConfigBlock(t *testing.T) {
 			name:           "nil metadata",
 			expectedError:  "no metadata in block",
 			blockRetriever: blockRetriever,
-			block:          &common.Block{},
+			block: &common.Block{
+				Header: &common.BlockHeader{Number: 1},
+			},
 		},
 		{
 			name:           "no last config block metadata",
 			expectedError:  "no metadata in block",
 			blockRetriever: blockRetriever,
 			block: &common.Block{
+				Header: &common.BlockHeader{Number: 1},
 				Metadata: &common.BlockMetadata{
-					Metadata: [][]byte{{}},
+					Metadata: [][]byte{},
 				},
 			},
 		},
@@ -882,18 +889,26 @@ func TestLastConfigBlock(t *testing.T) {
 			name:           "bad metadata in block",
 			blockRetriever: blockRetriever,
 			expectedError: "error unmarshaling metadata from block at index " +
-				"[LAST_CONFIG]: proto: common.Metadata: illegal tag 0 (wire type 1)",
+				"[SIGNATURES]: proto: common.Metadata: illegal tag 0 (wire type 1)",
 			block: &common.Block{
+				Header: &common.BlockHeader{Number: 1},
 				Metadata: &common.BlockMetadata{
-					Metadata: [][]byte{{}, {1, 2, 3}},
+					Metadata: [][]byte{{1, 2, 3}, {1, 2, 3}},
 				},
 			},
 		},
 		{
 			name: "no block with index",
 			block: &common.Block{
+				Header: &common.BlockHeader{Number: 1},
 				Metadata: &common.BlockMetadata{
-					Metadata: [][]byte{{}, utils.MarshalOrPanic(&common.Metadata{
+					Metadata: [][]byte{utils.MarshalOrPanic(&common.Metadata{
+						Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
+							LastConfig: &common.LastConfig{
+								Index: 666,
+							},
+						}),
+					}), utils.MarshalOrPanic(&common.Metadata{
 						Value: utils.MarshalOrPanic(&common.LastConfig{Index: 666}),
 					})},
 				},
@@ -904,8 +919,17 @@ func TestLastConfigBlock(t *testing.T) {
 		{
 			name: "valid last config block",
 			block: &common.Block{
+				Header: &common.BlockHeader{
+					Number: 1,
+				},
 				Metadata: &common.BlockMetadata{
-					Metadata: [][]byte{{}, utils.MarshalOrPanic(&common.Metadata{
+					Metadata: [][]byte{utils.MarshalOrPanic(&common.Metadata{
+						Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
+							LastConfig: &common.LastConfig{
+								Index: 42,
+							},
+						}),
+					}), utils.MarshalOrPanic(&common.Metadata{
 						Value: utils.MarshalOrPanic(&common.LastConfig{Index: 42}),
 					})},
 				},

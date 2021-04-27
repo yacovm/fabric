@@ -951,17 +951,26 @@ func TestVerifierLoader(t *testing.T) {
 			expectedPanic: "Failed retrieving block [99] for channel mychannel",
 		},
 		{
-			description:   "block retrieval succeeds but the block is bad",
-			ledgerHeight:  100,
-			lastBlock:     &common.Block{},
+			description:  "block retrieval succeeds but the block is bad",
+			ledgerHeight: 100,
+			lastBlock: &common.Block{
+				Header: &common.BlockHeader{Number: 99},
+			},
 			expectedPanic: "Failed retrieving config block [99] for channel mychannel",
 		},
 		{
 			description:  "config block retrieved is bad",
 			ledgerHeight: 100,
 			lastBlock: &common.Block{
+				Header: &common.BlockHeader{Number: 99},
 				Metadata: &common.BlockMetadata{
-					Metadata: [][]byte{{}, utils.MarshalOrPanic(&common.Metadata{
+					Metadata: [][]byte{utils.MarshalOrPanic(&common.Metadata{
+						Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
+							LastConfig: &common.LastConfig{
+								Index: 21,
+							},
+						}),
+					}), utils.MarshalOrPanic(&common.Metadata{
 						Value: utils.MarshalOrPanic(&common.LastConfig{Index: 21}),
 					}), {}, {}},
 				},
@@ -974,8 +983,15 @@ func TestVerifierLoader(t *testing.T) {
 			description:  "VerifierFromConfig fails",
 			ledgerHeight: 100,
 			lastBlock: &common.Block{
+				Header: &common.BlockHeader{Number: 99},
 				Metadata: &common.BlockMetadata{
-					Metadata: [][]byte{{}, utils.MarshalOrPanic(&common.Metadata{
+					Metadata: [][]byte{utils.MarshalOrPanic(&common.Metadata{
+						Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
+							LastConfig: &common.LastConfig{
+								Index: 21,
+							},
+						}),
+					}), utils.MarshalOrPanic(&common.Metadata{
 						Value: utils.MarshalOrPanic(&common.LastConfig{Index: 21}),
 					}), {}, {}},
 				},
@@ -989,8 +1005,15 @@ func TestVerifierLoader(t *testing.T) {
 			description:  "VerifierFromConfig succeeds",
 			ledgerHeight: 100,
 			lastBlock: &common.Block{
+				Header: &common.BlockHeader{Number: 99},
 				Metadata: &common.BlockMetadata{
-					Metadata: [][]byte{{}, utils.MarshalOrPanic(&common.Metadata{
+					Metadata: [][]byte{utils.MarshalOrPanic(&common.Metadata{
+						Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
+							LastConfig: &common.LastConfig{
+								Index: 21,
+							},
+						}),
+					}), utils.MarshalOrPanic(&common.Metadata{
 						Value: utils.MarshalOrPanic(&common.LastConfig{Index: 21}),
 					}), {}, {}},
 				},

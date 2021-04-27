@@ -1208,6 +1208,7 @@ func (b *blockRetriever) Block(number uint64) *common2.Block {
 	if err != nil {
 		panic(err)
 	}
+	defer i.Close()
 	qr, err := i.Next()
 	if err != nil {
 		panic(err)

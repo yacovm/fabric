@@ -244,9 +244,17 @@ func (ds *deliverServer) stop() {
 }
 
 func (ds *deliverServer) enqueueResponse(seq uint64) {
-	ds.blocks() <- &orderer.DeliverResponse{
+	block := &orderer.DeliverResponse{
 		Type: &orderer.DeliverResponse_Block{Block: common.NewBlock(seq, nil)},
 	}
+	block.GetBlock().Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(&common.Metadata{
+		Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
+			LastConfig: &common.LastConfig{
+				Index: seq - 1,
+			},
+		}),
+	})
+	ds.blocks() <- block
 }
 
 func (ds *deliverServer) addExpectProbeAssert() {

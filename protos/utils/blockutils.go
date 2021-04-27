@@ -80,16 +80,25 @@ func GetOrdererblockMetadataOrPanic(block *cb.Block) *cb.OrdererBlockMetadata {
 // GetLastConfigIndexFromBlock retrieves the index of the last config block as
 // encoded in the block metadata
 func GetLastConfigIndexFromBlock(block *cb.Block) (uint64, error) {
-	md, err := GetMetadataFromBlock(block, cb.BlockMetadataIndex_LAST_CONFIG)
+	if block == nil || block.Header == nil {
+		return 0, errors.Errorf("block is nil or header is nil")
+	}
+	if block.Header.Number == 0 {
+		return 0, nil
+	}
+	md, err := GetMetadataFromBlock(block, cb.BlockMetadataIndex_SIGNATURES)
 	if err != nil {
 		return 0, err
 	}
-	lc := &cb.LastConfig{}
-	err = proto.Unmarshal(md.Value, lc)
+	obm := &cb.OrdererBlockMetadata{}
+	err = proto.Unmarshal(md.Value, obm)
 	if err != nil {
 		return 0, errors.Wrap(err, "error unmarshaling LastConfig")
 	}
-	return lc.Index, nil
+	if obm.LastConfig == nil {
+		return 0, errors.Errorf("last config is nil")
+	}
+	return obm.LastConfig.Index, nil
 }
 
 // GetLastConfigIndexFromBlockOrPanic retrieves the index of the last config

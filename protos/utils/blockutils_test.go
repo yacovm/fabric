@@ -173,15 +173,15 @@ func TestCopyBlockMetadata(t *testing.T) {
 }
 
 func TestGetLastConfigIndexFromBlock(t *testing.T) {
-	block := common.NewBlock(0, nil)
+	block := common.NewBlock(1, nil)
 	index := uint64(2)
-	lc, _ := proto.Marshal(&cb.LastConfig{
-		Index: index,
+	lc, _ := proto.Marshal(&cb.OrdererBlockMetadata{
+		LastConfig: &cb.LastConfig{Index: 2},
 	})
 	metadata, _ := proto.Marshal(&cb.Metadata{
 		Value: lc,
 	})
-	block.Metadata.Metadata[cb.BlockMetadataIndex_LAST_CONFIG] = metadata
+	block.Metadata.Metadata[cb.BlockMetadataIndex_SIGNATURES] = metadata
 	result, err := utils.GetLastConfigIndexFromBlock(block)
 	assert.NoError(t, err, "Unexpected error returning last config index")
 	assert.Equal(t, index, result, "Unexpected last config index returned from block")
@@ -189,7 +189,7 @@ func TestGetLastConfigIndexFromBlock(t *testing.T) {
 	assert.Equal(t, index, result, "Unexpected last config index returned from block")
 
 	// malformed metadata
-	block.Metadata.Metadata[cb.BlockMetadataIndex_LAST_CONFIG] = []byte("bad metadata")
+	block.Metadata.Metadata[cb.BlockMetadataIndex_SIGNATURES] = []byte("bad metadata")
 	_, err = utils.GetLastConfigIndexFromBlock(block)
 	assert.Error(t, err, "Expected error with malformed metadata")
 
@@ -197,7 +197,7 @@ func TestGetLastConfigIndexFromBlock(t *testing.T) {
 	metadata, _ = proto.Marshal(&cb.Metadata{
 		Value: []byte("bad last config"),
 	})
-	block.Metadata.Metadata[cb.BlockMetadataIndex_LAST_CONFIG] = metadata
+	block.Metadata.Metadata[cb.BlockMetadataIndex_SIGNATURES] = metadata
 	_, err = utils.GetLastConfigIndexFromBlock(block)
 	assert.Error(t, err, "Expected error with malformed last config metadata")
 	assert.Panics(t, func() {

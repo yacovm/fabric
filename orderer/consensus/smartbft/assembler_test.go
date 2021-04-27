@@ -125,7 +125,13 @@ func makeNonConfigBlock(seq, lastConfigSeq uint64) *common.Block {
 			Data: [][]byte{nonConfigTx},
 		},
 		Metadata: &common.BlockMetadata{
-			Metadata: [][]byte{{},
+			Metadata: [][]byte{utils.MarshalOrPanic(&common.Metadata{
+				Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
+					LastConfig: &common.LastConfig{
+						Index: lastConfigSeq,
+					},
+				}),
+			}),
 				utils.MarshalOrPanic(&common.Metadata{
 					Value: utils.MarshalOrPanic(&common.LastConfig{Index: lastConfigSeq}),
 				})},
