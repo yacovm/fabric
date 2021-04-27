@@ -12,13 +12,13 @@ import (
 	"math"
 	"runtime/debug"
 	"sync"
-
-	"github.com/hyperledger/fabric/orderer/common/cluster"
+	"time"
 
 	cs "github.com/SmartBFT-Go/randomcommittees"
 	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
+	"github.com/hyperledger/fabric/orderer/common/cluster"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/orderer/smartbft"
 	"github.com/pkg/errors"
@@ -101,46 +101,26 @@ func (cm *CommitteeMetadata) Marshal() []byte {
 }
 
 type CommitteeTracker struct {
-	lock                sync.RWMutex
-	self                int32
-	ledger              Ledger
-	logger              *flogging.FabricLogger
-	cachedLastCommittee committee.Nodes
-	genesisConfigAt     int64
+	ledger Ledger
+	logger *flogging.FabricLogger
+	cr     *CommitteeRetriever
 }
 
 func (ct *CommitteeTracker) CurrentCommittee() committee.Nodes {
-	cr := &CommitteeRetriever{
-		NewCommitteeSelection: cs.NewCommitteeSelection,
-		Ledger:                ct.ledger,
-		Logger:                ct.logger,
+	if ct.cr == nil {
+		ct.cr = &CommitteeRetriever{
+			NewCommitteeSelection: cs.NewCommitteeSelection,
+			Ledger:                &CachingLedger{Ledger: ct.ledger},
+			Logger:                ct.logger,
+		}
 	}
 
-	committee, err := cr.CurrentCommittee()
+	committee, err := ct.cr.CurrentCommittee()
 	if err != nil {
 		ct.logger.Panicf("Failed determining current committee: %v\n%s", err, debug.Stack())
 	}
 
 	return committee
-
-	return committee
-}
-
-func (ct *CommitteeTracker) MaybeCommitteeChanged(metadata *CommitteeMetadata) {
-	if metadata == nil {
-		return
-	}
-
-	if ct.genesisConfigAt == 0 {
-		ct.genesisConfigAt = metadata.GenesisConfigAt
-		return
-	}
-
-	if len(metadata.CommitteeAtShift) > 0 {
-		ct.lock.Lock()
-		ct.cachedLastCommittee = nil
-		ct.lock.Unlock()
-	}
 }
 
 //go:generate mockery -dir . -name CommitteeSelection -case underscore -output mocks
@@ -444,4 +424,101 @@ func CommitteeMetadataForProposal(
 	}
 
 	return committeeMD
+}
+
+type CachingLedger struct {
+	lock      sync.RWMutex
+	initcache sync.Once
+	Ledger    Ledger
+	cache     map[uint64]*cacheEntry
+}
+
+type cacheEntry struct {
+	block    *common.Block
+	lastUsed time.Time
+}
+
+func (c *CachingLedger) Height() uint64 {
+	return c.Ledger.Height()
+}
+
+func (c *CachingLedger) Block(seq uint64) *common.Block {
+	block := c.lookup(seq)
+	if block != nil {
+		return block
+	}
+
+	block = c.Ledger.Block(seq)
+
+	defer c.shrinkIfNeeded()
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	c.cache[seq] = &cacheEntry{
+		block:    block,
+		lastUsed: time.Now(),
+	}
+	return block
+}
+
+func (c *CachingLedger) lookup(seq uint64) *common.Block {
+	c.initcache.Do(func() {
+		cache := make(map[uint64]*cacheEntry)
+		c.lock.Lock()
+		c.cache = cache
+		c.lock.Unlock()
+	})
+	c.lock.RLock()
+	entry, exists := c.cache[seq]
+	c.lock.RUnlock()
+
+	if !exists {
+		return nil
+	}
+
+	c.lock.Lock()
+	entry.lastUsed = time.Now()
+	c.cache[seq] = entry
+	c.lock.Unlock()
+
+	return entry.block
+}
+
+func (c *CachingLedger) shrinkIfNeeded() {
+	c.lock.RLock()
+	shrinkNeeded := len(c.cache) >= 5
+	c.lock.RUnlock()
+	if !shrinkNeeded {
+		return
+	}
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	for len(c.cache) > 4 {
+		c.evictOldest()
+	}
+}
+
+func (c *CachingLedger) evictOldest() {
+	var oldestTime time.Time
+	var oldestSeqUsed uint64
+	// Get first entry to set the minimum
+	for seq, entry := range c.cache {
+		oldestTime = entry.lastUsed
+		oldestSeqUsed = seq
+		break
+	}
+
+	// Find the minimum
+	for seq, entry := range c.cache {
+		if entry.lastUsed.Before(oldestTime) {
+			oldestTime = entry.lastUsed
+			oldestSeqUsed = seq
+		}
+	}
+
+	// Remove the minimum
+	delete(c.cache, oldestSeqUsed)
 }

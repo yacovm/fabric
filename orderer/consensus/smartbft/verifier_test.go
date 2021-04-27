@@ -545,10 +545,9 @@ func TestVerifyProposal(t *testing.T) {
 		t.Run(testCase.description, func(t *testing.T) {
 			runtimeConfig := &atomic.Value{}
 			rtc := smartbft.RuntimeConfig{
-				OnCommitteeMetadataUpdate: func(_ *smartbft.CommitteeMetadata) {},
-				LastCommittedBlockHash:    lastHash,
-				LastBlock:                 testCase.lastBlock,
-				LastConfigBlock:           testCase.lastConfigBlock,
+				LastCommittedBlockHash: lastHash,
+				LastBlock:              testCase.lastBlock,
+				LastConfigBlock:        testCase.lastConfigBlock,
 			}
 
 			runtimeConfig.Store(rtc)

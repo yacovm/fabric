@@ -1105,7 +1105,7 @@ func (cew *CommitteeEndpointWrapper) endpointCommitteeFilter(sup *committeeSuppo
 	cr := &smartbft.CommitteeRetriever{
 		NewCommitteeSelection: cs.NewCommitteeSelection,
 		Logger:                flogging.MustGetLogger("peer.discovery.committee"),
-		Ledger:                sup.leger,
+		Ledger:                &smartbft.CachingLedger{Ledger: sup.leger},
 	}
 
 	lastConfigBlock := smartbft.LastConfigBlockFromLedgerOrPanic(sup.leger, cew.logger)
