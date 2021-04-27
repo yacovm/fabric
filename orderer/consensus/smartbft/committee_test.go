@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hyperledger/fabric/protos/utils"
 	"go.uber.org/zap"
@@ -208,5 +209,32 @@ func TestCommitteeRetrieverCurrentCommittee(t *testing.T) {
 				t.Errorf("%s shouldn't been logged but hasn't", tt.mustBeLogged)
 			}
 		})
+	}
+}
+
+func TestCachingLedger(t *testing.T) {
+	l := &mocks.Ledger{}
+	l.On("Height").Return(uint64(100))
+
+	l.On("Block", uint64(0)).Return(&common.Block{Header: &common.BlockHeader{Number: 0}})
+	for seq := uint64(1); seq < 10; seq++ {
+		l.On("Block", seq).Return(&common.Block{Header: &common.BlockHeader{Number: seq}}).Once()
+	}
+
+	cl := &smartbft.CachingLedger{
+		Ledger: l,
+	}
+	assert.Equal(t, uint64(100), cl.Height())
+
+	for seq := uint64(1); seq < 10; seq++ {
+		time.Sleep(time.Millisecond)
+		assert.Equal(t, seq, cl.Block(seq).Header.Number)
+		time.Sleep(time.Millisecond)
+		assert.Equal(t, uint64(0), cl.Block(0).Header.Number)
+	}
+
+	for seq := uint64(9); seq > 7; seq-- {
+		assert.Equal(t, seq, cl.Block(seq).Header.Number)
+		time.Sleep(time.Millisecond)
 	}
 }

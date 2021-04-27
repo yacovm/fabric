@@ -426,20 +426,19 @@ func (nc *nodeConfig) Nodes(logger Logger) committee.Nodes {
 // RuntimeConfig defines the configuration of the consensus
 // that is related to runtime.
 type RuntimeConfig struct {
-	BFTConfig                 types.Configuration
-	isConfig                  bool
-	logger                    *flogging.FabricLogger
-	id                        uint64
-	LastCommittedBlockHash    string
-	RemoteNodes               []cluster.RemoteNode
-	ID2Identities             NodeIdentitiesByID
-	LastBlock                 *common.Block
-	LastConfigBlock           *common.Block
-	Nodes                     []uint64
-	CommitteeMetadata         *CommitteeMetadata
-	OnCommitteeMetadataUpdate func(*CommitteeMetadata)
-	OnCommitteeChange         func()
-	committeeMinimumLifespan  uint32
+	BFTConfig                types.Configuration
+	isConfig                 bool
+	logger                   *flogging.FabricLogger
+	id                       uint64
+	LastCommittedBlockHash   string
+	RemoteNodes              []cluster.RemoteNode
+	ID2Identities            NodeIdentitiesByID
+	LastBlock                *common.Block
+	LastConfigBlock          *common.Block
+	Nodes                    []uint64
+	CommitteeMetadata        *CommitteeMetadata
+	OnCommitteeChange        func()
+	committeeMinimumLifespan uint32
 }
 
 func (rtc RuntimeConfig) BlockCommitted(block *common.Block) (RuntimeConfig, error) {
@@ -455,22 +454,19 @@ func (rtc RuntimeConfig) BlockCommitted(block *common.Block) (RuntimeConfig, err
 		rtc.OnCommitteeChange()
 	}
 
-	defer rtc.OnCommitteeMetadataUpdate(cm)
-
 	return RuntimeConfig{
-		OnCommitteeChange:         rtc.OnCommitteeChange,
-		CommitteeMetadata:         cm,
-		BFTConfig:                 rtc.BFTConfig,
-		id:                        rtc.id,
-		logger:                    rtc.logger,
-		LastCommittedBlockHash:    hex.EncodeToString(block.Header.Hash()),
-		Nodes:                     rtc.Nodes,
-		ID2Identities:             rtc.ID2Identities,
-		RemoteNodes:               rtc.RemoteNodes,
-		LastBlock:                 block,
-		LastConfigBlock:           rtc.LastConfigBlock,
-		committeeMinimumLifespan:  rtc.committeeMinimumLifespan,
-		OnCommitteeMetadataUpdate: rtc.OnCommitteeMetadataUpdate,
+		OnCommitteeChange:        rtc.OnCommitteeChange,
+		CommitteeMetadata:        cm,
+		BFTConfig:                rtc.BFTConfig,
+		id:                       rtc.id,
+		logger:                   rtc.logger,
+		LastCommittedBlockHash:   hex.EncodeToString(block.Header.Hash()),
+		Nodes:                    rtc.Nodes,
+		ID2Identities:            rtc.ID2Identities,
+		RemoteNodes:              rtc.RemoteNodes,
+		LastBlock:                block,
+		LastConfigBlock:          rtc.LastConfigBlock,
+		committeeMinimumLifespan: rtc.committeeMinimumLifespan,
 	}, nil
 }
 
@@ -495,27 +491,24 @@ func (rtc RuntimeConfig) configBlockCommitted(block *common.Block) (RuntimeConfi
 		return RuntimeConfig{}, err
 	}
 
-	defer rtc.OnCommitteeMetadataUpdate(cm)
-
 	if cm != nil && cm.CommitteeShiftAt == int64(block.Header.Number) {
 		rtc.OnCommitteeChange()
 	}
 
 	return RuntimeConfig{
-		OnCommitteeChange:         rtc.OnCommitteeChange,
-		OnCommitteeMetadataUpdate: rtc.OnCommitteeMetadataUpdate,
-		CommitteeMetadata:         cm,
-		BFTConfig:                 bftConfig,
-		isConfig:                  true,
-		id:                        rtc.id,
-		logger:                    rtc.logger,
-		LastCommittedBlockHash:    hex.EncodeToString(block.Header.Hash()),
-		Nodes:                     nodeConf.nodeIDs,
-		ID2Identities:             nodeConf.id2Identities,
-		RemoteNodes:               nodeConf.remoteNodes,
-		LastBlock:                 block,
-		LastConfigBlock:           block,
-		committeeMinimumLifespan:  committeeConfig.CommitteeMinimumLifespan,
+		OnCommitteeChange:        rtc.OnCommitteeChange,
+		CommitteeMetadata:        cm,
+		BFTConfig:                bftConfig,
+		isConfig:                 true,
+		id:                       rtc.id,
+		logger:                   rtc.logger,
+		LastCommittedBlockHash:   hex.EncodeToString(block.Header.Hash()),
+		Nodes:                    nodeConf.nodeIDs,
+		ID2Identities:            nodeConf.id2Identities,
+		RemoteNodes:              nodeConf.remoteNodes,
+		LastBlock:                block,
+		LastConfigBlock:          block,
+		committeeMinimumLifespan: committeeConfig.CommitteeMinimumLifespan,
 	}, nil
 }
 

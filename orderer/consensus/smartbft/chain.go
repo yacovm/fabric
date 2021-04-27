@@ -148,25 +148,14 @@ func NewChain(
 		},
 		ct: &CommitteeTracker{
 			logger: logger,
-			self:   int32(selfID),
-			ledger: support,
+			ledger: &CachingLedger{Ledger: support},
 		},
 	}
 
 	lastBlock := LastBlockFromLedgerOrPanic(support, c.Logger)
 	lastConfigBlock := LastConfigBlockFromLedgerOrPanic(support, c.Logger)
 
-	cr := &CommitteeRetriever{
-		NewCommitteeSelection: cs.NewCommitteeSelection,
-		Logger:                logger,
-		Ledger:                support,
-	}
-
-	currentCommittee, err := cr.CurrentCommittee()
-	if err != nil {
-		logger.Errorf("Failed initializing chain: %v", err)
-		return nil, err
-	}
+	currentCommittee := c.ct.CurrentCommittee()
 
 	rtc := RuntimeConfig{
 		OnCommitteeChange: func() {
@@ -175,9 +164,8 @@ func NewChain(
 				logger.Panicf("Failed initializing committee selection library: %v", err)
 			}
 		},
-		OnCommitteeMetadataUpdate: c.ct.MaybeCommitteeChanged,
-		logger:                    logger,
-		id:                        selfID,
+		logger: logger,
+		id:     selfID,
 	}
 	rtc, err = rtc.BlockCommitted(lastConfigBlock)
 	if err != nil {
@@ -639,7 +627,7 @@ func (c *BFTChain) committeeState() committee.State {
 	cr := &CommitteeRetriever{
 		NewCommitteeSelection: cs.NewCommitteeSelection,
 		Logger:                c.Logger,
-		Ledger:                c.support,
+		Ledger:                c.ct.ledger,
 	}
 
 	return cr.CurrentState()

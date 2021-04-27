@@ -87,9 +87,8 @@ func TestSignProposal(t *testing.T) {
 	}
 
 	rtc := smartbft.RuntimeConfig{
-		OnCommitteeMetadataUpdate: func(_ *smartbft.CommitteeMetadata) {},
-		LastBlock:                 smartbft.LastBlockFromLedgerOrPanic(ledger, logger),
-		LastConfigBlock:           smartbft.LastConfigBlockFromLedgerOrPanic(ledger, logger),
+		LastBlock:       smartbft.LastBlockFromLedgerOrPanic(ledger, logger),
+		LastConfigBlock: smartbft.LastConfigBlockFromLedgerOrPanic(ledger, logger),
 	}
 
 	assembler.RuntimeConfig.Store(rtc)
