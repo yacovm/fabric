@@ -18,8 +18,11 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"net"
 	"sort"
 	"time"
+
+	cs "github.com/SmartBFT-Go/randomcommittees"
 
 	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
 
@@ -59,10 +62,69 @@ func newBlockPuller(
 	stdDialer.ClientConfig.AsyncConnect = false
 	stdDialer.ClientConfig.SecOpts.VerifyCertificate = nil
 
+	cr := &CommitteeRetriever{
+		NewCommitteeSelection: cs.NewCommitteeSelection,
+		Logger:                flogging.MustGetLogger("orderer.consensus.smartbft.committee"),
+		Ledger:                support,
+	}
+
+	logger := flogging.MustGetLogger("orderer.common.cluster.puller")
+
+	currentCommittee, err := cr.CurrentCommittee()
+	if err != nil {
+		return nil, err
+	}
+
+	committeeIdentifiers := currentCommittee.IDs()
+
+	logger.Debugf("Current committee: %v", committeeIdentifiers)
+
+	committeeIDs := make(map[uint64]struct{})
+	for _, id := range committeeIdentifiers {
+		committeeIDs[uint64(id)] = struct{}{}
+	}
+
+	consensusMD := &smartbft.ConfigMetadata{}
+	if err := proto.Unmarshal(support.SharedConfig().ConsensusMetadata(), consensusMD); err != nil {
+		return nil, err
+	}
+
+	endpointsInCommittee := make(map[string]struct{})
+	for _, consenter := range consensusMD.Consenters {
+		if _, exists := committeeIDs[consenter.ConsenterId]; !exists {
+			logger.Debugf("%d %s is not in the committee", consenter.ConsenterId, consenter.Host)
+			continue
+		}
+		endpointsInCommittee[consenter.Host] = struct{}{}
+	}
+
 	// Extract the TLS CA certs and endpoints from the configuration,
 	endpoints, err := etcdraft.EndpointconfigFromFromSupport(support)
 	if err != nil {
 		return nil, err
+	}
+
+	logger.Debugf("Endpoints in committee: %v", endpointsInCommittee)
+
+	if len(endpointsInCommittee) > 0 {
+		var filteredEndpoints []cluster.EndpointCriteria
+		var filteredEndpointsURIs []string
+		for _, ep := range endpoints {
+			host, _, err := net.SplitHostPort(ep.Endpoint)
+			if err != nil {
+				logger.Warnf("Invalid host port string %s: %v", ep.Endpoint, err)
+				continue
+			}
+			if _, exists := endpointsInCommittee[host]; !exists {
+				continue
+			}
+			filteredEndpoints = append(filteredEndpoints, ep)
+			filteredEndpointsURIs = append(filteredEndpointsURIs, ep.Endpoint)
+		}
+		endpoints = filteredEndpoints
+		logger.Debugf("Filtering out endpoints of nodes not in the committee, remaining endpoints: %v", filteredEndpointsURIs)
+	} else {
+		logger.Debugf("Endpoints and consenter endpoints are disjoint, using the endpoints without filtering by committee")
 	}
 
 	der, _ := pem.Decode(stdDialer.ClientConfig.SecOpts.Certificate)
@@ -73,7 +135,7 @@ func newBlockPuller(
 
 	bp := &cluster.BlockPuller{
 		VerifyBlockSequence: verifyBlockSequence,
-		Logger:              flogging.MustGetLogger("orderer.common.cluster.puller"),
+		Logger:              logger,
 		RetryTimeout:        clusterConfig.ReplicationRetryTimeout,
 		MaxTotalBufferBytes: clusterConfig.ReplicationBufferSize,
 		FetchTimeout:        clusterConfig.ReplicationPullTimeout,
