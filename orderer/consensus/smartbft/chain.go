@@ -9,6 +9,7 @@ package smartbft
 import (
 	"encoding/base64"
 	"fmt"
+	"math"
 	"reflect"
 	"sync/atomic"
 	"time"
@@ -69,6 +70,7 @@ type signerSerializer interface {
 // BFTChain implements Chain interface to wire with
 // BFT smart library
 type BFTChain struct {
+	egress              *Egress
 	committeePrivateKey committee.PrivateKey
 	ct                  *CommitteeTracker
 	commitZKP           *atomic.Value
@@ -158,11 +160,13 @@ func NewChain(
 	currentCommittee := c.ct.CurrentCommittee()
 
 	rtc := RuntimeConfig{
-		OnCommitteeChange: func() {
-			err = committeeSelection.Initialize(int32(selfID), privateKey, c.ct.CurrentCommittee())
+		OnCommitteeChange: func(prevCommittee []int32) {
+			currentCommittee := c.ct.CurrentCommittee()
+			err = committeeSelection.Initialize(int32(selfID), privateKey, currentCommittee)
 			if err != nil {
 				logger.Panicf("Failed initializing committee selection library: %v", err)
 			}
+			c.migrateTransactions(prevCommittee, currentCommittee.IDs())
 		},
 		logger: logger,
 		id:     selfID,
@@ -299,6 +303,33 @@ func bftSmartConsensusBuild(
 		Logger:           flogging.MustGetLogger("orderer.consensus.smartbft.assembler").With(channelDecorator),
 	}
 
+	c.egress = &Egress{
+		ConvertMessage: func(m *smartbftprotos.Message, channel string) *orderer.ConsensusRequest {
+			msg := bftMsgToClusterMsg(m, channel)
+			if prp := m.GetPrePrepare(); prp != nil {
+				zkp := c.commitZKP.Load().([]byte)
+				// Remove the ZKP in the end, we don't need it anymore
+				// after we send it.
+				defer c.commitZKP.Store([]byte{})
+
+				if len(zkp) > 0 {
+					msg.Metadata = zkp
+				}
+			}
+			return msg
+		},
+		RuntimeConfig: c.RuntimeConfig,
+		Channel:       c.support.ChainID(),
+		Logger:        flogging.MustGetLogger("orderer.consensus.smartbft.egress").With(channelDecorator),
+		RPC: &cluster.RPC{
+			Logger:        flogging.MustGetLogger("orderer.consensus.smartbft.rpc").With(channelDecorator),
+			Channel:       c.support.ChainID(),
+			StreamsByType: cluster.NewStreamsByType(),
+			Comm:          c.Comm,
+			Timeout:       5 * time.Minute, // Externalize configuration
+		},
+	}
+
 	consensus := &smartbft.Consensus{
 		Config:   c.Config,
 		Logger:   logger,
@@ -311,32 +342,7 @@ func bftSmartConsensusBuild(
 		Assembler:         c.assembler,
 		RequestInspector:  requestInspector,
 		Synchronizer:      sync,
-		Comm: &Egress{
-			ConvertMessage: func(m *smartbftprotos.Message, channel string) *orderer.ConsensusRequest {
-				msg := bftMsgToClusterMsg(m, channel)
-				if prp := m.GetPrePrepare(); prp != nil {
-					zkp := c.commitZKP.Load().([]byte)
-					// Remove the ZKP in the end, we don't need it anymore
-					// after we send it.
-					defer c.commitZKP.Store([]byte{})
-
-					if len(zkp) > 0 {
-						msg.Metadata = zkp
-					}
-				}
-				return msg
-			},
-			RuntimeConfig: c.RuntimeConfig,
-			Channel:       c.support.ChainID(),
-			Logger:        flogging.MustGetLogger("orderer.consensus.smartbft.egress").With(channelDecorator),
-			RPC: &cluster.RPC{
-				Logger:        flogging.MustGetLogger("orderer.consensus.smartbft.rpc").With(channelDecorator),
-				Channel:       c.support.ChainID(),
-				StreamsByType: cluster.NewStreamsByType(),
-				Comm:          c.Comm,
-				Timeout:       5 * time.Minute, // Externalize configuration
-			},
-		},
+		Comm:              c.egress,
 		Scheduler:         time.NewTicker(time.Second).C,
 		ViewChangerTicker: time.NewTicker(time.Second).C,
 	}
@@ -387,6 +393,48 @@ func buildVerifier(
 			}
 			return nil
 		},
+	}
+}
+
+func (c *BFTChain) migrateTransactions(prevCommittee, nextCommittee []int32) {
+	prev := make(map[int32]struct{})
+	for _, id := range prevCommittee {
+		prev[id] = struct{}{}
+	}
+
+	var newNodes []int32
+	for _, id := range nextCommittee {
+		if _, exists := prev[id]; !exists {
+			continue
+		}
+		newNodes = append(newNodes, id)
+	}
+
+	if len(newNodes) == 0 {
+		c.Logger.Debugf("No new nodes have been added to the committee")
+		return
+	}
+
+	if c.consensus == nil {
+		c.Logger.Debugf("Consensus hasn't been initialized yet")
+		return
+	}
+
+	c.Logger.Infof("Migrating transactions from %v to %v", prevCommittee, nextCommittee)
+
+	requests, _ := c.consensus.Pool.NextRequests(math.MaxInt32, math.MaxUint64, false)
+
+	c.Logger.Infof("Sending %d transactions to %v", len(requests), newNodes)
+	for _, id := range newNodes {
+		t1 := time.Now()
+		go func(id int32) {
+			defer func() {
+				c.Logger.Debugf("Sending %d transactions to %v took %v", len(requests), id, time.Since(t1))
+			}()
+			for _, tx := range requests {
+				c.egress.SendTransaction(uint64(id), tx)
+			}
+		}(id)
 	}
 }
 
