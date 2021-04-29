@@ -177,11 +177,6 @@ func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *co
 	}
 	c.Logger.Infof("Local consenter id is %d", selfID)
 
-	puller, err := newBlockPuller(support, c.ClusterDialer, c.Conf.General.Cluster)
-	if err != nil {
-		c.Logger.Panicf("Failed initializing block puller")
-	}
-
 	config, err := configFromMetadataOptions(selfID, m.Options)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed parsing smartbft configuration")
@@ -196,12 +191,23 @@ func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *co
 		Logger:                 c.Logger,
 	}
 
-	chain, err := NewChain(c.privateKeyBytesHash, configValidator, selfID, config, path.Join(c.WALBaseDir, support.ChainID()), puller, c.Comm, c.SignerSerializer, c.GetPolicyManager(support.ChainID()), support, c.Metrics)
+	pc := pullerConfig{
+		support:       support,
+		baseDialer:    c.ClusterDialer,
+		clusterConfig: c.Conf.General.Cluster,
+	}
+	chain, err := NewChain(c.privateKeyBytesHash, configValidator, selfID, config, path.Join(c.WALBaseDir, support.ChainID()), pc, c.Comm, c.SignerSerializer, c.GetPolicyManager(support.ChainID()), support, c.Metrics)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed creating a new BFTChain")
 	}
 
 	return chain, nil
+}
+
+type pullerConfig struct {
+	support       consensus.ConsenterSupport
+	baseDialer    *cluster.PredicateDialer
+	clusterConfig localconfig.Cluster
 }
 
 func pemToDER(pemBytes []byte, id uint64, certType string, logger *flogging.FabricLogger) ([]byte, error) {

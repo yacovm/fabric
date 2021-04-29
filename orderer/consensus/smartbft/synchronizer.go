@@ -26,6 +26,7 @@ type Synchronizer struct {
 	OnCommit        func(*common.Block) types.Reconfig
 	Support         consensus.ConsenterSupport
 	BlockPuller     BlockPuller
+	PullerConfig    pullerConfig
 	ClusterSize     uint64
 	Logger          *flogging.FabricLogger
 }
@@ -35,6 +36,18 @@ func (s *Synchronizer) Close() {
 }
 
 func (s *Synchronizer) Sync() types.SyncResponse {
+	if s.BlockPuller == nil {
+		puller, err := newBlockPuller(s.PullerConfig.support, s.PullerConfig.baseDialer, s.PullerConfig.clusterConfig)
+		if err != nil {
+			s.Logger.Panicf("Failed initializing block puller")
+		}
+		s.BlockPuller = puller
+	}
+
+	defer func() {
+		s.BlockPuller = nil
+	}()
+
 	decision, err := s.synchronize()
 	if err != nil {
 		s.Logger.Warnf("Could not synchronize with remote peers due to %s, returning state from local ledger", err)
@@ -81,8 +94,6 @@ func (s *Synchronizer) synchronize() (*types.Decision, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot get HeightsByEndpoints")
 	}
-
-	s.Logger.Infof("HeightsByEndpoints: %v", heightByEndpoint)
 
 	if len(heightByEndpoint) == 0 {
 		return nil, errors.New("no cluster members to synchronize with")

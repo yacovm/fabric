@@ -1132,12 +1132,11 @@ func (cew *CommitteeEndpointWrapper) endpointCommitteeFilter(sup *committeeSuppo
 	endpointsInCommittee := make(map[string]struct{})
 
 	for _, c := range consensusMD.Consenters {
-		endpoint := fmt.Sprintf("%s:%d", c.Host, c.Port)
 		if _, exists := committeeIDs[c.ConsenterId]; exists {
-			endpointsInCommittee[endpoint] = struct{}{}
-			cew.logger.Debugf("%d with endpoint %s is in the committee", c.ConsenterId, endpoint)
+			endpointsInCommittee[c.Host] = struct{}{}
+			cew.logger.Debugf("%d with endpoint %s is in the committee", c.ConsenterId, c.Host)
 		} else {
-			cew.logger.Debugf("%d with endpoint %s is not in the committee", c.ConsenterId, endpoint)
+			cew.logger.Debugf("%d with endpoint %s is not in the committee", c.ConsenterId, c.Host)
 		}
 	}
 
@@ -1146,7 +1145,7 @@ func (cew *CommitteeEndpointWrapper) endpointCommitteeFilter(sup *committeeSuppo
 
 		for orgName, v := range m {
 			for _, endpoint := range v.Endpoint {
-				if _, exists := endpointsInCommittee[fmt.Sprintf("%s:%d", endpoint.Host, endpoint.Port)]; !exists {
+				if _, exists := endpointsInCommittee[endpoint.Host]; !exists {
 					continue
 				}
 				endpoints, exists := res[orgName]
