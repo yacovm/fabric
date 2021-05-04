@@ -93,6 +93,7 @@ type BFTChain struct {
 	Metrics             *Metrics
 	heartbeatMonitor    *HeartbeatMonitor
 	monitorLock         *sync.RWMutex
+	monitorInitialized  bool
 }
 
 // NewChain creates new BFT Smart chain
@@ -176,11 +177,13 @@ func NewChain(
 			}
 			c.migrateTransactions(prevCommittee, currentCommittee.IDs())
 
-			myRole, heartbeatSenders, heartbeatReceivers := setupHeartbeatMonitor(selfID, currentCommittee, allNodes)
+			if c.monitorInitialized { // if not initialized then heartbeat monitor will initialize later in NewChain
+				myRole, heartbeatSenders, heartbeatReceivers := setupHeartbeatMonitor(selfID, currentCommittee, allNodes)
 
-			c.monitorLock.Lock()
-			c.heartbeatMonitor = NewHeartbeatMonitor(c.consensus.Comm.(MessageSender), heartbeatTicker.C, logger, heartbeatTimeout, heartbeatCount, myRole, heartbeatSenders, heartbeatReceivers)
-			c.monitorLock.Unlock()
+				c.monitorLock.Lock()
+				c.heartbeatMonitor = NewHeartbeatMonitor(c.consensus.Comm.(MessageSender), heartbeatTicker.C, logger, heartbeatTimeout, heartbeatCount, myRole, heartbeatSenders, heartbeatReceivers)
+				c.monitorLock.Unlock()
+			}
 		},
 		logger: logger,
 		id:     selfID,
@@ -215,6 +218,7 @@ func NewChain(
 	c.monitorLock.Lock()
 	c.heartbeatMonitor = NewHeartbeatMonitor(c.consensus.Comm.(MessageSender), heartbeatTicker.C, logger, heartbeatTimeout, heartbeatCount, myRole, heartbeatSenders, heartbeatReceivers)
 	c.monitorLock.Unlock()
+	c.monitorInitialized = true
 
 	c.consensus.Signer = &Signer{
 		ID:               c.Config.SelfID,
