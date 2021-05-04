@@ -174,6 +174,9 @@ func (hm *HeartbeatMonitor) GetSuspects() []uint64 {
 	hm.monitorLock.RLock()
 	defer hm.monitorLock.RUnlock()
 	suspects := make([]uint64, 0)
+	if hm.role == HeartbeatSender {
+		return suspects
+	}
 	for i, lastHb := range hm.lastReceivedTimes {
 		if lastHb.IsZero() {
 			hm.logger.Debugf("Node %d did not send a heartbeat yet and therefore a suspect", hm.senders[i])
