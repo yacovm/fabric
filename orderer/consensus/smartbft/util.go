@@ -499,7 +499,7 @@ type RuntimeConfig struct {
 	LastConfigBlock          *common.Block
 	Nodes                    []uint64
 	CommitteeMetadata        *CommitteeMetadata
-	OnCommitteeChange        func([]int32)
+	OnCommitteeChange        func(prevCommittee []int32, allNodes []uint64)
 	committeeMinimumLifespan uint32
 }
 
@@ -513,7 +513,7 @@ func (rtc RuntimeConfig) BlockCommitted(block *common.Block) (RuntimeConfig, err
 	}
 
 	if cm != nil && cm.CommitteeShiftAt == int64(block.Header.Number) {
-		rtc.OnCommitteeChange(cm.CommitteeAtShift.IDs())
+		rtc.OnCommitteeChange(cm.CommitteeAtShift.IDs(), rtc.Nodes)
 	}
 
 	return RuntimeConfig{
@@ -554,7 +554,7 @@ func (rtc RuntimeConfig) configBlockCommitted(block *common.Block) (RuntimeConfi
 	}
 
 	if cm != nil && cm.CommitteeShiftAt == int64(block.Header.Number) {
-		rtc.OnCommitteeChange(cm.CommitteeAtShift.IDs())
+		rtc.OnCommitteeChange(cm.CommitteeAtShift.IDs(), rtc.Nodes)
 	}
 
 	return RuntimeConfig{
@@ -816,7 +816,7 @@ func removeDuplicates(list []int32) []int32 {
 }
 
 // agreedSuspects gets a list of all suspects (a concatenation of all suspects lists)
-// it returns the suspects that appear at least f+1 times in the given least
+// it returns the suspects that appear at least f+1 times in the given list (sorted)
 func agreedSuspects(allSuspects []int32, f int32) []int32 {
 	votes := make(map[int32]int32)
 

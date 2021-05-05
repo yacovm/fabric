@@ -61,7 +61,11 @@ func (a *Assembler) AssembleProposal(metadata []byte, requests [][]byte) (nextPr
 		lastConfigBlockNum = block.Header.Number
 	}
 
-	suspects := assembleSuspectsList(lastBlock)
+	var suspects []int32
+	if !rtc.isConfig { // if last block is a config block then leave the suspects list empty
+		suspects = assembleSuspectsList(lastBlock)
+	}
+
 	commitment, newCommitteeMetadata := a.committeeCommitmentAndMetadata(int64(block.Header.Number))
 
 	block.Metadata.Metadata[common.BlockMetadataIndex_LAST_CONFIG] = utils.MarshalOrPanic(&common.Metadata{

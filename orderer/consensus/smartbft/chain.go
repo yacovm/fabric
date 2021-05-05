@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -91,6 +92,8 @@ type BFTChain struct {
 	assembler           *Assembler
 	Metrics             *Metrics
 	heartbeatMonitor    *HeartbeatMonitor
+	monitorLock         *sync.RWMutex
+	monitorInitialized  bool
 }
 
 // NewChain creates new BFT Smart chain
@@ -157,16 +160,30 @@ func NewChain(
 	lastBlock := LastBlockFromLedgerOrPanic(support, c.Logger)
 	lastConfigBlock := LastConfigBlockFromLedgerOrPanic(support, c.Logger)
 
+	// TODO setup heartbeat monitor with the right config
+	heartbeatTicker := time.NewTicker(1 * time.Second)
+	heartbeatTimeout := 10 * time.Second
+	heartbeatCount := uint64(5)
+	c.monitorLock = &sync.RWMutex{}
+
 	currentCommittee := c.ct.CurrentCommittee()
 
 	rtc := RuntimeConfig{
-		OnCommitteeChange: func(prevCommittee []int32) {
+		OnCommitteeChange: func(prevCommittee []int32, allNodes []uint64) {
 			currentCommittee := c.ct.CurrentCommittee()
 			err = committeeSelection.Initialize(int32(selfID), privateKey, currentCommittee)
 			if err != nil {
 				logger.Panicf("Failed initializing committee selection library: %v", err)
 			}
 			c.migrateTransactions(prevCommittee, currentCommittee.IDs())
+
+			if c.monitorInitialized { // if not initialized then heartbeat monitor will initialize later in NewChain
+				myRole, heartbeatSenders, heartbeatReceivers := setupHeartbeatMonitor(selfID, currentCommittee, allNodes)
+
+				c.monitorLock.Lock()
+				c.heartbeatMonitor = NewHeartbeatMonitor(c.consensus.Comm.(MessageSender), heartbeatTicker.C, logger, heartbeatTimeout, heartbeatCount, myRole, heartbeatSenders, heartbeatReceivers)
+				c.monitorLock.Unlock()
+			}
 		},
 		logger: logger,
 		id:     selfID,
@@ -187,7 +204,7 @@ func NewChain(
 		if err != nil {
 			return nil, errors.Wrap(err, "failed initializing committee selection instance")
 		}
-		logger.Infof("Initialized committee selection with for %d with public key %s", selfID, base64.StdEncoding.EncodeToString(publicKey))
+		logger.Infof("Initialized committee selection for %d with public key %s", selfID, base64.StdEncoding.EncodeToString(publicKey))
 		logger.Infof("Nodes: %v", currentCommittee)
 	} else {
 		logger.Infof("No nodes in current committee")
@@ -196,26 +213,12 @@ func NewChain(
 	c.verifier = buildVerifier(committeeSelection, cv, c.RuntimeConfig, support, requestInspector, policyManager)
 	c.consensus = bftSmartConsensusBuild(c.ct, c, requestInspector)
 
-	// TODO setup heartbeat monitor with the right config
-	heartbeatTicker := time.NewTicker(1 * time.Second)
-	heartbeatTimeout := 10 * time.Second
-	heartbeatCount := uint64(5)
-	var role Role
-	if selfID%2 == 0 {
-		role = HeartbeatSender
-	} else {
-		role = HeartbeatReceiver
-	}
-	senders := make([]uint64, 0)
-	receivers := make([]uint64, 0)
-	for _, node := range currentCommittee {
-		if node.ID%2 == 0 {
-			senders = append(senders, uint64(node.ID))
-		} else {
-			receivers = append(receivers, uint64(node.ID))
-		}
-	}
-	c.heartbeatMonitor = NewHeartbeatMonitor(c.consensus.Comm.(MessageSender), heartbeatTicker.C, logger, heartbeatTimeout, heartbeatCount, role, senders, receivers)
+	myRole, heartbeatSenders, heartbeatReceivers := setupHeartbeatMonitor(selfID, currentCommittee, rtc.Nodes)
+
+	c.monitorLock.Lock()
+	c.heartbeatMonitor = NewHeartbeatMonitor(c.consensus.Comm.(MessageSender), heartbeatTicker.C, logger, heartbeatTimeout, heartbeatCount, myRole, heartbeatSenders, heartbeatReceivers)
+	c.monitorLock.Unlock()
+	c.monitorInitialized = true
 
 	c.consensus.Signer = &Signer{
 		ID:               c.Config.SelfID,
@@ -229,6 +232,7 @@ func NewChain(
 			return c.RuntimeConfig.Load().(RuntimeConfig).LastConfigBlock.Header.Number
 		},
 		HeartbeatMonitor: c.heartbeatMonitor,
+		MonitorLock:      c.monitorLock,
 		CreateReconShares: func() []committee.ReconShare {
 			feedback, _, err := c.cs.Process(c.committeeState(), committee.Input{})
 			if err != nil {
@@ -440,6 +444,14 @@ func (c *BFTChain) migrateTransactions(prevCommittee, nextCommittee []int32) {
 
 func (c *BFTChain) HandleMessage(sender uint64, m *smartbftprotos.Message, metadata []byte) {
 	c.Logger.Debugf("Message from %d", sender)
+
+	if prp := m.GetPrePrepare(); prp != nil {
+		if !c.verifySuspects(prp) {
+			c.Logger.Warningf("Failed verifying suspects in pre-prepare")
+			return
+		}
+	}
+
 	/*
 		if prp := m.GetPrePrepare(); prp != nil {
 
@@ -453,6 +465,118 @@ func (c *BFTChain) HandleMessage(sender uint64, m *smartbftprotos.Message, metad
 	*/
 
 	c.consensus.HandleMessage(sender, m)
+}
+
+func (c *BFTChain) getSuspectsFromSignatures(signatures []*smartbftprotos.Signature) []int32 {
+	var allSuspects []int32
+	for _, signature := range signatures {
+		sig := &Signature{}
+		if err := sig.Unmarshal(signature.Msg); err != nil {
+			c.Logger.Warningf("Failed unmarshaling signature, error: %v", err)
+			continue
+		}
+		aux := sig.CommitteeAuxiliaryInput
+		committeeFeedback := &smartbft2.CommitteeFeedback{}
+		if err := proto.Unmarshal(aux, committeeFeedback); err != nil {
+			c.Logger.Warningf("Failed unmarshaling committeeFeedback, error: %v", err)
+			continue
+		}
+		list := committeeFeedback.Suspects
+		cleanList := removeDuplicates(list)
+		allSuspects = append(allSuspects, cleanList...)
+	}
+	return agreedSuspects(allSuspects, 1) // TODO use f
+}
+
+func (c *BFTChain) getSuspectsFromBlock(proposal *smartbftprotos.Proposal) (bool, []int32) {
+	tuple := &ByteBufferTuple{}
+	if err := tuple.FromBytes(proposal.Payload); err != nil {
+		c.Logger.Warningf("Failed reading proposal payload, error: %v", err)
+		return false, nil
+	}
+	metadata := &common.BlockMetadata{}
+	if err := proto.Unmarshal(tuple.B, metadata); err != nil {
+		c.Logger.Warningf("Failed unmarshaling block metadata, error: %v", err)
+		return false, nil
+	}
+	if metadata == nil || len(metadata.Metadata) < len(common.BlockMetadataIndex_name) {
+		c.Logger.Warningf("Block metadata is either missing or contains too few entries")
+		return false, nil
+	}
+	signatureMetadata := &common.Metadata{}
+	if err := proto.Unmarshal(metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], signatureMetadata); err != nil {
+		c.Logger.Warningf("Failed unmarshaling block signature metadata, error: %v", err)
+		return false, nil
+
+	}
+	ordererMDFromBlock := &common.OrdererBlockMetadata{}
+	if err := proto.Unmarshal(signatureMetadata.Value, ordererMDFromBlock); err != nil {
+		c.Logger.Warningf("Failed unmarshaling orderer block metadata, error: %v", err)
+		return false, nil
+	}
+	return true, ordererMDFromBlock.HeartbeatSuspects
+}
+
+func (c *BFTChain) verifySuspects(prp *smartbftprotos.PrePrepare) bool {
+	agreedSuspects := c.getSuspectsFromSignatures(prp.PrevCommitSignatures)
+	success, blockSuspects := c.getSuspectsFromBlock(prp.Proposal)
+	if !success {
+		c.Logger.Warningf("Couldn't read suspects from block")
+		return false
+	}
+
+	rtc := c.RuntimeConfig.Load().(RuntimeConfig)
+	if rtc.isConfig {
+		if len(blockSuspects) != 0 {
+			c.Logger.Warningf("Last block was a config block, but the suggested suspects list is not empty")
+			return false
+		}
+		c.Logger.Infof("Last block was a config block, therefore disregarding the suspects verification")
+		return true
+	}
+
+	if len(agreedSuspects) != len(blockSuspects) {
+		c.Logger.Warningf("Length of suspects list don't match, according to the signatures the length should be %d, while in the block the length is %d", len(agreedSuspects), len(blockSuspects))
+		return false
+	}
+	for i, s := range agreedSuspects {
+		if blockSuspects[i] != s {
+			c.Logger.Warningf("Suspect doesn't match, according to the signatures the %d'th suspect should be %d, while in the block the suspect is %d", i, s, blockSuspects[i])
+			return false
+		}
+	}
+	return true
+}
+
+func setupHeartbeatMonitor(selfID uint64, currentCommittee []committee.Node, allNodes []uint64) (myRole Role, heartbeatSenders []uint64, heartbeatReceivers []uint64) {
+	currentCommitteeIDs := make([]uint64, 0)
+	for _, node := range currentCommittee {
+		currentCommitteeIDs = append(currentCommitteeIDs, uint64(node.ID))
+	}
+	myRole = HeartbeatSender
+	heartbeatReceivers = make([]uint64, 0)
+	for _, node := range currentCommitteeIDs {
+		if selfID == node {
+			myRole = HeartbeatReceiver
+		}
+		heartbeatReceivers = append(heartbeatReceivers, node)
+	}
+
+	heartbeatSenders = make([]uint64, 0)
+	for _, node := range allNodes {
+		receiver := false
+		for _, committeeNode := range currentCommitteeIDs {
+			if node == committeeNode {
+				receiver = true
+				break
+			}
+		}
+		if receiver {
+			continue
+		}
+		heartbeatSenders = append(heartbeatSenders, node)
+	}
+	return myRole, heartbeatSenders, heartbeatReceivers
 }
 
 func (c *BFTChain) maybeCommit() ([]byte, []byte) {
@@ -492,6 +616,8 @@ func (c *BFTChain) HandleRequest(sender uint64, req []byte) {
 
 func (c *BFTChain) HandleHeartbeat(sender uint64) {
 	c.Logger.Debugf("HandleHeartbeat from %d", sender)
+	c.monitorLock.RLock()
+	defer c.monitorLock.RUnlock()
 	c.heartbeatMonitor.ProcessHeartbeat(sender)
 }
 
@@ -682,11 +808,15 @@ func (c *BFTChain) Errored() <-chan struct{} {
 
 func (c *BFTChain) Start() {
 	c.consensus.Start()
+	c.monitorLock.RLock()
+	defer c.monitorLock.RUnlock()
 	c.heartbeatMonitor.Start()
 }
 
 func (c *BFTChain) Halt() {
 	c.Logger.Infof("Shutting down chain")
+	c.monitorLock.RLock()
+	defer c.monitorLock.RUnlock()
 	c.heartbeatMonitor.Close()
 	c.consensus.Stop()
 }

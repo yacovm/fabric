@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -345,6 +346,7 @@ func TestVerifyConsenterSig(t *testing.T) {
 				Logger:           flogging.MustGetLogger("test"),
 				ID:               3,
 				HeartbeatMonitor: monitor,
+				MonitorLock:      &sync.RWMutex{},
 			}
 
 			rtc := smartbft.RuntimeConfig{
