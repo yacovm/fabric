@@ -52,6 +52,7 @@ type Consensus struct {
 	state         *algorithm.PersistedState
 	numberOfNodes uint64
 	nodes         []uint64
+	nodeMap       sync.Map
 
 	consensusDone sync.WaitGroup
 	stopOnce      sync.Once
@@ -60,6 +61,8 @@ type Consensus struct {
 	consensusLock sync.RWMutex
 
 	reconfigChan chan types.Reconfig
+
+	running uint64
 }
 
 func (c *Consensus) Complain(viewNum uint64, stopView bool) {
@@ -88,6 +91,14 @@ func (c *Consensus) Sync() types.SyncResponse {
 		}
 	}
 	return syncResponse
+}
+
+// GetLeaderID returns the current leader ID or zero if Consensus is not running
+func (c *Consensus) GetLeaderID() uint64 {
+	if atomic.LoadUint64(&c.running) == 0 {
+		return 0
+	}
+	return c.controller.GetLeaderID()
 }
 
 func (c *Consensus) Start() error {
@@ -138,6 +149,9 @@ func (c *Consensus) Start() error {
 	}()
 
 	c.startComponents(view, seq, dec, true)
+
+	atomic.StoreUint64(&c.running, 1)
+
 	return nil
 }
 
@@ -221,6 +235,7 @@ func (c *Consensus) close() {
 
 func (c *Consensus) Stop() {
 	c.consensusLock.RLock()
+	atomic.StoreUint64(&c.running, 0)
 	c.viewChanger.Stop()
 	c.controller.Stop()
 	c.collector.Stop()
@@ -230,6 +245,10 @@ func (c *Consensus) Stop() {
 }
 
 func (c *Consensus) HandleMessage(sender uint64, m *protos.Message) {
+	if _, exists := c.nodeMap.Load(sender); !exists {
+		c.Logger.Warnf("Received message from unexpected node %d", sender)
+		return
+	}
 	c.consensusLock.RLock()
 	defer c.consensusLock.RUnlock()
 	c.controller.ProcessMessages(sender, m)
@@ -292,8 +311,15 @@ func (c *Consensus) ValidateConfiguration(nodes []uint64) error {
 }
 
 func (c *Consensus) setNodes(nodes []uint64) {
+	for _, n := range c.nodes {
+		c.nodeMap.Delete(n)
+	}
+
 	c.numberOfNodes = uint64(len(nodes))
 	c.nodes = sortNodes(nodes)
+	for _, n := range nodes {
+		c.nodeMap.Store(n, struct{}{})
+	}
 }
 
 func sortNodes(nodes []uint64) []uint64 {
