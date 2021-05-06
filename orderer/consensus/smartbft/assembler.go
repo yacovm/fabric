@@ -35,6 +35,7 @@ type Ledger interface {
 }
 
 type Assembler struct {
+	SeqProposed      uint64
 	RuntimeConfig    *atomic.Value
 	Logger           *flogging.FabricLogger
 	VerificationSeq  func() uint64
@@ -56,6 +57,8 @@ func (a *Assembler) AssembleProposal(metadata []byte, requests [][]byte) (nextPr
 	block := common.NewBlock(lastBlock.Header.Number+1, lastBlock.Header.Hash())
 	block.Data = &common.BlockData{Data: batchedRequests}
 	block.Header.DataHash = block.Data.Hash()
+
+	atomic.StoreUint64(&a.SeqProposed, block.Header.Number)
 
 	if isConfigBlock(block) {
 		lastConfigBlockNum = block.Header.Number
@@ -114,7 +117,7 @@ func (a *Assembler) committeeCommitmentAndMetadata(blockNum int64) ([]byte, []by
 		expectedCommitters,
 		rtc.committeeMinimumLifespan, currentCommittee, int32(rtc.id))
 
-	a.Logger.Infof("Creating committee metadata: %+v", committeeMD)
+	a.Logger.Infof("Creating committee metadata for block %d: %+v", blockNum, committeeMD)
 
 	return commitment, committeeMD.Marshal()
 

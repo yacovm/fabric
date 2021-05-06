@@ -83,6 +83,7 @@ type Verifier struct {
 	Logger                *flogging.FabricLogger
 	ConfigValidator       ConfigValidator
 	VerifyReconShares     func(reconShares []committee.ReconShare) error
+	VerifyCommitment      func(block *common.Block) error
 }
 
 func (v *Verifier) AuxiliaryData(msg []byte) []byte {
@@ -96,6 +97,10 @@ func (v *Verifier) AuxiliaryData(msg []byte) []byte {
 func (v *Verifier) VerifyProposal(proposal types.Proposal) ([]types.RequestInfo, error) {
 	block, err := ProposalToBlock(proposal)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := v.VerifyCommitment(block); err != nil {
 		return nil, err
 	}
 
@@ -439,12 +444,24 @@ func (v *Verifier) verifySignatureIsBoundToProposal(sig *Signature, identity []b
 		return errors.Errorf("signature's OrdererBlockMetadata and OrdererBlockMetadata extracted from block do not match")
 	}
 
-	// TODO: Verify this committee metadata: check the state matches our state, and the config hash matches our config hash,
-	// TODO: check also the commitment is sound (elements are in group, ZKP is correct)
 	cm := &CommitteeMetadata{}
 	if err := cm.Unmarshal(ordererMDFromBlock.CommitteeMetadata); err != nil {
 		return errors.Errorf("failed unmarshaling committee metadata (%s): %v",
 			base64.StdEncoding.EncodeToString(ordererMDFromBlock.CommitteeMetadata), err)
+	}
+
+	if !bytes.Equal(ordererMDFromBlock.CommitteeMetadata, ordererMD.CommitteeMetadata) {
+		v.Logger.Warnf("CommitteeMetadata from block is %s but from signature is %s",
+			base64.StdEncoding.EncodeToString(ordererMDFromBlock.CommitteeMetadata),
+			base64.StdEncoding.EncodeToString(ordererMD.CommitteeMetadata))
+		return errors.Errorf("committee metadata mismatch")
+	}
+
+	if !bytes.Equal(ordererMDFromBlock.CommittteeCommitment, ordererMD.CommittteeCommitment) {
+		v.Logger.Warnf("CommitteeCommitment from block is %s but from signature is %s",
+			base64.StdEncoding.EncodeToString(ordererMDFromBlock.CommittteeCommitment),
+			base64.StdEncoding.EncodeToString(ordererMD.CommittteeCommitment))
+		return errors.Errorf("committee commitment mismatch")
 	}
 
 	return nil

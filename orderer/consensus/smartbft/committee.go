@@ -35,24 +35,6 @@ type CommitteeMetadata struct {
 	GenesisConfigAt  int64           // The block number of the first ever committee instance
 }
 
-func (cm *CommitteeMetadata) committeeState(oldState committee.State) (committee.State, error) {
-	var rawCommitteeState []byte
-	if cm != nil {
-		rawCommitteeState = cm.State
-	}
-
-	// If our state is not zero, it means we have some new commitments.
-	// Otherwise, our state may be zero.
-	// Then, we are either in a new committee or we are still in the current committee.
-	// If we're in the current committee, we shouldn't override the state.
-	// If this is a new committee we need to nil out the state.
-	if len(rawCommitteeState) > 0 || (cm != nil && len(cm.Committers) == 0) {
-		return cs.StateFromBytes(rawCommitteeState)
-	} else {
-		return oldState, nil
-	}
-}
-
 func (cm *CommitteeMetadata) committed(id int32) bool {
 	for _, e := range cm.Committers {
 		if e == id {
@@ -110,7 +92,7 @@ func (ct *CommitteeTracker) CurrentCommittee() committee.Nodes {
 	if ct.cr == nil {
 		ct.cr = &CommitteeRetriever{
 			NewCommitteeSelection: cs.NewCommitteeSelection,
-			Ledger:                &CachingLedger{Ledger: ct.ledger},
+			Ledger:                ct.ledger,
 			Logger:                ct.logger,
 		}
 	}
