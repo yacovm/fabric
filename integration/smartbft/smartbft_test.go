@@ -388,7 +388,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			assertBlockReception(map[string]int{"testchannel1": 7}, network.Orderers, peer, network)
 		})
 
-		It("smartbft node addition and removal", func() {
+		PIt("smartbft node addition and removal", func() {
 			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, StartPort(), components)
 			network.BoostrapDockerNetwork()
 			network.GenerateAndBoostrapCrypto()
@@ -674,7 +674,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			Eventually(ordererRunners[4].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Deciding on seq 13 channel=testchannel1"))
 		})
 
-		It("smartbft iterated addition and iterated removal", func() {
+		PIt("smartbft iterated addition and iterated removal", func() {
 			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, StartPort(), components)
 			network.BoostrapDockerNetwork()
 			network.GenerateAndBoostrapCrypto()
