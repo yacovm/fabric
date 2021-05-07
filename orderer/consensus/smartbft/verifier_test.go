@@ -603,6 +603,9 @@ func TestVerifyProposal(t *testing.T) {
 			rtc.LastConfigBlock = lastConfigBlock
 			runtimeConfig.Store(rtc)
 			v := &smartbft.Verifier{
+				VerifyCommitment: func(_ *common.Block) error {
+					return nil
+				},
 				RuntimeConfig:         runtimeConfig,
 				Logger:                logger,
 				Ledger:                ledger,

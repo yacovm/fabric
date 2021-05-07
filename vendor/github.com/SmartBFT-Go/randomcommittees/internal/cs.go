@@ -222,6 +222,7 @@ func (cs *CommitteeSelection) Process(state committee.State, input committee.Inp
 		prevDigest := cs.state.header.BodyDigest
 		cs.state.header.BodyDigest = digest(cs.state.bodyBytes)
 		cs.Logger.Infof("State changed from %s to %s", prevDigest, cs.state.header.BodyDigest)
+		state = cs.state
 	}
 
 	// Did we receive reconstruction shares?

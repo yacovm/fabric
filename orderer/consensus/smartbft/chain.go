@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package smartbft
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"math"
@@ -14,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/hyperledger/fabric/common/util"
 
 	cs "github.com/SmartBFT-Go/randomcommittees"
 
@@ -71,29 +74,31 @@ type signerSerializer interface {
 // BFTChain implements Chain interface to wire with
 // BFT smart library
 type BFTChain struct {
-	egress              *Egress
-	committeePrivateKey committee.PrivateKey
-	ct                  *CommitteeTracker
-	commitZKP           *atomic.Value
-	cv                  ConfigValidator
-	cs                  committee.Selection
-	RuntimeConfig       *atomic.Value
-	Channel             string
-	Config              types.Configuration
-	PullerConfig        pullerConfig
-	Comm                cluster.Communicator
-	SignerSerializer    signerSerializer
-	PolicyManager       policies.Manager
-	Logger              *flogging.FabricLogger
-	WALDir              string
-	consensus           *smartbft.Consensus
-	support             consensus.ConsenterSupport
-	verifier            *Verifier
-	assembler           *Assembler
-	Metrics             *Metrics
-	heartbeatMonitor    *HeartbeatMonitor
-	monitorLock         *sync.RWMutex
-	monitorInitialized  bool
+	egress                  *Egress
+	committeePrivateKey     committee.PrivateKey
+	ct                      *CommitteeTracker
+	commitZKPWeSent         *atomic.Value
+	commitZKPWeReceivedOdd  *atomic.Value
+	commitZKPWeReceivedEven *atomic.Value
+	cv                      ConfigValidator
+	cs                      committee.Selection
+	RuntimeConfig           *atomic.Value
+	Channel                 string
+	Config                  types.Configuration
+	PullerConfig            pullerConfig
+	Comm                    cluster.Communicator
+	SignerSerializer        signerSerializer
+	PolicyManager           policies.Manager
+	Logger                  *flogging.FabricLogger
+	WALDir                  string
+	consensus               *smartbft.Consensus
+	support                 consensus.ConsenterSupport
+	verifier                *Verifier
+	assembler               *Assembler
+	Metrics                 *Metrics
+	heartbeatMonitor        *HeartbeatMonitor
+	monitorLock             *sync.RWMutex
+	monitorInitialized      bool
 }
 
 // NewChain creates new BFT Smart chain
@@ -131,20 +136,22 @@ func NewChain(
 	commitZKP := &atomic.Value{}
 	commitZKP.Store([]byte{}) // Store an empty slice for type safety
 	c := &BFTChain{
-		committeePrivateKey: privateKey,
-		commitZKP:           commitZKP,
-		cv:                  cv,
-		cs:                  committeeSelection,
-		RuntimeConfig:       &atomic.Value{},
-		Channel:             support.ChainID(),
-		Config:              config,
-		WALDir:              walDir,
-		Comm:                comm,
-		support:             support,
-		SignerSerializer:    signerSerializer,
-		PolicyManager:       policyManager,
-		PullerConfig:        pc,
-		Logger:              logger,
+		commitZKPWeReceivedOdd:  &atomic.Value{},
+		commitZKPWeReceivedEven: &atomic.Value{},
+		commitZKPWeSent:         commitZKP,
+		committeePrivateKey:     privateKey,
+		cv:                      cv,
+		cs:                      committeeSelection,
+		RuntimeConfig:           &atomic.Value{},
+		Channel:                 support.ChainID(),
+		Config:                  config,
+		WALDir:                  walDir,
+		Comm:                    comm,
+		support:                 support,
+		SignerSerializer:        signerSerializer,
+		PolicyManager:           policyManager,
+		PullerConfig:            pc,
+		Logger:                  logger,
 		Metrics: &Metrics{
 			ClusterSize:          metrics.ClusterSize.With("channel", support.ChainID()),
 			CommittedBlockNumber: metrics.CommittedBlockNumber.With("channel", support.ChainID()),
@@ -210,7 +217,7 @@ func NewChain(
 		logger.Infof("No nodes in current committee")
 	}
 
-	c.verifier = buildVerifier(committeeSelection, cv, c.RuntimeConfig, support, requestInspector, policyManager)
+	c.verifier = buildVerifier(c, committeeSelection, cv, c.RuntimeConfig, support, requestInspector, policyManager)
 	c.consensus = bftSmartConsensusBuild(c.ct, c, requestInspector)
 
 	myRole, heartbeatSenders, heartbeatReceivers := setupHeartbeatMonitor(selfID, currentCommittee, rtc.Nodes)
@@ -311,12 +318,9 @@ func bftSmartConsensusBuild(
 		ConvertMessage: func(m *smartbftprotos.Message, channel string) *orderer.ConsensusRequest {
 			msg := bftMsgToClusterMsg(m, channel)
 			if prp := m.GetPrePrepare(); prp != nil {
-				zkp := c.commitZKP.Load().([]byte)
-				// Remove the ZKP in the end, we don't need it anymore
-				// after we send it.
-				defer c.commitZKP.Store([]byte{})
+				zkp := c.commitZKPWeSent.Load().([]byte)
 
-				if len(zkp) > 0 {
+				if zkp != nil && len(zkp) > 0 {
 					msg.Metadata = zkp
 				}
 			}
@@ -363,6 +367,7 @@ func bftSmartConsensusBuild(
 }
 
 func buildVerifier(
+	c *BFTChain,
 	cs committee.Selection,
 	cv ConfigValidator,
 	runtimeConfig *atomic.Value,
@@ -373,6 +378,7 @@ func buildVerifier(
 	channelDecorator := zap.String("channel", support.ChainID())
 	logger := flogging.MustGetLogger("orderer.consensus.smartbft.verifier").With(channelDecorator)
 	return &Verifier{
+		VerifyCommitment:      c.verifyCommitment,
 		ConfigValidator:       cv,
 		VerificationSequencer: support,
 		ReqInspector:          requestInspector,
@@ -398,6 +404,83 @@ func buildVerifier(
 			return nil
 		},
 	}
+}
+
+func (c *BFTChain) verifyCommitment(block *common.Block) error {
+	// Ensure Metadata slice is of the right size
+	if len(block.Metadata.Metadata) != len(common.BlockMetadataIndex_name) {
+		return errors.Errorf("block metadata is of size %d but should be of size %d",
+			len(block.Metadata.Metadata), len(common.BlockMetadataIndex_name))
+	}
+
+	signatureMetadata := &common.Metadata{}
+	if err := proto.Unmarshal(block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], signatureMetadata); err != nil {
+		return errors.Wrap(err, "malformed signature metadata")
+	}
+
+	ordererMDFromBlock := &common.OrdererBlockMetadata{}
+	if err := proto.Unmarshal(signatureMetadata.Value, ordererMDFromBlock); err != nil {
+		return errors.Wrap(err, "malformed orderer metadata in block")
+	}
+
+	if atomic.LoadUint64(&c.assembler.SeqProposed) == block.Header.Number && c.Config.SelfID == c.consensus.GetLeaderID() {
+		c.Logger.Debugf("We have proposed block %d ourselves, skipping verification", block.Header.Number)
+		return nil
+	}
+
+	if len(ordererMDFromBlock.CommittteeCommitment) == 0 {
+		c.Logger.Debugf("Block %d doesn't contain any commitment to verify", block.Header.Number)
+		return nil
+	}
+
+	var cmt interface{}
+	if block.Header.Number%2 == 0 {
+		cmt = c.commitZKPWeReceivedEven.Load()
+	} else {
+		cmt = c.commitZKPWeReceivedOdd.Load()
+	}
+
+	commitment := cmt.(committee.Commitment)
+	commitment.Data = ordererMDFromBlock.CommittteeCommitment
+
+	c.Logger.Debugf("Verifying commitment from %d, for block %d with digest of %s and ZKP digest of %s",
+		commitment.From,
+		block.Header.Number,
+		base64.StdEncoding.EncodeToString(util.ComputeSHA256(commitment.Data)),
+		base64.StdEncoding.EncodeToString(util.ComputeSHA256(commitment.Proof)))
+
+	err := c.cs.VerifyCommitment(commitment)
+	if err != nil {
+		c.Logger.Warnf("commitment {Data: %s, Proof %s:} is not valid",
+			base64.StdEncoding.EncodeToString(commitment.Data),
+			base64.StdEncoding.EncodeToString(commitment.Proof))
+		return errors.Wrap(err, "commitment is invalid")
+	}
+
+	state := c.committeeState()
+	_, newState, err := c.cs.Process(state, committee.Input{
+		Commitments: []committee.Commitment{commitment},
+	})
+	if err != nil {
+		c.Logger.Panicf("Failed processing committee update: %v", err)
+	}
+
+	rtc := c.RuntimeConfig.Load().(RuntimeConfig)
+	currentCommittee := c.ct.CurrentCommittee()
+	expectedCommitters := (len(currentCommittee)-1)/3 + 1
+	committeeMD := CommitteeMetadataForProposal(c.Logger, commitment.Data, newState.ToBytes(), rtc.CommitteeMetadata,
+		int64(block.Header.Number), expectedCommitters, rtc.committeeMinimumLifespan, currentCommittee, commitment.From)
+
+	expected := committeeMD.Marshal()
+	if !bytes.Equal(ordererMDFromBlock.CommitteeMetadata, expected) {
+		gotCommitteeMD := &CommitteeMetadata{}
+		gotCommitteeMD.Unmarshal(ordererMDFromBlock.CommitteeMetadata)
+
+		c.Logger.Warnf("Expected committee metadata \n%+v but got \n%+v", committeeMD, gotCommitteeMD)
+		return errors.Errorf("received committee metadata is different than expected")
+	}
+
+	return nil
 }
 
 func (c *BFTChain) migrateTransactions(prevCommittee, nextCommittee []int32) {
@@ -450,19 +533,24 @@ func (c *BFTChain) HandleMessage(sender uint64, m *smartbftprotos.Message, metad
 			c.Logger.Warningf("Failed verifying suspects in pre-prepare")
 			return
 		}
-	}
 
-	/*
-		if prp := m.GetPrePrepare(); prp != nil {
-
-			err := c.cs.VerifyCommitment(committee.Commitment{}) // TODO: actually extract the commitment from the pre-prepare
-			if err != nil {
-				c.Logger.Warningf("Failed verifying commitment of pre-prepare: %v", err)
-				return
-			}
-
+		if c.consensus.GetLeaderID() != sender {
+			c.Logger.Warnf("Received pre-prepare from %d but it was not the leader", sender)
+			return
 		}
-	*/
+
+		if prp.Seq%2 == 0 {
+			c.commitZKPWeReceivedEven.Store(committee.Commitment{
+				From:  int32(sender),
+				Proof: metadata,
+			})
+		} else {
+			c.commitZKPWeReceivedOdd.Store(committee.Commitment{
+				From:  int32(sender),
+				Proof: metadata,
+			})
+		}
+	}
 
 	c.consensus.HandleMessage(sender, m)
 }
@@ -583,6 +671,12 @@ func (c *BFTChain) maybeCommit() ([]byte, []byte) {
 	rtc := c.RuntimeConfig.Load().(RuntimeConfig)
 
 	currentCommittee := c.ct.CurrentCommittee()
+
+	if len(currentCommittee) == 0 {
+		c.Logger.Debugf("Committee selection is disabled")
+		return nil, nil
+	}
+
 	expectedCommitters := (len(currentCommittee)-1)/3 + 1
 
 	if !rtc.CommitteeMetadata.shouldCommit(int32(rtc.id), expectedCommitters, c.Logger) {
@@ -590,22 +684,28 @@ func (c *BFTChain) maybeCommit() ([]byte, []byte) {
 	}
 
 	state := c.committeeState()
+	prevStateSize := len(state.ToBytes())
 	feedback, _, err := c.cs.Process(state, committee.Input{})
 	if err != nil {
 		c.Logger.Panicf("Failed processing library: %v", err)
 	}
-	c.commitZKP.Store(feedback.Commitment.Proof)
 	if feedback.Commitment != nil {
-		c.Logger.Infof("Created commit of %d bytes", len(feedback.Commitment.Data))
+		c.commitZKPWeSent.Store(feedback.Commitment.Proof)
 		_, newState, err := c.cs.Process(state, committee.Input{
 			Commitments: []committee.Commitment{*feedback.Commitment},
 		})
 		if err != nil {
 			c.Logger.Panicf("Failed processing library: %v", err)
 		}
-		return feedback.Commitment.Data, newState.ToBytes()
+		rawNewState := newState.ToBytes()
+		c.Logger.Infof("Created commit (%s) with ZKP (%s) of %d bytes, state grows from %d to %d bytes",
+			base64.StdEncoding.EncodeToString(util.ComputeSHA256(feedback.Commitment.Data)),
+			base64.StdEncoding.EncodeToString(util.ComputeSHA256(feedback.Commitment.Proof)),
+			len(feedback.Commitment.Data), prevStateSize, len(rawNewState))
+		return feedback.Commitment.Data, rawNewState
 	}
 	c.Logger.Infof("Nothing to commit")
+	c.commitZKPWeSent.Store([]byte{})
 	return nil, nil
 }
 
