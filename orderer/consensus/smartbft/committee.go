@@ -273,9 +273,15 @@ func (cr *CommitteeRetriever) CurrentCommittee() (committee.Nodes, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed fetching latest state from block %d", committeeMetadataOfLastBlock.CommitteeShiftAt)
 	}
+
+	// Load latest state by processing an empty input
+	if _, _, err := committeeSelection.Process(currentCommitteeState, committee.Input{}); err != nil {
+		return nil, errors.Wrap(err, "failed loading state")
+	}
+
 	feedback, _, err := committeeSelection.Process(currentCommitteeState, committee.Input{
 		NextConfig:  cfg,
-		ReconShares: reconShares,
+		ReconShares: cr.filterInvalidReconShares(committeeSelection, reconShares),
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed deciding the next committee")
@@ -302,6 +308,20 @@ func (cr *CommitteeRetriever) CurrentCommittee() (committee.Nodes, error) {
 	cr.Logger.Debugf("Returning %v", nodes.IDs())
 	return nodes, nil
 
+}
+
+func (cr *CommitteeRetriever) filterInvalidReconShares(cs committee.Selection, reconShares []committee.ReconShare) []committee.ReconShare {
+	var res []committee.ReconShare
+
+	for _, rcs := range reconShares {
+		if err := cs.VerifyReconShare(rcs); err != nil {
+			cr.Logger.Warnf("Reconstruction share of %d about %d is invalid: %v", rcs.From, rcs.About, err)
+			continue
+		}
+		res = append(res, rcs)
+	}
+
+	return res
 }
 
 func (cr *CommitteeRetriever) genesisCommittee(lastBlockIndex int64) (committee.Nodes, error) {

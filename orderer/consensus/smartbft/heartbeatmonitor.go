@@ -8,6 +8,7 @@ package smartbft
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -190,4 +191,45 @@ func (hm *HeartbeatMonitor) GetSuspects() []uint64 {
 	}
 	hm.logger.Infof("The suspects are %v", suspects)
 	return suspects
+}
+
+type AtomicHeartBeatMonitor struct {
+	hbm atomic.Value
+}
+
+func (ahbm *AtomicHeartBeatMonitor) Set(hbm *HeartbeatMonitor) {
+	prev := ahbm.hbm.Load()
+	if prev != nil {
+		prev.(*HeartbeatMonitor).Close()
+	}
+	ahbm.hbm.Store(hbm)
+}
+
+func (ahbm *AtomicHeartBeatMonitor) GetSuspects() []uint64 {
+	hbm := ahbm.hbm.Load()
+	if hbm != nil {
+		hbm.(*HeartbeatMonitor).GetSuspects()
+	}
+	return nil
+}
+
+func (ahbm *AtomicHeartBeatMonitor) ProcessHeartbeat(sender uint64) {
+	hbm := ahbm.hbm.Load()
+	if hbm != nil {
+		hbm.(*HeartbeatMonitor).ProcessHeartbeat(sender)
+	}
+}
+
+func (ahbm *AtomicHeartBeatMonitor) Close() {
+	hbm := ahbm.hbm.Load()
+	if hbm != nil {
+		hbm.(*HeartbeatMonitor).Close()
+	}
+}
+
+func (ahbm *AtomicHeartBeatMonitor) Start() {
+	hbm := ahbm.hbm.Load()
+	if hbm != nil {
+		hbm.(*HeartbeatMonitor).Start()
+	}
 }

@@ -9,7 +9,6 @@ package smartbft
 import (
 	"encoding/asn1"
 	"encoding/base64"
-	"sync"
 
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
@@ -39,7 +38,6 @@ type Signer struct {
 	Logger             Logger
 	LastConfigBlockNum func(*common.Block) uint64
 	HeartbeatMonitor   HeartbeatSuspects
-	MonitorLock        *sync.RWMutex
 	CreateReconShares  func() []committee.ReconShare
 }
 
@@ -79,9 +77,7 @@ func (s *Signer) SignProposal(proposal types.Proposal, auxiliaryInput []byte) *t
 	}
 
 	var suspects []int32
-	s.MonitorLock.RLock()
 	monitorSuspects := s.HeartbeatMonitor.GetSuspects()
-	s.MonitorLock.RUnlock()
 	for _, s := range monitorSuspects {
 		suspects = append(suspects, int32(s))
 	}
