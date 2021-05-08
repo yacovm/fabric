@@ -12,18 +12,14 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"sync"
 	"sync/atomic"
 	"time"
-
-	cs "github.com/SmartBFT-Go/randomcommittees"
-
-	"github.com/hyperledger/fabric/protos/orderer"
 
 	smartbft "github.com/SmartBFT-Go/consensus/pkg/consensus"
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/pkg/wal"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
+	cs "github.com/SmartBFT-Go/randomcommittees"
 	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/channelconfig"
@@ -35,6 +31,7 @@ import (
 	"github.com/hyperledger/fabric/orderer/consensus"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/msp"
+	"github.com/hyperledger/fabric/protos/orderer"
 	smartbft2 "github.com/hyperledger/fabric/protos/orderer/smartbft"
 	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/pkg/errors"
@@ -94,9 +91,7 @@ type BFTChain struct {
 	verifier                *Verifier
 	assembler               *Assembler
 	Metrics                 *Metrics
-	heartbeatMonitor        *HeartbeatMonitor
-	monitorLock             *sync.RWMutex
-	monitorInitialized      bool
+	heartbeatMonitor        *AtomicHeartBeatMonitor
 }
 
 // NewChain creates new BFT Smart chain
@@ -169,7 +164,6 @@ func NewChain(
 	heartbeatTicker := time.NewTicker(1 * time.Second)
 	heartbeatTimeout := 10 * time.Second
 	heartbeatCount := uint64(5)
-	c.monitorLock = &sync.RWMutex{}
 
 	currentCommittee := c.ct.CurrentCommittee()
 
@@ -182,12 +176,11 @@ func NewChain(
 			}
 			c.migrateTransactions(prevCommittee, currentCommittee.IDs())
 
-			if c.monitorInitialized { // if not initialized then heartbeat monitor will initialize later in NewChain
+			if c.heartbeatMonitor != nil {
 				myRole, heartbeatSenders, heartbeatReceivers := setupHeartbeatMonitor(selfID, currentCommittee, allNodes)
-
-				c.monitorLock.Lock()
-				c.heartbeatMonitor = NewHeartbeatMonitor(c.consensus.Comm.(MessageSender), heartbeatTicker.C, logger, heartbeatTimeout, heartbeatCount, myRole, heartbeatSenders, heartbeatReceivers)
-				c.monitorLock.Unlock()
+				hbm := NewHeartbeatMonitor(c.consensus.Comm.(MessageSender), heartbeatTicker.C, logger, heartbeatTimeout, heartbeatCount, myRole, heartbeatSenders, heartbeatReceivers)
+				c.heartbeatMonitor.Set(hbm)
+				hbm.Start()
 			}
 		},
 		logger: logger,
@@ -220,10 +213,9 @@ func NewChain(
 
 	myRole, heartbeatSenders, heartbeatReceivers := setupHeartbeatMonitor(selfID, currentCommittee, rtc.Nodes)
 
-	c.monitorLock.Lock()
-	c.heartbeatMonitor = NewHeartbeatMonitor(c.consensus.Comm.(MessageSender), heartbeatTicker.C, logger, heartbeatTimeout, heartbeatCount, myRole, heartbeatSenders, heartbeatReceivers)
-	c.monitorLock.Unlock()
-	c.monitorInitialized = true
+	c.heartbeatMonitor = &AtomicHeartBeatMonitor{}
+	hbm := NewHeartbeatMonitor(c.consensus.Comm.(MessageSender), heartbeatTicker.C, logger, heartbeatTimeout, heartbeatCount, myRole, heartbeatSenders, heartbeatReceivers)
+	c.heartbeatMonitor.Set(hbm)
 
 	c.consensus.Signer = &Signer{
 		ID:               c.Config.SelfID,
@@ -237,7 +229,6 @@ func NewChain(
 			return c.RuntimeConfig.Load().(RuntimeConfig).LastConfigBlock.Header.Number
 		},
 		HeartbeatMonitor: c.heartbeatMonitor,
-		MonitorLock:      c.monitorLock,
 		CreateReconShares: func() []committee.ReconShare {
 			feedback, _, err := c.cs.Process(c.committeeState(), committee.Input{})
 			if err != nil {
@@ -293,7 +284,6 @@ func bftSmartConsensusBuild(
 		BlockToDecision: c.blockToDecision,
 		OnCommit:        c.updateRuntimeConfig,
 		Support:         c.support,
-		ClusterSize:     clusterSize,
 		Logger:          c.Logger,
 		LatestConfig: func() (types.Configuration, []uint64) {
 			rtc := c.RuntimeConfig.Load().(RuntimeConfig)
@@ -490,7 +480,7 @@ func (c *BFTChain) migrateTransactions(prevCommittee, nextCommittee []int32) {
 
 	var newNodes []int32
 	for _, id := range nextCommittee {
-		if _, exists := prev[id]; !exists {
+		if _, exists := prev[id]; exists {
 			continue
 		}
 		newNodes = append(newNodes, id)
@@ -712,14 +702,16 @@ func (c *BFTChain) maybeCommit() ([]byte, []byte) {
 }
 
 func (c *BFTChain) HandleRequest(sender uint64, req []byte) {
+	if _, err := c.verifier.verifyRequest(req, false); err != nil {
+		c.Logger.Warnf("Request from %d is invalid: %v", sender, err)
+		return
+	}
 	c.Logger.Debugf("HandleRequest from %d", sender)
 	c.consensus.SubmitRequest(req)
 }
 
 func (c *BFTChain) HandleHeartbeat(sender uint64) {
 	c.Logger.Debugf("HandleHeartbeat from %d", sender)
-	c.monitorLock.RLock()
-	defer c.monitorLock.RUnlock()
 	c.heartbeatMonitor.ProcessHeartbeat(sender)
 }
 
@@ -910,15 +902,11 @@ func (c *BFTChain) Errored() <-chan struct{} {
 
 func (c *BFTChain) Start() {
 	c.consensus.Start()
-	c.monitorLock.RLock()
-	defer c.monitorLock.RUnlock()
 	c.heartbeatMonitor.Start()
 }
 
 func (c *BFTChain) Halt() {
 	c.Logger.Infof("Shutting down chain")
-	c.monitorLock.RLock()
-	defer c.monitorLock.RUnlock()
 	c.heartbeatMonitor.Close()
 	c.consensus.Stop()
 }

@@ -8,7 +8,6 @@ package smartbft_test
 
 import (
 	"errors"
-	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -34,7 +33,6 @@ func TestSigner(t *testing.T) {
 		Logger:           flogging.MustGetLogger("test"),
 		ID:               3,
 		HeartbeatMonitor: monitor,
-		MonitorLock:      &sync.RWMutex{},
 	}
 
 	t.Run("signing fails", func(t *testing.T) {
@@ -67,7 +65,6 @@ func TestSignProposal(t *testing.T) {
 			return 10
 		},
 		HeartbeatMonitor: monitor,
-		MonitorLock:      &sync.RWMutex{},
 	}
 
 	lastBlock := makeNonConfigBlock(19, 10)
@@ -129,7 +126,6 @@ func TestSignBadProposal(t *testing.T) {
 		Logger:           flogging.MustGetLogger("test"),
 		ID:               3,
 		HeartbeatMonitor: monitor,
-		MonitorLock:      &sync.RWMutex{},
 	}
 
 	f := func() {
