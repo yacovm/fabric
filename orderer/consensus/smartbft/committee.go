@@ -27,12 +27,18 @@ import (
 // CommitteeMetadata encodes committee metadata
 // for a block.
 type CommitteeMetadata struct {
-	State            []byte          // State of this current committee.
+	State            RawState        // State of this current committee.
 	Committers       []int32         // The identifiers of who committed in this committee
 	FinalStateIndex  int64           // The block number of the last finalized state that was used to pick this committee
 	CommitteeShiftAt int64           // The block number that contains reconstruction shares that reveal this committee
 	CommitteeAtShift committee.Nodes // The committee at the time of the shift to this committee
 	GenesisConfigAt  int64           // The block number of the first ever committee instance
+}
+
+type RawState []byte
+
+func (rs RawState) String() string {
+	return base64.StdEncoding.EncodeToString(rs)
 }
 
 func (cm *CommitteeMetadata) committed(id int32) bool {

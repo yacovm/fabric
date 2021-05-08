@@ -16,8 +16,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/hyperledger/fabric/common/util"
-
 	cs "github.com/SmartBFT-Go/randomcommittees"
 
 	"github.com/hyperledger/fabric/protos/orderer"
@@ -443,17 +441,18 @@ func (c *BFTChain) verifyCommitment(block *common.Block) error {
 	commitment := cmt.(committee.Commitment)
 	commitment.Data = ordererMDFromBlock.CommittteeCommitment
 
-	c.Logger.Debugf("Verifying commitment from %d, for block %d with digest of %s and ZKP digest of %s",
+	c.Logger.Debugf("Verifying commitment from %d, for block %d with body (%s) and ZKP (%s)",
 		commitment.From,
 		block.Header.Number,
-		base64.StdEncoding.EncodeToString(util.ComputeSHA256(commitment.Data)),
-		base64.StdEncoding.EncodeToString(util.ComputeSHA256(commitment.Proof)))
+		base64.StdEncoding.EncodeToString(commitment.Data),
+		base64.StdEncoding.EncodeToString(commitment.Proof))
 
 	err := c.cs.VerifyCommitment(commitment)
 	if err != nil {
-		c.Logger.Warnf("commitment {Data: %s, Proof %s:} is not valid",
+		c.Logger.Warnf("commitment {Data: %s, Proof %s:} for block %d is not valid",
 			base64.StdEncoding.EncodeToString(commitment.Data),
-			base64.StdEncoding.EncodeToString(commitment.Proof))
+			base64.StdEncoding.EncodeToString(commitment.Proof),
+			block.Header.Number)
 		return errors.Wrap(err, "commitment is invalid")
 	}
 
@@ -538,6 +537,8 @@ func (c *BFTChain) HandleMessage(sender uint64, m *smartbftprotos.Message, metad
 			c.Logger.Warnf("Received pre-prepare from %d but it was not the leader", sender)
 			return
 		}
+
+		c.Logger.Debugf("Received pre-prepare from %d with ZKP (%s)", sender, base64.StdEncoding.EncodeToString(metadata))
 
 		if prp.Seq%2 == 0 {
 			c.commitZKPWeReceivedEven.Store(committee.Commitment{
@@ -685,7 +686,8 @@ func (c *BFTChain) maybeCommit() ([]byte, []byte) {
 
 	state := c.committeeState()
 	prevStateSize := len(state.ToBytes())
-	feedback, _, err := c.cs.Process(state, committee.Input{})
+
+	feedback, _, err := c.cs.Process(c.committeeState(), committee.Input{})
 	if err != nil {
 		c.Logger.Panicf("Failed processing library: %v", err)
 	}
@@ -699,8 +701,8 @@ func (c *BFTChain) maybeCommit() ([]byte, []byte) {
 		}
 		rawNewState := newState.ToBytes()
 		c.Logger.Infof("Created commit (%s) with ZKP (%s) of %d bytes, state grows from %d to %d bytes",
-			base64.StdEncoding.EncodeToString(util.ComputeSHA256(feedback.Commitment.Data)),
-			base64.StdEncoding.EncodeToString(util.ComputeSHA256(feedback.Commitment.Proof)),
+			base64.StdEncoding.EncodeToString(feedback.Commitment.Data),
+			base64.StdEncoding.EncodeToString(feedback.Commitment.Proof),
 			len(feedback.Commitment.Data), prevStateSize, len(rawNewState))
 		return feedback.Commitment.Data, rawNewState
 	}
