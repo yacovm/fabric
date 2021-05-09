@@ -78,7 +78,8 @@ func (cm *CommitteeMetadata) Unmarshal(bytes []byte) error {
 }
 
 func (cm *CommitteeMetadata) Marshal() []byte {
-	if cm == nil || (len(cm.Committers) == 0 && len(cm.State) == 0) {
+	if cm == nil ||
+		(len(cm.Committers) == 0 && len(cm.State) == 0 && cm.GenesisConfigAt == 0 && cm.FinalStateIndex == 0 && cm.CommitteeShiftAt == 0) {
 		return nil
 	}
 	bytes, err := asn1.Marshal(*cm)
@@ -89,14 +90,25 @@ func (cm *CommitteeMetadata) Marshal() []byte {
 }
 
 type CommitteeTracker struct {
-	ledger Ledger
-	logger *flogging.FabricLogger
-	cr     *CommitteeRetriever
+	committeeDisabled bool
+	ledger            Ledger
+	logger            *flogging.FabricLogger
+	cr                *CommitteeRetriever
+}
+
+func committeeHasPublicKeysDefined(nodes committee.Nodes) bool {
+	for _, n := range nodes {
+		if len(n.PubKey) == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (ct *CommitteeTracker) CurrentCommittee() committee.Nodes {
 	if ct.cr == nil {
 		ct.cr = &CommitteeRetriever{
+			committeeDisabled:     ct.committeeDisabled,
 			NewCommitteeSelection: cs.NewCommitteeSelection,
 			Ledger:                ct.ledger,
 			Logger:                ct.logger,
@@ -119,21 +131,27 @@ type CommitteeSelection interface {
 
 // CommitteeRetriever retrieves the committee.
 type CommitteeRetriever struct {
+	committeeDisabled     bool
 	NewCommitteeSelection func(logger committee.Logger) committee.Selection
 	Ledger                Ledger
 	Logger                *flogging.FabricLogger
 }
 
-func (cr *CommitteeRetriever) CurrentState() committee.State {
+func (cr *CommitteeRetriever) CurrentState(forCommit bool) committee.State {
+	emptyState, err := cs.StateFromBytes(nil)
+	if err != nil {
+		cr.Logger.Panicf("Failed initializing empty state: %v", err)
+	}
+
+	if cr.committeeDisabled {
+		cr.Logger.Debugf("Committee selection is disabled, returning empty state")
+		return emptyState
+	}
+
 	lastBlock := LastBlockFromLedgerOrPanic(cr.Ledger, cr.Logger)
 	md, err := committeeMetadataFromBlock(lastBlock)
 	if err != nil {
 		cr.Logger.Panicf("Failed extracting committee metadata from block %d: %v", lastBlock.Header.Number, err)
-	}
-
-	emptyState, err := cs.StateFromBytes(nil)
-	if err != nil {
-		cr.Logger.Panicf("Failed initializing empty state: %v", err)
 	}
 
 	if md == nil {
@@ -141,14 +159,29 @@ func (cr *CommitteeRetriever) CurrentState() committee.State {
 		return emptyState
 	}
 
+	if forCommit {
+		if lastBlock.Header.Number == uint64(md.CommitteeShiftAt) {
+			cr.Logger.Debugf("Last block was a committee change, returning an empty state")
+			return emptyState
+		}
+		nonEmptyState, err := cs.StateFromBytes(md.State)
+		if err != nil {
+			cr.Logger.Panicf("Failed initializing state: %v", err)
+		}
+		cr.Logger.Debugf("Requested state for commit, returning a state of %d bytes", len(md.State))
+
+		return nonEmptyState
+	}
+
 	var rawState []byte
 	if len(md.State) > 0 {
-		cr.Logger.Debugf("Current block(%d) contains %d bytes of state", lastBlock.Header.Number, len(md.State))
+		cr.Logger.Debugf("Current block (%d) contains %d bytes of state", lastBlock.Header.Number, len(md.State))
 		rawState = md.State
-	} else if md.FinalStateIndex > md.CommitteeShiftAt {
-		cr.Logger.Debugf("Current block(%d) has no state but its final state index (%d) is later than its last committee shift index (%d),"+
-			"retrieving the state from that block", lastBlock.Header.Number, md.FinalStateIndex, md.CommitteeShiftAt)
+	} else {
+		cr.Logger.Debugf("Current block (%d) has no state and its final state index is %d and its last committee shift index is %d ,"+
+			"retrieving the state from block %d", lastBlock.Header.Number, md.FinalStateIndex, md.CommitteeShiftAt, md.FinalStateIndex)
 		block := cr.Ledger.Block(uint64(md.FinalStateIndex))
+
 		md, err := committeeMetadataFromBlock(block)
 		if err != nil {
 			cr.Logger.Panicf("Failed extracting committee metadata from block %d: %v", block.Header.Number, err)
@@ -193,7 +226,7 @@ func (cr *CommitteeRetriever) CurrentCommittee() (committee.Nodes, error) {
 
 	if noCommitteeSelection {
 		cr.Logger.Debugf("Committee selection is disabled, returning all nodes")
-		return nil, nil
+		return nodeConf.NodesNoPubKeys(cr.Logger), nil
 	}
 
 	if committeeMetadataOfLastBlock == nil {
@@ -247,6 +280,8 @@ func (cr *CommitteeRetriever) CurrentCommittee() (committee.Nodes, error) {
 			reconShares = append(reconShares, reconShare)
 		}
 	}
+
+	cr.Logger.Debugf("Detected %d ReconShares in block %d", len(reconShares), reconstructionSharesBlock.Header.Number)
 
 	consensusMD, err := consensusMDFromBlock(lastConfigBlock)
 	if err != nil {
@@ -305,7 +340,7 @@ func (cr *CommitteeRetriever) CurrentCommittee() (committee.Nodes, error) {
 		})
 	}
 
-	cr.Logger.Debugf("Returning %v", nodes.IDs())
+	cr.Logger.Debugf("Returning committee for block %d: %v", lastBlock.Header.Number+1, nodes.IDs())
 	return nodes, nil
 
 }
@@ -314,12 +349,15 @@ func (cr *CommitteeRetriever) filterInvalidReconShares(cs committee.Selection, r
 	var res []committee.ReconShare
 
 	for _, rcs := range reconShares {
+		cr.Logger.Debugf("Verifying ReconShare from %d about %d", rcs.From, rcs.About)
 		if err := cs.VerifyReconShare(rcs); err != nil {
 			cr.Logger.Warnf("Reconstruction share of %d about %d is invalid: %v", rcs.From, rcs.About, err)
 			continue
 		}
 		res = append(res, rcs)
 	}
+
+	cr.Logger.Debugf("Returning %d ReconShares", len(res))
 
 	return res
 }
@@ -364,6 +402,10 @@ func (cr *CommitteeRetriever) latestState(finalStateIndex int64) (committee.Stat
 }
 
 func (cr *CommitteeRetriever) disabled(config *smartbft.ConfigMetadata, nodeConf *nodeConfig) (bool, error) {
+	if cr.committeeDisabled {
+		return true, nil
+	}
+
 	if config.Options.CommitteeConfig == nil {
 		cr.Logger.Debugf("Committee selection is not set")
 		return true, nil
@@ -394,11 +436,22 @@ func CommitteeMetadataForProposal(
 ) *CommitteeMetadata {
 	committeeMD := &CommitteeMetadata{}
 
+	logger.Debugf("Computing metadata for block %d", blockNum)
+
+	if !committeeHasPublicKeysDefined(currentCommittee) {
+		logger.Debugf("Current committee lacks public keys, returning an empty CommitteeMetadata")
+		return committeeMD
+	}
+
+	var prevStateSize int
 	if prevCommitteeMD == nil {
 		committeeMD.GenesisConfigAt = blockNum - 1
+		logger.Debugf("This is the first committee metadata, setting genesis config to be %d", committeeMD.GenesisConfigAt)
 	}
 
 	if prevCommitteeMD != nil {
+		prevStateSize = len(prevCommitteeMD.State)
+		committeeMD.GenesisConfigAt = prevCommitteeMD.GenesisConfigAt
 		committeeMD.Committers = make([]int32, len(prevCommitteeMD.Committers))
 		copy(committeeMD.Committers, prevCommitteeMD.Committers)
 		committeeMD.CommitteeShiftAt = prevCommitteeMD.CommitteeShiftAt
@@ -408,6 +461,11 @@ func CommitteeMetadataForProposal(
 		// So wipe out all the previous committers.
 		if committeeMD.CommitteeShiftAt == blockNum-1 {
 			committeeMD.Committers = nil
+			logger.Debugf("This is a new committee with GenesisConfigAt(%d), CommitteeShiftAt(%d), FinalStateIndex(%d)",
+				committeeMD.GenesisConfigAt, committeeMD.CommitteeShiftAt, committeeMD.FinalStateIndex)
+		} else {
+			logger.Debugf("Transferring previous committee metadata GenesisConfigAt(%d), Committers(%v), CommitteeShiftAt(%d), FinalStateIndex(%d)",
+				committeeMD.GenesisConfigAt, committeeMD.Committers, committeeMD.CommitteeShiftAt, committeeMD.FinalStateIndex)
 		}
 	}
 
@@ -415,20 +473,29 @@ func CommitteeMetadataForProposal(
 	if len(commitment) > 0 && committeeMD.shouldCommit(id, expectedCommitters, logger) {
 		committeeMD.State = newState
 		committeeMD.Committers = append(committeeMD.Committers, id)
+		logger.Debugf("A commit has occurred, state has increased from %d to %d bytes", prevStateSize, len(committeeMD.State))
+		logger.Debugf("Setting state to %s", base64.StdEncoding.EncodeToString(newState))
 		if len(committeeMD.Committers) == expectedCommitters {
 			committeeMD.FinalStateIndex = blockNum
+			logger.Debugf("Final state index changed from %d to %d because this is the last commit",
+				prevCommitteeMD.FinalStateIndex, committeeMD.FinalStateIndex)
 		}
 	}
 
-	finalStateIndex := committeeMD.FinalStateIndex
+	lastIndex := committeeMD.FinalStateIndex
+	if committeeMD.CommitteeShiftAt > lastIndex {
+		lastIndex = committeeMD.CommitteeShiftAt
+	}
 
 	// This might be the last block of the committee, so we need to prepare for the committee change.
 	// We encode the block number where the committee ends, and the committee itself at that point.
 	// This, alongside the FinalStateIndex and reconstruction shares collected from the signatures
 	// at the block commit, is enough information for the committee selection library deduce the next committee.
-	if finalStateIndex > 0 && blockNum-finalStateIndex > int64(committeeMinimumLifespan) {
+	if len(committeeMD.Committers) == expectedCommitters && lastIndex > 0 && blockNum-lastIndex > int64(committeeMinimumLifespan) {
 		committeeMD.CommitteeShiftAt = blockNum
 		committeeMD.CommitteeAtShift = currentCommittee
+		logger.Debugf("This block ends the committee, setting CommitteeShiftAt to be %d with committee of %v",
+			committeeMD.CommitteeShiftAt, committeeMD.CommitteeAtShift.IDs())
 	}
 
 	return committeeMD

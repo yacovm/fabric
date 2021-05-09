@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hyperledger/fabric/common/util"
+
 	smartbft "github.com/SmartBFT-Go/consensus/pkg/consensus"
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/pkg/wal"
@@ -69,6 +71,7 @@ type signerSerializer interface {
 // BFTChain implements Chain interface to wire with
 // BFT smart library
 type BFTChain struct {
+	committeeDisabled       bool
 	egress                  *Egress
 	committeePrivateKey     committee.PrivateKey
 	ct                      *CommitteeTracker
@@ -76,7 +79,6 @@ type BFTChain struct {
 	commitZKPWeReceivedOdd  *atomic.Value
 	commitZKPWeReceivedEven *atomic.Value
 	cv                      ConfigValidator
-	cs                      committee.Selection
 	RuntimeConfig           *atomic.Value
 	Channel                 string
 	Config                  types.Configuration
@@ -96,6 +98,7 @@ type BFTChain struct {
 
 // NewChain creates new BFT Smart chain
 func NewChain(
+	committeeDisabled bool,
 	privateKeyBytesHash []byte,
 	cv ConfigValidator,
 	selfID uint64,
@@ -129,12 +132,12 @@ func NewChain(
 	commitZKP := &atomic.Value{}
 	commitZKP.Store([]byte{}) // Store an empty slice for type safety
 	c := &BFTChain{
+		committeeDisabled:       committeeDisabled,
 		commitZKPWeReceivedOdd:  &atomic.Value{},
 		commitZKPWeReceivedEven: &atomic.Value{},
 		commitZKPWeSent:         commitZKP,
 		committeePrivateKey:     privateKey,
 		cv:                      cv,
-		cs:                      committeeSelection,
 		RuntimeConfig:           &atomic.Value{},
 		Channel:                 support.ChainID(),
 		Config:                  config,
@@ -152,8 +155,9 @@ func NewChain(
 			LeaderID:             metrics.LeaderID.With("channel", support.ChainID()),
 		},
 		ct: &CommitteeTracker{
-			logger: logger,
-			ledger: &CachingLedger{Ledger: support},
+			committeeDisabled: committeeDisabled,
+			logger:            logger,
+			ledger:            &CachingLedger{Ledger: support},
 		},
 	}
 
@@ -197,7 +201,7 @@ func NewChain(
 
 	c.RuntimeConfig.Store(rtc)
 
-	if len(currentCommittee) > 0 {
+	if !committeeDisabled && committeeHasPublicKeysDefined(currentCommittee) {
 		err = committeeSelection.Initialize(int32(selfID), privateKey, currentCommittee)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed initializing committee selection instance")
@@ -205,10 +209,10 @@ func NewChain(
 		logger.Infof("Initialized committee selection for %d with public key %s", selfID, base64.StdEncoding.EncodeToString(publicKey))
 		logger.Infof("Nodes: %v", currentCommittee)
 	} else {
-		logger.Infof("No nodes in current committee")
+		logger.Infof("Committee selection is disabled")
 	}
 
-	c.verifier = buildVerifier(c, committeeSelection, cv, c.RuntimeConfig, support, requestInspector, policyManager)
+	c.verifier = buildVerifier(c, cv, c.RuntimeConfig, support, requestInspector, policyManager)
 	c.consensus = bftSmartConsensusBuild(c.ct, c, requestInspector)
 
 	myRole, heartbeatSenders, heartbeatReceivers := setupHeartbeatMonitor(selfID, currentCommittee, rtc.Nodes)
@@ -228,14 +232,8 @@ func NewChain(
 
 			return c.RuntimeConfig.Load().(RuntimeConfig).LastConfigBlock.Header.Number
 		},
-		HeartbeatMonitor: c.heartbeatMonitor,
-		CreateReconShares: func() []committee.ReconShare {
-			feedback, _, err := c.cs.Process(c.committeeState(), committee.Input{})
-			if err != nil {
-				c.Logger.Panicf("Failed creating reconstruction shares: %v", err)
-			}
-			return feedback.ReconShares
-		},
+		HeartbeatMonitor:  c.heartbeatMonitor,
+		CreateReconShares: c.createReconShares,
 	}
 
 	// Setup communication with list of remotes notes for the new channel
@@ -279,12 +277,13 @@ func bftSmartConsensusBuild(
 	c.Metrics.ClusterSize.Set(float64(clusterSize))
 
 	sync := &Synchronizer{
-		PullerConfig:    c.PullerConfig,
-		selfID:          rtc.id,
-		BlockToDecision: c.blockToDecision,
-		OnCommit:        c.updateRuntimeConfig,
-		Support:         c.support,
-		Logger:          c.Logger,
+		committeeDisabled: c.committeeDisabled,
+		PullerConfig:      c.PullerConfig,
+		selfID:            rtc.id,
+		BlockToDecision:   c.blockToDecision,
+		OnCommit:          c.updateRuntimeConfig,
+		Support:           c.support,
+		Logger:            c.Logger,
 		LatestConfig: func() (types.Configuration, []uint64) {
 			rtc := c.RuntimeConfig.Load().(RuntimeConfig)
 			return rtc.BFTConfig, rtc.Nodes
@@ -356,7 +355,6 @@ func bftSmartConsensusBuild(
 
 func buildVerifier(
 	c *BFTChain,
-	cs committee.Selection,
 	cv ConfigValidator,
 	runtimeConfig *atomic.Value,
 	support consensus.ConsenterSupport,
@@ -385,6 +383,7 @@ func buildVerifier(
 		Ledger: support,
 		VerifyReconShares: func(reconShares []committee.ReconShare) error {
 			for _, rcs := range reconShares {
+				cs := c.committeeSelection(nonMember)
 				if err := cs.VerifyReconShare(rcs); err != nil {
 					return err
 				}
@@ -392,6 +391,36 @@ func buildVerifier(
 			return nil
 		},
 	}
+}
+
+func (c *BFTChain) isInCommittee() bool {
+	for _, id := range c.ct.CurrentCommittee().IDs() {
+		if uint64(id) == c.Config.SelfID {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (c *BFTChain) createReconShares() []committee.ReconShare {
+	if !c.isInCommittee() {
+		c.Logger.Debugf("Not in committee, will not send ReconShares")
+		return nil
+	}
+
+	lastBlock := LastBlockFromLedgerOrPanic(c.ct.ledger, c.Logger)
+
+	committeeSelection := c.committeeSelection(member)
+	currState := c.committeeState(false)
+	feedback, _, err := committeeSelection.Process(currState, committee.Input{})
+	if err != nil {
+		c.Logger.Panicf("Failed creating reconstruction shares: %v", err)
+	}
+	stateDigest := base64.StdEncoding.EncodeToString(util.ComputeSHA256(currState.ToBytes()))
+	c.Logger.Debugf("Created %d ReconShares at last block %d for state with digest %s",
+		len(feedback.ReconShares), lastBlock.Header.Number, stateDigest)
+	return feedback.ReconShares
 }
 
 func (c *BFTChain) verifyCommitment(block *common.Block) error {
@@ -421,6 +450,10 @@ func (c *BFTChain) verifyCommitment(block *common.Block) error {
 		return nil
 	}
 
+	if c.committeeDisabled {
+		return errors.Errorf("committee selection is disabled, but block contains commitment")
+	}
+
 	var cmt interface{}
 	if block.Header.Number%2 == 0 {
 		cmt = c.commitZKPWeReceivedEven.Load()
@@ -437,8 +470,9 @@ func (c *BFTChain) verifyCommitment(block *common.Block) error {
 		base64.StdEncoding.EncodeToString(commitment.Data),
 		base64.StdEncoding.EncodeToString(commitment.Proof))
 
-	err := c.cs.VerifyCommitment(commitment)
-	if err != nil {
+	committeeSelection := c.committeeSelection(nonMember)
+
+	if err := committeeSelection.VerifyCommitment(commitment); err != nil {
 		c.Logger.Warnf("commitment {Data: %s, Proof %s:} for block %d is not valid",
 			base64.StdEncoding.EncodeToString(commitment.Data),
 			base64.StdEncoding.EncodeToString(commitment.Proof),
@@ -446,16 +480,18 @@ func (c *BFTChain) verifyCommitment(block *common.Block) error {
 		return errors.Wrap(err, "commitment is invalid")
 	}
 
-	state := c.committeeState()
-	_, newState, err := c.cs.Process(state, committee.Input{
+	c.Logger.Debugf("Commitment from %d is valid", commitment.From)
+
+	state := c.committeeState(true)
+	_, newState, err := committeeSelection.Process(state, committee.Input{
 		Commitments: []committee.Commitment{commitment},
 	})
 	if err != nil {
 		c.Logger.Panicf("Failed processing committee update: %v", err)
 	}
 
-	rtc := c.RuntimeConfig.Load().(RuntimeConfig)
 	currentCommittee := c.ct.CurrentCommittee()
+	rtc := c.RuntimeConfig.Load().(RuntimeConfig)
 	expectedCommitters := (len(currentCommittee)-1)/3 + 1
 	committeeMD := CommitteeMetadataForProposal(c.Logger, commitment.Data, newState.ToBytes(), rtc.CommitteeMetadata,
 		int64(block.Header.Number), expectedCommitters, rtc.committeeMinimumLifespan, currentCommittee, commitment.From)
@@ -470,6 +506,33 @@ func (c *BFTChain) verifyCommitment(block *common.Block) error {
 	}
 
 	return nil
+}
+
+type committeeInstanceType bool
+
+const (
+	nonMember committeeInstanceType = false
+	member    committeeInstanceType = true
+)
+
+func (c *BFTChain) committeeSelection(isMember committeeInstanceType) committee.Selection {
+	currentCommittee := c.ct.CurrentCommittee()
+	committeeSelection := cs.NewCommitteeSelection(c.Logger)
+
+	selfID := int32(math.MaxInt32)
+	var privateKey committee.PrivateKey
+
+	if isMember {
+		selfID = int32(c.Config.SelfID)
+		privateKey = c.committeePrivateKey
+	}
+
+	err := committeeSelection.Initialize(selfID, privateKey, currentCommittee)
+	if err != nil {
+		c.Logger.Panicf("Failed initializing committee after commit: %v", err)
+	}
+
+	return committeeSelection
 }
 
 func (c *BFTChain) migrateTransactions(prevCommittee, nextCommittee []int32) {
@@ -659,13 +722,21 @@ func setupHeartbeatMonitor(selfID uint64, currentCommittee []committee.Node, all
 }
 
 func (c *BFTChain) maybeCommit() ([]byte, []byte) {
+	if c.committeeDisabled {
+		c.Logger.Debugf("Committee selection disabled")
+		return nil, nil
+	}
 	rtc := c.RuntimeConfig.Load().(RuntimeConfig)
 
 	currentCommittee := c.ct.CurrentCommittee()
 
-	if len(currentCommittee) == 0 {
-		c.Logger.Debugf("Committee selection is disabled")
+	if !committeeHasPublicKeysDefined(currentCommittee) {
+		c.Logger.Debugf("Committee is lacking public keys, will not commit")
 		return nil, nil
+	}
+
+	if !c.isInCommittee() {
+		c.Logger.Debugf("I am not in the committee, skipping the commit")
 	}
 
 	expectedCommitters := (len(currentCommittee)-1)/3 + 1
@@ -674,16 +745,17 @@ func (c *BFTChain) maybeCommit() ([]byte, []byte) {
 		return nil, nil
 	}
 
-	state := c.committeeState()
+	state := c.committeeState(true)
 	prevStateSize := len(state.ToBytes())
 
-	feedback, _, err := c.cs.Process(c.committeeState(), committee.Input{})
+	committeeSelection := c.committeeSelection(member)
+	feedback, _, err := committeeSelection.Process(c.committeeState(true), committee.Input{})
 	if err != nil {
 		c.Logger.Panicf("Failed processing library: %v", err)
 	}
 	if feedback.Commitment != nil {
 		c.commitZKPWeSent.Store(feedback.Commitment.Proof)
-		_, newState, err := c.cs.Process(state, committee.Input{
+		_, newState, err := committeeSelection.Process(state, committee.Input{
 			Commitments: []committee.Commitment{*feedback.Commitment},
 		})
 		if err != nil {
@@ -740,6 +812,10 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 		if ordererBlockMetadata == nil {
 			ordererBlockMetadata = sig.OrdererBlockMetadata
 		}
+
+		cf := &smartbft2.CommitteeFeedback{}
+		proto.Unmarshal(sig.CommitteeAuxiliaryInput, cf)
+		c.Logger.Debugf("Signature from %d with CommitteeAuxiliaryInput containing %d ReconShares", s.ID, len(cf.Reconshares))
 
 		sigs = append(sigs, &common.MetadataSignature{
 			CommitteeAuxiliaryInput: sig.CommitteeAuxiliaryInput,
@@ -813,14 +889,14 @@ func (c *BFTChain) reportIsLeader(proposal *types.Proposal) {
 
 }
 
-func (c *BFTChain) committeeState() committee.State {
+func (c *BFTChain) committeeState(forCommit bool) committee.State {
 	cr := &CommitteeRetriever{
 		NewCommitteeSelection: cs.NewCommitteeSelection,
 		Logger:                c.Logger,
 		Ledger:                c.ct.ledger,
 	}
 
-	return cr.CurrentState()
+	return cr.CurrentState(forCommit)
 }
 
 func (c *BFTChain) updateRuntimeConfig(block *common.Block) types.Reconfig {
@@ -834,11 +910,6 @@ func (c *BFTChain) updateRuntimeConfig(block *common.Block) types.Reconfig {
 	c.RuntimeConfig.Store(newRTC)
 	if utils.IsConfigBlock(block) {
 		c.Comm.Configure(c.Channel, newRTC.RemoteNodes)
-	}
-
-	err = c.cs.Initialize(int32(c.Config.SelfID), c.committeePrivateKey, c.ct.CurrentCommittee())
-	if err != nil {
-		c.Logger.Panicf("Failed initializing committee after commit: %v", err)
 	}
 
 	membershipDidNotChange := reflect.DeepEqual(newRTC.Nodes, prevRTC.Nodes)
@@ -968,10 +1039,12 @@ func (c *BFTChain) blockToDecision(block *common.Block) *types.Decision {
 	for _, sigMD := range signatureMetadata.Signatures {
 		id := sigMD.SignerId
 		sig := &Signature{
-			Nonce:                sigMD.Nonce,
-			BlockHeader:          block.Header.Bytes(),
-			OrdererBlockMetadata: signatureMetadata.Value,
-			AuxiliaryInput:       sigMD.AuxiliaryInput,
+			Nonce:                   sigMD.Nonce,
+			BlockHeader:             block.Header.Bytes(),
+			OrdererBlockMetadata:    signatureMetadata.Value,
+			AuxiliaryInput:          sigMD.AuxiliaryInput,
+			CommitteeAuxiliaryInput: sigMD.CommitteeAuxiliaryInput,
+			SignatureHeader:         sigMD.SignatureHeader,
 		}
 		prpf := &smartbftprotos.PreparesFrom{}
 		if err := proto.Unmarshal(sigMD.AuxiliaryInput, prpf); err != nil {

@@ -237,13 +237,16 @@ func (cs *CommitteeSelection) Process(state committee.State, input committee.Inp
 		inputBeforeDeduplication := input.ReconShares
 		input.ReconShares = deduplicateReconShares(input.ReconShares, cs.threshold())
 
-		cs.Logger.Infof("Received %d ReconShares and de-duplicated into %d ReconShares",
+		cs.Logger.Debugf("Received %d ReconShares and de-duplicated into %d ReconShares",
 			len(inputBeforeDeduplication), len(input.ReconShares))
 
 		combinedSecret, err := cs.secretFromReconShares(input.ReconShares)
 		if err != nil {
 			return feedback, state, err
 		}
+
+		cs.Logger.Debugf("Combined secret for state %s and committee %v is %s",
+			base64.StdEncoding.EncodeToString(newState.header.Bytes()), cs.nodes.IDs(), base64.StdEncoding.EncodeToString(combinedSecret))
 
 		feedback.NextCommittee = cs.SelectCommittee(input.NextConfig, []byte(digest(combinedSecret)))
 		cs.Logger.Infof("Next committee out of %v will be %v", input.NextConfig.Nodes.IDs(), feedback.NextCommittee)
@@ -435,10 +438,11 @@ func reconstructSecrets(reconShares []committee.ReconShare, ids2Index map[int32]
 func (cs *CommitteeSelection) createReconShares() ([]committee.ReconShare, error) {
 	ourIndex, weAreInCommittee := cs.ourIndex()
 	if !weAreInCommittee {
-		cs.Logger.Infof("We are not in the committee, should not send reconstruction shares")
+		if cs.pk != nil {
+			cs.Logger.Infof("We are not in the committee, should not send reconstruction shares")
+		}
 		return nil, nil
 	}
-	cs.Logger.Infof("Total public keys: %v", len(cs.pubKeys))
 	var res []committee.ReconShare
 	for _, cmt := range cs.state.commitments {
 		ourShare := cmt.EncShares[ourIndex]
@@ -469,7 +473,7 @@ func (cs *CommitteeSelection) createReconShares() ([]committee.ReconShare, error
 		res = append(res, rs)
 	}
 
-	cs.Logger.Infof("Created %d ReconShares", len(res))
+	cs.Logger.Infof("Created %d ReconShares for %d public keys and commitments: %s", len(res), len(cs.nodes), cs.state.commitments.asString())
 
 	return res, nil
 }
@@ -554,7 +558,7 @@ type State struct {
 
 func (s *State) String() string {
 	m := make(map[string]interface{})
-	m["commitments"] = s.commitments.asStrings()
+	m["commitments"] = s.commitments.asString()
 	m["header"] = fmt.Sprintf("BodyDigest: %s", s.header.BodyDigest)
 	m["body"] = fmt.Sprintf("commitments: %d", len(s.body.Commitments))
 
@@ -763,13 +767,13 @@ func (b Body) Bytes() []byte {
 
 type commitments []Commitment
 
-func (cms commitments) asStrings() []string {
+func (cms commitments) asString() string {
 	var res []string
 	for _, cmt := range cms {
-		res = append(res, fmt.Sprintf("from %d, %d commitments, %d shares, %d proofs",
+		res = append(res, fmt.Sprintf("From %d:{%d commitments, %d shares, %d proofs}",
 			cmt.From, len(cmt.Commitments), len(cmt.EncShares), len(cmt.Proofs.Proofs)))
 	}
-	return res
+	return fmt.Sprintf("%v", res)
 }
 
 type Commitment struct {

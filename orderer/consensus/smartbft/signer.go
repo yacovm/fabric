@@ -63,7 +63,6 @@ func (s *Signer) SignProposal(proposal types.Proposal, auxiliaryInput []byte) *t
 	if err := cm.Unmarshal(obm.CommitteeMetadata); err != nil {
 		s.Logger.Panicf("Failed unmarshaling committee metadata on an agreed upon block: %v", err)
 	}
-
 	var reconShares [][]byte
 	// This is the last block of the committee, so include reconstruction shares.
 	if cm.CommitteeShiftAt == int64(block.Header.Number) {

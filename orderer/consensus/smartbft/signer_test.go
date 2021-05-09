@@ -109,7 +109,7 @@ func TestSignProposal(t *testing.T) {
 	assert.NoError(t, proto.Unmarshal(signature.SignatureHeader, sigHdr))
 	assert.Nil(t, sigHdr.Creator)
 	assert.Equal(t, signature.OrdererBlockMetadata, utils.MarshalOrPanic(&common.OrdererBlockMetadata{
-		CommitteeMetadata: (&smartbft.CommitteeMetadata{}).Marshal(),
+		CommitteeMetadata: (&smartbft.CommitteeMetadata{GenesisConfigAt: 19}).Marshal(),
 		LastConfig:        &common.LastConfig{Index: 10},
 		ConsenterMetadata: prop.Metadata,
 	}))
