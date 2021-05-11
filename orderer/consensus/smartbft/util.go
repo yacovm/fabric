@@ -48,6 +48,7 @@ import (
 
 // newBlockPuller creates a new block puller
 func newBlockPuller(
+	committeeDisabled bool,
 	support consensus.ConsenterSupport,
 	baseDialer *cluster.PredicateDialer,
 	clusterConfig localconfig.Cluster) (BlockPuller, error) {
@@ -63,6 +64,7 @@ func newBlockPuller(
 	stdDialer.ClientConfig.SecOpts.VerifyCertificate = nil
 
 	cr := &CommitteeRetriever{
+		committeeDisabled:     committeeDisabled,
 		NewCommitteeSelection: cs.NewCommitteeSelection,
 		Logger:                flogging.MustGetLogger("orderer.consensus.smartbft.committee"),
 		Ledger:                support,
@@ -369,6 +371,7 @@ func (conCert ConsenterCertificate) IsConsenterOfChannel(configBlock *common.Blo
 }
 
 func RemoteNodesFromConfigBlock(block *common.Block, selfID uint64, logger *flogging.FabricLogger) (*nodeConfig, error) {
+	logger.Debugf("Computing nodes from block %d", block.Header.Number)
 	env := &common.Envelope{}
 	if err := proto.Unmarshal(block.Data.Data[0], env); err != nil {
 		return nil, errors.Wrap(err, "failed unmarshaling envelope of config block")
@@ -413,8 +416,6 @@ func RemoteNodesFromConfigBlock(block *common.Block, selfID uint64, logger *flog
 		} else {
 			logger.Warnf("Node %d lacks a committee public key", consenter.ConsenterId)
 		}
-
-		logger.Debugf("%s %d ---> %s", bundle.ConfigtxValidator().ChainID(), consenter.ConsenterId, string(consenter.Identity))
 
 		nodeIDs = append(nodeIDs, consenter.ConsenterId)
 
@@ -480,6 +481,19 @@ func (nc *nodeConfig) Nodes(logger Logger) committee.Nodes {
 				PubKey: pk,
 			})
 		}
+	}
+
+	return nodes
+}
+
+func (nc *nodeConfig) NodesNoPubKeys(logger Logger) committee.Nodes {
+	var nodes committee.Nodes
+	for _, n := range nc.nodeIDs {
+		pk := nc.id2SectionPK[n]
+		nodes = append(nodes, committee.Node{
+			ID:     int32(n),
+			PubKey: pk,
+		})
 	}
 
 	return nodes

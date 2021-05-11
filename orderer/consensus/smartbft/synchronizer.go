@@ -19,15 +19,16 @@ import (
 )
 
 type Synchronizer struct {
-	lastReconfig    types.Reconfig
-	selfID          uint64
-	LatestConfig    func() (types.Configuration, []uint64)
-	BlockToDecision func(*common.Block) *types.Decision
-	OnCommit        func(*common.Block) types.Reconfig
-	Support         consensus.ConsenterSupport
-	BlockPuller     BlockPuller
-	PullerConfig    pullerConfig
-	Logger          *flogging.FabricLogger
+	committeeDisabled bool
+	lastReconfig      types.Reconfig
+	selfID            uint64
+	LatestConfig      func() (types.Configuration, []uint64)
+	BlockToDecision   func(*common.Block) *types.Decision
+	OnCommit          func(*common.Block) types.Reconfig
+	Support           consensus.ConsenterSupport
+	BlockPuller       BlockPuller
+	PullerConfig      pullerConfig
+	Logger            *flogging.FabricLogger
 }
 
 func (s *Synchronizer) Close() {
@@ -36,7 +37,7 @@ func (s *Synchronizer) Close() {
 
 func (s *Synchronizer) Sync() types.SyncResponse {
 	if s.BlockPuller == nil {
-		puller, err := newBlockPuller(s.PullerConfig.support, s.PullerConfig.baseDialer, s.PullerConfig.clusterConfig)
+		puller, err := newBlockPuller(s.committeeDisabled, s.PullerConfig.support, s.PullerConfig.baseDialer, s.PullerConfig.clusterConfig)
 		if err != nil {
 			s.Logger.Panicf("Failed initializing block puller")
 		}
