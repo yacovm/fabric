@@ -197,7 +197,7 @@ func proposalFromRequests(verificationSeq, seq, lastConfigSeq uint64, lastBlockH
 
 	block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(&common.Metadata{
 		Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
-			CommitteeMetadata: (&smartbft.CommitteeMetadata{}).Marshal(),
+			CommitteeMetadata: (&smartbft.CommitteeMetadata{GenesisConfigAt: int64(19)}).Marshal(),
 			ConsenterMetadata: metadata,
 			LastConfig: &common.LastConfig{
 				Index: lastConfigSeq,

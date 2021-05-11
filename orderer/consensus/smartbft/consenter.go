@@ -196,7 +196,7 @@ func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *co
 		baseDialer:    c.ClusterDialer,
 		clusterConfig: c.Conf.General.Cluster,
 	}
-	chain, err := NewChain(c.privateKeyBytesHash, configValidator, selfID, config, path.Join(c.WALBaseDir, support.ChainID()), pc, c.Comm, c.SignerSerializer, c.GetPolicyManager(support.ChainID()), support, c.Metrics)
+	chain, err := NewChain(c.Conf.General.CommitteeSelectionDisabled, c.privateKeyBytesHash, configValidator, selfID, config, path.Join(c.WALBaseDir, support.ChainID()), pc, c.Comm, c.SignerSerializer, c.GetPolicyManager(support.ChainID()), support, c.Metrics)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed creating a new BFTChain")
 	}

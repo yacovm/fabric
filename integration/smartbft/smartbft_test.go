@@ -177,6 +177,102 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			invokeQuery(network, peer, network.Orderers[2], channel, 80)
 		})
 
+		It("smartbft disable committee", func() {
+			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, StartPort(), components)
+			network.BoostrapDockerNetwork()
+			network.GenerateAndBoostrapCrypto()
+			network.GenerateAndBoostrapConfig()
+
+			var ordererRunners []*ginkgomon.Runner
+			for _, orderer := range network.Orderers {
+				runner := network.OrdererRunner(orderer)
+				runner.Command.Env = append(runner.Command.Env, "FABRIC_LOGGING_SPEC=orderer.consensus.smartbft=debug:grpc=debug")
+				ordererRunners = append(ordererRunners, runner)
+				proc := ifrit.Invoke(runner)
+				ordererProcesses = append(ordererProcesses, proc)
+				Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
+			}
+
+			peerGroupRunner, peerRunners := peerGroupRunners(network)
+			peerProcesses = ifrit.Invoke(peerGroupRunner)
+			Eventually(peerProcesses.Ready(), network.EventuallyTimeout).Should(BeClosed())
+			peer := network.Peer("Org1", "peer0")
+
+			assertBlockReception(map[string]int{"systemchannel": 0}, network.Orderers, peer, network)
+			By("check block validation policy on system channel")
+			assertBlockValidationPolicy(network, peer, network.Orderers[0], "systemchannel", common.Policy_IMPLICIT_ORDERER)
+
+			By("Waiting for followers to see the leader")
+			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+
+			channel := "testchannel1"
+			By("Creating and joining  testchannel1")
+			network.CreateAndJoinChannel(network.Orderers[0], channel)
+
+			By("Deploying chaincode")
+			nwo.DeployChaincode(network, channel, network.Orderers[0], nwo.Chaincode{
+				Name:    "mycc",
+				Version: "0.0",
+				Path:    "github.com/hyperledger/fabric/integration/chaincode/simple/cmd",
+				Ctor:    `{"Args":["init","a","100","b","200"]}`,
+				Policy:  `AND ('Org1MSP.member','Org2MSP.member')`,
+			})
+
+			By("check block validation policy on app channel")
+			assertBlockValidationPolicy(network, peer, network.Orderers[0], channel, common.Policy_IMPLICIT_ORDERER)
+
+			By("check peers are using the BFT delivery client")
+			for _, peerRunner := range peerRunners {
+				Eventually(peerRunner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Created BFT Delivery Client"))
+			}
+
+			By("querying the chaincode")
+			sess, err := network.PeerUserSession(peer, "User1", commands.ChaincodeQuery{
+				ChannelID: channel,
+				Name:      "mycc",
+				Ctor:      `{"Args":["query","a"]}`,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(sess, network.EventuallyTimeout).Should(gexec.Exit(0))
+			Expect(sess).To(gbytes.Say("100"))
+
+			By("invoking the chaincode")
+			invokeQuery(network, peer, network.Orderers[1], channel, 90)
+
+			By("Taking down all the orderers")
+			for _, proc := range ordererProcesses {
+				proc.Signal(syscall.SIGTERM)
+				Eventually(proc.Wait(), network.EventuallyTimeout).Should(Receive())
+			}
+
+			ordererRunners = nil
+			ordererProcesses = nil
+			By("Bringing up all the nodes")
+			for _, orderer := range network.Orderers {
+				runner := network.OrdererRunner(orderer)
+				runner.Command.Env = append(runner.Command.Env, "FABRIC_LOGGING_SPEC=orderer.consensus.smartbft=debug:grpc=debug")
+				runner.Command.Env = append(runner.Command.Env, "ORDERER_GENERAL_COMMITTEESELECTIONDISABLED=true")
+				ordererRunners = append(ordererRunners, runner)
+				proc := ifrit.Invoke(runner)
+				ordererProcesses = append(ordererProcesses, proc)
+				Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
+			}
+
+			By("Waiting for followers to see the leader, again")
+			Eventually(ordererRunners[0].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 3 channel=testchannel1"))
+			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 3 channel=testchannel1"))
+			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 3 channel=testchannel1"))
+			By("invoking the chaincode, again")
+			invokeQuery(network, peer, network.Orderers[2], channel, 80)
+			By("Ensuring the committee selection is disabled in the leader")
+			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Committee selection disabled channel=testchannel1"))
+			By("Invoking some more")
+			invokeQuery(network, peer, network.Orderers[2], channel, 70)
+			invokeQuery(network, peer, network.Orderers[2], channel, 60)
+		})
+
 		It("smartbft assisted synchronization no rotation", func() {
 			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, StartPort(), components)
 			network.BoostrapDockerNetwork()
@@ -1120,8 +1216,29 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 
 			peer := network.Peer("Org1", "peer0")
 			invokeQuery(network, peer, network.Orderers[3], "testchannel1", 60)
+
+			By("Setting selection public keys for orderers")
+			nwo.UpdateSmartBFTMetadata(network, peer, network.Orderers[3], "testchannel1", func(md *smartbft.ConfigMetadata) {
+				for i, orderer := range network.Orderers {
+					pk := network.OrdererSelectionPK(orderer)
+					fmt.Fprintf(GinkgoWriter, "committee selection public key of node %d is [%s]", i+1, pk)
+					md.Consenters[i].SelectionPk = []byte(pk)
+				}
+			})
+
+			By("Invoking some more")
 			invokeQuery(network, peer, network.Orderers[3], "testchannel1", 50)
 			invokeQuery(network, peer, network.Orderers[3], "testchannel1", 40)
+			invokeQuery(network, peer, network.Orderers[3], "testchannel1", 30)
+			invokeQuery(network, peer, network.Orderers[3], "testchannel1", 20)
+			if os.Getenv("ORDERER_GENERAL_COMMITTEESELECTIONDISABLED") != "true" {
+				Eventually(ordererRunners[0].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Created 2 ReconShares"))
+				Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Created 2 ReconShares"))
+				Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Created 2 ReconShares"))
+				Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Created 2 ReconShares"))
+			}
+			invokeQuery(network, peer, network.Orderers[3], "testchannel1", 10)
+			invokeQuery(network, peer, network.Orderers[3], "testchannel1", 0)
 		})
 	})
 })

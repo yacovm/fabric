@@ -29,13 +29,6 @@ else
 fi
 
 
-echo "Running orderer unit tests"
-go test -race ./orderer/...
-if [[ $? -ne 0 ]];then
-    echo "unit tests failed"
-    exit 1
-fi
-
 make docker
 
 echo "Pulling hyperledger/fabric-ccenv:latest"
@@ -52,8 +45,8 @@ make docker
 
 echo "Running integration tests"
 cd integration/smartbft
-ginkgo
 
+ORDERER_GENERAL_COMMITTEESELECTIONDISABLED=true ginkgo
 
 if [[ $? -ne 0 ]];then
     echo "integration tests failed"
