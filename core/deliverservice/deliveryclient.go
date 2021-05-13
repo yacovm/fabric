@@ -253,13 +253,13 @@ func (d *deliverServiceImpl) StartDeliverForChannel(chainID string, ledgerInfo b
 		if !isBFTClientEnabled() {
 			client := d.newClient(chainID, ledgerInfo)
 			d.deliverClients[chainID] = &deliverClient{
-				bp:      blocksprovider.NewBlocksProvider(chainID, client, d.conf.Gossip, d.conf.CryptoSvc),
+				bp:      blocksprovider.NewBlocksProvider(chainID, client, d.conf.Gossip, d.conf.CryptoSvc, ledgerInfo),
 				bclient: client,
 			}
 		} else {
 			bftClient := d.newBFTClient(chainID, ledgerInfo, d.conf.CryptoSvc)
 			d.deliverClients[chainID] = &deliverClient{
-				bp:      blocksprovider.NewBlocksProvider(chainID, bftClient, d.conf.Gossip, d.conf.CryptoSvc),
+				bp:      blocksprovider.NewBlocksProvider(chainID, bftClient, d.conf.Gossip, d.conf.CryptoSvc, ledgerInfo),
 				bclient: bftClient,
 			}
 		}

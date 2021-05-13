@@ -13,12 +13,15 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
+	"github.com/hyperledger/fabric/core/comm"
 	"github.com/hyperledger/fabric/gossip/api"
 	gossipcommon "github.com/hyperledger/fabric/gossip/common"
 	"github.com/hyperledger/fabric/gossip/discovery"
+	"github.com/hyperledger/fabric/orderer/consensus/smartbft"
 	"github.com/hyperledger/fabric/protos/common"
 	gossip_proto "github.com/hyperledger/fabric/protos/gossip"
 	"github.com/hyperledger/fabric/protos/orderer"
+	"github.com/hyperledger/fabric/protos/utils"
 )
 
 //go:generate mockery -dir . -name LedgerInfo -case underscore -output ../mocks/
@@ -66,6 +69,8 @@ type BlocksDeliverer interface {
 	Send(*common.Envelope) error
 }
 
+//go:generate mockery -dir . -name StreamClient -case underscore -output ../mocks/
+
 type StreamClient interface {
 	BlocksDeliverer
 
@@ -77,6 +82,12 @@ type StreamClient interface {
 
 	// Update the client on the last valid block number
 	UpdateReceived(blockNumber uint64)
+
+	// UpdateEndpoints updates the endpoint of the underlying client
+	UpdateEndpoints(endpoints []comm.EndpointCriteria)
+
+	// GetEndpoint retrieves the orderer endpoint from which the client is receiving blocks (as opposed to headers)
+	GetEndpoint() string
 }
 
 // blocksProviderImpl the actual implementation for BlocksProvider interface
@@ -89,6 +100,8 @@ type blocksProviderImpl struct {
 
 	mcs api.MessageCryptoService
 
+	info LedgerInfo
+
 	done int32
 
 	wrongStatusThreshold int
@@ -100,12 +113,13 @@ var maxRetryDelay = time.Second * 10
 var logger = flogging.MustGetLogger("blocksProvider")
 
 // NewBlocksProvider constructor function to create blocks deliverer instance
-func NewBlocksProvider(chainID string, client StreamClient, gossip GossipServiceAdapter, mcs api.MessageCryptoService) BlocksProvider {
+func NewBlocksProvider(chainID string, client StreamClient, gossip GossipServiceAdapter, mcs api.MessageCryptoService, info LedgerInfo) BlocksProvider {
 	return &blocksProviderImpl{
 		chainID:              chainID,
 		client:               client,
 		gossip:               gossip,
 		mcs:                  mcs,
+		info:                 info,
 		wrongStatusThreshold: wrongStatusThreshold,
 	}
 }
@@ -164,7 +178,7 @@ func (b *blocksProviderImpl) DeliverBlocks() {
 			}
 
 			if err := b.mcs.VerifyBlock(gossipcommon.ChainID(b.chainID), blockNum, marshaledBlock); err != nil {
-				logger.Errorf("[%s] Error verifying block with sequnce number %d, due to %s; Disconnecting client from orderer.", b.chainID, blockNum, err)
+				logger.Errorf("[%s] Error verifying block with sequence number %d, due to %s; Disconnecting client from orderer.", b.chainID, blockNum, err)
 				delay, verErrCounter = computeBackOffDelay(verErrCounter)
 				time.Sleep(delay)
 				b.client.Disconnect()
@@ -193,6 +207,24 @@ func (b *blocksProviderImpl) DeliverBlocks() {
 
 			b.client.UpdateReceived(blockNum)
 
+			// TODO if committee is disabled then update endpoints at each block
+
+			if !b.isCommitteeChangeBlock(t.Block) {
+				continue
+			}
+
+			// wait for the block to be committed
+			currHeight := blockNum
+			for currHeight < blockNum+1 {
+				time.Sleep(time.Millisecond)
+				currHeight, err = b.info.LedgerHeight()
+				if err != nil {
+					logger.Panicf("[%s] Error getting ledger height while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
+				}
+			}
+
+			// TODO b.client.UpdateEndpoints()
+
 		default:
 			logger.Warningf("[%s] Received unknown: %v", b.chainID, t)
 			return
@@ -209,6 +241,19 @@ func (b *blocksProviderImpl) Stop() {
 // Check whenever provider is stopped
 func (b *blocksProviderImpl) isDone() bool {
 	return atomic.LoadInt32(&b.done) == 1
+}
+
+// Check if in this block there is a committee change
+func (b *blocksProviderImpl) isCommitteeChangeBlock(block *common.Block) bool {
+	md := utils.GetOrdererblockMetadataOrPanic(block).CommitteeMetadata
+	if len(md) == 0 {
+		return false
+	}
+	cm := &smartbft.CommitteeMetadata{}
+	if err := cm.Unmarshal(md); err != nil {
+		logger.Panicf("[%s] Error unmarshaling committee metadata of block with sequence number %d, due to %s", b.chainID, block.Header.Number, err)
+	}
+	return cm.CommitteeShiftAt == int64(block.Header.Number)
 }
 
 func createGossipMsg(chainID string, payload *gossip_proto.Payload) *gossip_proto.GossipMessage {

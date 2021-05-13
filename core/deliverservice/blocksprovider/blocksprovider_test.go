@@ -18,6 +18,7 @@ import (
 	common2 "github.com/hyperledger/fabric/gossip/common"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/orderer"
+	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -80,7 +81,7 @@ func makeTestCase(ledgerHeight uint64, mcs api.MessageCryptoService, shouldSucce
 		deliverer := &mocks.MockBlocksDeliverer{Pos: ledgerHeight}
 		deliverer.MockRecv = rcv
 		deliverer.DisconnectCalled = make(chan struct{}, 10)
-		provider := NewBlocksProvider("***TEST_CHAINID***", deliverer, gossipServiceAdapter, mcs)
+		provider := NewBlocksProvider("***TEST_CHAINID***", deliverer, gossipServiceAdapter, mcs, &deliverer.Info)
 
 		wg := sync.WaitGroup{}
 		wg.Add(1)
@@ -225,6 +226,11 @@ func TestBlocksProvider_DeliveryWrongStatus(t *testing.T) {
 					Data: &common.BlockData{
 						Data: [][]byte{},
 					},
+					Metadata: &common.BlockMetadata{
+						Metadata: [][]byte{utils.MarshalOrPanic(&common.Metadata{
+							Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{}),
+						})},
+					},
 				}},
 		}
 	}
@@ -240,11 +246,13 @@ func TestBlocksProvider_DeliveryWrongStatus(t *testing.T) {
 	mcs := &mockMCS{}
 	mcs.On("VerifyBlock", mock.Anything).Return(nil)
 	gossipServiceAdapter := &mocks.MockGossipServiceAdapter{GossipBlockDisseminations: make(chan uint64, 2)}
+	info := &mocks.MockLedgerInfo{Height: 1}
 	provider := &blocksProviderImpl{
 		chainID:              "***TEST_CHAINID***",
 		gossip:               gossipServiceAdapter,
 		client:               &bd,
 		mcs:                  mcs,
+		info:                 info,
 		wrongStatusThreshold: wrongStatusThreshold,
 	}
 
@@ -378,7 +386,7 @@ func TestBlockVerificationFailure(t *testing.T) {
 	deliverer.MockRecv = rcvr
 	deliverer.DisconnectCalled = make(chan struct{}, 10)
 	deliverer.CloseCalled = make(chan struct{}, 10)
-	provider := NewBlocksProvider("***TEST_CHAINID***", deliverer, gossipServiceAdapter, mcs)
+	provider := NewBlocksProvider("***TEST_CHAINID***", deliverer, gossipServiceAdapter, mcs, &deliverer.Info)
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)

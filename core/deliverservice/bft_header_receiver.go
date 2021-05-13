@@ -20,13 +20,6 @@ import (
 
 const bftHeaderWrongStatusThreshold = 10
 
-//go:generate mockery -dir . -name HeaderStreamClient -case underscore -output mocks/
-
-type HeaderStreamClient interface {
-	blocksprovider.StreamClient
-	EndpointUpdater
-}
-
 type bftHeaderReceiver struct {
 	mutex              sync.Mutex
 	chainID            string
@@ -36,7 +29,7 @@ type bftHeaderReceiver struct {
 	stopChan           chan struct{}
 	started            bool
 	endpoint           string
-	client             HeaderStreamClient
+	client             blocksprovider.StreamClient
 	msgCryptoVerifier  MessageCryptoVerifier
 	lastHeader         *common.Block // a block with Header & Metadata, without Data (i.e. lastHeader.Data==nil)
 	lastHeaderTime     time.Time
@@ -47,7 +40,7 @@ type bftHeaderReceiver struct {
 func newBFTHeaderReceiver(
 	chainID string,
 	endpoint string,
-	client HeaderStreamClient,
+	client blocksprovider.StreamClient,
 	msgVerifier MessageCryptoVerifier,
 	minBackOff time.Duration,
 	maxBackOff time.Duration,

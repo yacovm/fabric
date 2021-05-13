@@ -21,7 +21,7 @@ import (
 
 func TestBftHeaderReceiver_NoBlocks(t *testing.T) {
 	msgVerifierMock := &mocks.MessageCryptoVerifier{}
-	streamClientMock := &mocks.HeaderStreamClient{}
+	streamClientMock := &mocks.StreamClient{}
 	hr := newBFTHeaderReceiver("testchannel", "10.10.10.11:666", streamClientMock, msgVerifierMock, 10*time.Millisecond, 10*time.Second)
 	assert.NotNil(t, hr)
 
@@ -38,7 +38,7 @@ func TestBftHeaderReceiver_NoBlocks(t *testing.T) {
 
 func TestBftHeaderReceiver_WithBlocks(t *testing.T) {
 	msgVerifierMock := &mocks.MessageCryptoVerifier{}
-	streamClientMock := &mocks.HeaderStreamClient{}
+	streamClientMock := &mocks.StreamClient{}
 	hr := newBFTHeaderReceiver("testchannel", "10.10.10.11:666", streamClientMock, msgVerifierMock, 10*time.Millisecond, 10*time.Second)
 
 	seq := uint64(0)
@@ -98,7 +98,7 @@ func TestBftHeaderReceiver_WithBlocks(t *testing.T) {
 
 func TestBftHeaderReceiver_VerifyOnce(t *testing.T) {
 	msgVerifierMock := &mocks.MessageCryptoVerifier{}
-	streamClientMock := &mocks.HeaderStreamClient{}
+	streamClientMock := &mocks.StreamClient{}
 	hr := newBFTHeaderReceiver("testchannel", "10.10.10.11:666", streamClientMock, msgVerifierMock, 10*time.Millisecond, 10*time.Second)
 
 	seq := uint64(0)
