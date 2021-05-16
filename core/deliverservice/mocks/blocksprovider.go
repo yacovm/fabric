@@ -168,3 +168,7 @@ func (li *MockLedgerInfo) LedgerHeight() (uint64, error) {
 func (li *MockLedgerInfo) Set(height uint64) {
 	atomic.StoreUint64(&li.Height, height)
 }
+
+func (li *MockLedgerInfo) GetBlocks(blockSeqs []uint64) []*common.Block {
+	return nil
+}

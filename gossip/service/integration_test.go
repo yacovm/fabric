@@ -71,11 +71,11 @@ func (eds *embeddingDeliveryService) waitForDeliveryServiceTermination() {
 	eds.stopSignal.Wait()
 }
 
-func (eds *embeddingDeliveryService) StartDeliverForChannel(chainID string, ledgerInfo blocksprovider.LedgerInfo, finalizer func()) error {
+func (eds *embeddingDeliveryService) StartDeliverForChannel(chainID string, ledger blocksprovider.Ledger, finalizer func()) error {
 	eds.startOnce.Do(func() {
 		eds.startSignal.Done()
 	})
-	return eds.DeliverService.StartDeliverForChannel(chainID, ledgerInfo, finalizer)
+	return eds.DeliverService.StartDeliverForChannel(chainID, ledger, finalizer)
 }
 
 func (eds *embeddingDeliveryService) StopDeliverForChannel(chainID string) error {

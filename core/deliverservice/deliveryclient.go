@@ -58,7 +58,7 @@ type DeliverService interface {
 	// StartDeliverForChannel dynamically starts delivery of new blocks from ordering service
 	// to channel peers.
 	// When the delivery finishes, the finalizer func is called
-	StartDeliverForChannel(chainID string, ledgerInfo blocksprovider.LedgerInfo, finalizer func()) error
+	StartDeliverForChannel(chainID string, ledgerInfo blocksprovider.Ledger, finalizer func()) error
 
 	// StopDeliverForChannel dynamically stops delivery of new blocks from ordering service
 	// to channel peers.
@@ -236,7 +236,7 @@ func (d *deliverServiceImpl) validateConfiguration() error {
 // initializes the grpc stream for given chainID, creates blocks provider instance
 // that spawns in go routine to read new blocks starting from the position provided by ledger
 // info instance.
-func (d *deliverServiceImpl) StartDeliverForChannel(chainID string, ledgerInfo blocksprovider.LedgerInfo, finalizer func()) error {
+func (d *deliverServiceImpl) StartDeliverForChannel(chainID string, ledger blocksprovider.Ledger, finalizer func()) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.stopping {
@@ -251,15 +251,15 @@ func (d *deliverServiceImpl) StartDeliverForChannel(chainID string, ledgerInfo b
 	} else {
 		logger.Info("This peer will retrieve blocks from ordering service and disseminate to other peers in the organization for channel", chainID)
 		if !isBFTClientEnabled() {
-			client := d.newClient(chainID, ledgerInfo)
+			client := d.newClient(chainID, ledger)
 			d.deliverClients[chainID] = &deliverClient{
-				bp:      blocksprovider.NewBlocksProvider(chainID, client, d.conf.Gossip, d.conf.CryptoSvc, ledgerInfo),
+				bp:      blocksprovider.NewBlocksProvider(chainID, client, d.conf.Gossip, d.conf.CryptoSvc, ledger),
 				bclient: client,
 			}
 		} else {
-			bftClient := d.newBFTClient(chainID, ledgerInfo, d.conf.CryptoSvc)
+			bftClient := d.newBFTClient(chainID, ledger, d.conf.CryptoSvc)
 			d.deliverClients[chainID] = &deliverClient{
-				bp:      blocksprovider.NewBlocksProvider(chainID, bftClient, d.conf.Gossip, d.conf.CryptoSvc, ledgerInfo),
+				bp:      blocksprovider.NewBlocksProvider(chainID, bftClient, d.conf.Gossip, d.conf.CryptoSvc, ledger),
 				bclient: bftClient,
 			}
 		}

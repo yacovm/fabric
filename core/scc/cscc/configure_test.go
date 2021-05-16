@@ -85,7 +85,7 @@ func (ds *mockDeliveryClient) UpdateEndpoints(chainID string, _ deliverclient.Co
 
 // StartDeliverForChannel dynamically starts delivery of new blocks from ordering service
 // to channel peers.
-func (ds *mockDeliveryClient) StartDeliverForChannel(chainID string, ledgerInfo blocksprovider.LedgerInfo, f func()) error {
+func (ds *mockDeliveryClient) StartDeliverForChannel(chainID string, ledgerInfo blocksprovider.Ledger, f func()) error {
 	return nil
 }
 

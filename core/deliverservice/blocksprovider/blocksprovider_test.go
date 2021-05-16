@@ -252,7 +252,7 @@ func TestBlocksProvider_DeliveryWrongStatus(t *testing.T) {
 		gossip:               gossipServiceAdapter,
 		client:               &bd,
 		mcs:                  mcs,
-		info:                 info,
+		ledger:               info,
 		wrongStatusThreshold: wrongStatusThreshold,
 	}
 

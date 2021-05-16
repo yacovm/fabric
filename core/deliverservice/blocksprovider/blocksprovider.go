@@ -7,10 +7,12 @@ SPDX-License-Identifier: Apache-2.0
 package blocksprovider
 
 import (
+	"fmt"
 	"math"
 	"sync/atomic"
 	"time"
 
+	cs "github.com/SmartBFT-Go/randomcommittees"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/core/comm"
@@ -31,6 +33,36 @@ import (
 type LedgerInfo interface {
 	// LedgerHeight returns current local ledger height
 	LedgerHeight() (uint64, error)
+}
+
+//go:generate mockery -dir . -name Ledger -case underscore -output mocks
+
+type Ledger interface {
+	LedgerInfo
+
+	// Gets blocks with sequence numbers provided in the slice.
+	GetBlocks(blockSeqs []uint64) []*common.Block
+}
+
+// SimpleLedger implements a simple ledger interface.
+type SimpleLedger struct {
+	ledger Ledger
+}
+
+// Height returns the number of blocks in the ledger this channel is associated with.
+func (sl *SimpleLedger) Height() uint64 {
+	h, err := sl.ledger.LedgerHeight()
+	if err != nil {
+		panic(fmt.Sprintf("Can't get ledger height, err: %v", err))
+	}
+	return h
+}
+
+// Block returns a block with the given number,
+// or nil if such a block doesn't exist.
+func (sl *SimpleLedger) Block(number uint64) *common.Block {
+	blocks := sl.ledger.GetBlocks([]uint64{number})
+	return blocks[0]
 }
 
 // GossipServiceAdapter serves to provide basic functionality
@@ -100,7 +132,7 @@ type blocksProviderImpl struct {
 
 	mcs api.MessageCryptoService
 
-	info LedgerInfo
+	ledger Ledger
 
 	done int32
 
@@ -113,13 +145,13 @@ var maxRetryDelay = time.Second * 10
 var logger = flogging.MustGetLogger("blocksProvider")
 
 // NewBlocksProvider constructor function to create blocks deliverer instance
-func NewBlocksProvider(chainID string, client StreamClient, gossip GossipServiceAdapter, mcs api.MessageCryptoService, info LedgerInfo) BlocksProvider {
+func NewBlocksProvider(chainID string, client StreamClient, gossip GossipServiceAdapter, mcs api.MessageCryptoService, ledger Ledger) BlocksProvider {
 	return &blocksProviderImpl{
 		chainID:              chainID,
 		client:               client,
 		gossip:               gossip,
 		mcs:                  mcs,
-		info:                 info,
+		ledger:               ledger,
 		wrongStatusThreshold: wrongStatusThreshold,
 	}
 }
@@ -217,11 +249,27 @@ func (b *blocksProviderImpl) DeliverBlocks() {
 			currHeight := blockNum
 			for currHeight < blockNum+1 {
 				time.Sleep(time.Millisecond)
-				currHeight, err = b.info.LedgerHeight()
+				currHeight, err = b.ledger.LedgerHeight()
 				if err != nil {
 					logger.Panicf("[%s] Error getting ledger height while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
 				}
 			}
+
+			cr := &smartbft.CommitteeRetriever{
+				//committeeDisabled:     false,
+				NewCommitteeSelection: cs.NewCommitteeSelection,
+				Logger:                flogging.MustGetLogger("orderer.consensus.smartbft.committee"),
+				Ledger:                &SimpleLedger{ledger: b.ledger},
+			}
+
+			currentCommittee, err := cr.CurrentCommittee()
+			if err != nil {
+				logger.Panicf("[%s] Error getting current committee while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
+			}
+
+			committeeIdentifiers := currentCommittee.IDs()
+
+			logger.Debugf("Current committee: %v", committeeIdentifiers)
 
 			// TODO b.client.UpdateEndpoints()
 

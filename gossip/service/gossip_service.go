@@ -469,7 +469,7 @@ func (g *gossipServiceImpl) amIinChannel(myOrg string, config Config) bool {
 	return false
 }
 
-func (g *gossipServiceImpl) onStatusChangeFactory(chainID string, committer blocksprovider.LedgerInfo) func(bool) {
+func (g *gossipServiceImpl) onStatusChangeFactory(chainID string, committer blocksprovider.Ledger) func(bool) {
 	return func(isLeader bool) {
 		if isLeader {
 			yield := func() {

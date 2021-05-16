@@ -336,7 +336,7 @@ func (ds *mockDeliverService) UpdateEndpoints(_ string, _ deliverclient.Connecti
 	panic("implement me")
 }
 
-func (ds *mockDeliverService) StartDeliverForChannel(chainID string, ledgerInfo blocksprovider.LedgerInfo, finalizer func()) error {
+func (ds *mockDeliverService) StartDeliverForChannel(chainID string, ledger blocksprovider.Ledger, finalizer func()) error {
 	ds.running[chainID] = true
 	return nil
 }
