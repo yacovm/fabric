@@ -515,7 +515,7 @@ type RuntimeConfig struct {
 	LastConfigBlock          *common.Block
 	Nodes                    []uint64
 	CommitteeMetadata        *types2.CommitteeMetadata
-	OnCommitteeChange        func(prevCommittee []int32, allNodes []uint64)
+	OnCommitteeChange        func(prevCommittee []int32)
 	committeeMinimumLifespan uint32
 	changesCommittee         bool
 }
@@ -531,7 +531,7 @@ func (rtc RuntimeConfig) BlockCommitted(block *common.Block) (RuntimeConfig, err
 
 	changesCommittee := cm != nil && cm.CommitteeShiftAt == int64(block.Header.Number)
 	if changesCommittee {
-		rtc.OnCommitteeChange(cm.CommitteeAtShift.IDs(), rtc.Nodes)
+		rtc.OnCommitteeChange(cm.CommitteeAtShift.IDs())
 	}
 
 	return RuntimeConfig{
@@ -574,7 +574,7 @@ func (rtc RuntimeConfig) configBlockCommitted(block *common.Block) (RuntimeConfi
 
 	changesCommittee := cm != nil && cm.CommitteeShiftAt == int64(block.Header.Number)
 	if changesCommittee {
-		rtc.OnCommitteeChange(cm.CommitteeAtShift.IDs(), rtc.Nodes)
+		rtc.OnCommitteeChange(cm.CommitteeAtShift.IDs())
 	}
 
 	return RuntimeConfig{
