@@ -61,12 +61,14 @@ func (s *Signer) SignProposal(proposal types.Proposal, auxiliaryInput []byte) *t
 
 	obm := utils.GetOrdererblockMetadataOrPanic(block)
 
+	var suspects []int32
+
 	cm := &types2.CommitteeMetadata{}
 	if err := cm.Unmarshal(obm.CommitteeMetadata); err != nil {
 		s.Logger.Panicf("Failed unmarshaling committee metadata on an agreed upon block: %v", err)
 	}
 	var reconShares [][]byte
-	// This is the last block of the committee, so include reconstruction shares.
+	// This is the last block of the committee, so include reconstruction shares and suspects.
 	if cm.CommitteeShiftAt == int64(block.Header.Number) {
 		for _, rcs := range s.CreateReconShares() {
 			rawReconshare, err := asn1.Marshal(rcs)
@@ -75,13 +77,13 @@ func (s *Signer) SignProposal(proposal types.Proposal, auxiliaryInput []byte) *t
 			}
 			reconShares = append(reconShares, rawReconshare)
 		}
+
+		for _, s := range s.HeartbeatMonitor.GetSuspects() {
+			suspects = append(suspects, int32(s))
+		}
+
 	}
 
-	var suspects []int32
-	monitorSuspects := s.HeartbeatMonitor.GetSuspects()
-	for _, s := range monitorSuspects {
-		suspects = append(suspects, int32(s))
-	}
 	committeeFeedback := &smartbft.CommitteeFeedback{
 		Reconshares: reconShares,
 		Suspects:    suspects,

@@ -9,6 +9,8 @@ package smartbft
 import (
 	"encoding/asn1"
 
+	types2 "github.com/hyperledger/fabric/orderer/consensus/smartbft/types"
+
 	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
 
 	"sync/atomic"
@@ -64,19 +66,20 @@ func (a *Assembler) AssembleProposal(metadata []byte, requests [][]byte) (nextPr
 		lastConfigBlockNum = block.Header.Number
 	}
 
+	commitment, newCommitteeMetadata := a.committeeCommitmentAndMetadata(int64(block.Header.Number))
+
 	var suspects []int32
-	if !rtc.isConfig { // if last block is a config block then leave the suspects list empty
+	// if last block is a config block or not a committee change block, then leave the suspects list empty
+	if !rtc.isConfig && newCommitteeMetadata.CommitteeShiftAt == int64(block.Header.Number) {
 		suspects = assembleSuspectsList(lastBlock)
 	}
-
-	commitment, newCommitteeMetadata := a.committeeCommitmentAndMetadata(int64(block.Header.Number))
 
 	block.Metadata.Metadata[common.BlockMetadataIndex_LAST_CONFIG] = utils.MarshalOrPanic(&common.Metadata{
 		Value: utils.MarshalOrPanic(&common.LastConfig{Index: lastConfigBlockNum}),
 	})
 	block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = utils.MarshalOrPanic(&common.Metadata{
 		Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{
-			CommitteeMetadata:    newCommitteeMetadata,
+			CommitteeMetadata:    newCommitteeMetadata.Marshal(),
 			CommittteeCommitment: commitment,
 			ConsenterMetadata:    metadata,
 			LastConfig: &common.LastConfig{
@@ -101,7 +104,7 @@ func (a *Assembler) AssembleProposal(metadata []byte, requests [][]byte) (nextPr
 	return prop
 }
 
-func (a *Assembler) committeeCommitmentAndMetadata(blockNum int64) ([]byte, []byte) {
+func (a *Assembler) committeeCommitmentAndMetadata(blockNum int64) ([]byte, *types2.CommitteeMetadata) {
 	rtc := a.RuntimeConfig.Load().(RuntimeConfig)
 	// The committee state is the state *after* the commit!
 	// In case there is no commit in this round, the state encoded
@@ -119,7 +122,7 @@ func (a *Assembler) committeeCommitmentAndMetadata(blockNum int64) ([]byte, []by
 
 	a.Logger.Infof("Creating committee metadata for block %d: %+v and previous metadata: %+v", blockNum, committeeMD, rtc.CommitteeMetadata)
 
-	return commitment, committeeMD.Marshal()
+	return commitment, committeeMD
 
 }
 

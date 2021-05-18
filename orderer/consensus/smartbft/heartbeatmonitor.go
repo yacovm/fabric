@@ -35,6 +35,7 @@ type MessageSender interface {
 }
 
 type HeartbeatMonitor struct {
+	ticker            *time.Ticker
 	messageSender     MessageSender
 	scheduler         <-chan time.Time
 	inc               chan uint64
@@ -85,6 +86,10 @@ func (hm *HeartbeatMonitor) Close() {
 	if hm.closed() {
 		return
 	}
+	if hm.ticker != nil {
+		hm.ticker.Stop()
+	}
+
 	defer hm.running.Wait()
 	close(hm.stopChan)
 }

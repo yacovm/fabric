@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	utils2 "github.com/hyperledger/fabric/protos/utils"
+
 	cs "github.com/SmartBFT-Go/randomcommittees"
 	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
 	"github.com/golang/protobuf/proto"
@@ -308,6 +310,14 @@ func (cr *CommitteeRetriever) currentCommittee() (committee.Nodes, error) {
 	// Load latest state by processing an empty input
 	if _, _, err := committeeSelection.Process(currentCommitteeState, committee.Input{}); err != nil {
 		return nil, errors.Wrap(err, "failed loading state")
+	}
+
+	obm := utils2.GetOrdererblockMetadataOrPanic(reconstructionSharesBlock)
+	if len(obm.HeartbeatSuspects) > 0 {
+		cr.Logger.Infof("Committee suspects nodes %v outside of the committee, excluding them from being candidates")
+		cfg.ExcludedNodes = obm.HeartbeatSuspects
+	} else {
+		cr.Logger.Infof("Committee did not suspect any node outside of the committee")
 	}
 
 	feedback, _, err := committeeSelection.Process(currentCommitteeState, committee.Input{

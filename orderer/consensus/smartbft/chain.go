@@ -153,6 +153,7 @@ func NewChain(
 	commitZKP := &atomic.Value{}
 	commitZKP.Store([]byte{}) // Store an empty slice for type safety
 	c := &BFTChain{
+		heartbeatMonitor:        &AtomicHeartBeatMonitor{},
 		committeeDisabled:       committeeDisabled,
 		commitZKPWeReceivedOdd:  &atomic.Value{},
 		commitZKPWeReceivedEven: &atomic.Value{},
@@ -199,11 +200,6 @@ func NewChain(
 		return len(c.ct.CurrentCommittee())
 	}
 
-	// TODO setup heartbeat monitor with the right config
-	heartbeatTicker := time.NewTicker(1 * time.Second)
-	heartbeatTimeout := 10 * time.Second
-	heartbeatCount := uint64(5)
-
 	rtc := RuntimeConfig{
 		id:                selfID,
 		logger:            logger,
@@ -235,12 +231,6 @@ func NewChain(
 
 	c.verifier = buildVerifier(c, cv, c.RuntimeConfig, support, requestInspector, policyManager)
 	c.consensus = bftSmartConsensusBuild(c.ct, c, requestInspector)
-
-	myRole, heartbeatSenders, heartbeatReceivers := setupHeartbeatMonitor(selfID, currentCommittee, rtc.Nodes)
-
-	c.heartbeatMonitor = &AtomicHeartBeatMonitor{}
-	hbm := NewHeartbeatMonitor(c.consensus.Comm.(MessageSender), heartbeatTicker.C, logger, heartbeatTimeout, heartbeatCount, myRole, heartbeatSenders, heartbeatReceivers)
-	c.heartbeatMonitor.Set(hbm)
 
 	c.consensus.Signer = &Signer{
 		ID:               c.Config.SelfID,
@@ -427,6 +417,22 @@ func (c *BFTChain) isInCommittee() bool {
 	return false
 }
 
+func (c *BFTChain) setupHBM() {
+	selfID := c.Config.SelfID
+	currentCommittee := c.ct.CurrentCommittee()
+	rtc := c.RuntimeConfig.Load().(RuntimeConfig)
+	myRole, heartbeatSenders, heartbeatReceivers := setupHeartbeatMonitor(selfID, currentCommittee, rtc.Nodes)
+
+	heartbeatTicker := time.NewTicker(1 * time.Second)
+	heartbeatTimeout := 60 * time.Second
+	heartbeatCount := uint64(5)
+
+	hbm := NewHeartbeatMonitor(c.consensus.Comm.(MessageSender), heartbeatTicker.C, c.Logger, heartbeatTimeout, heartbeatCount, myRole, heartbeatSenders, heartbeatReceivers)
+	hbm.ticker = heartbeatTicker
+	c.heartbeatMonitor.Set(hbm)
+	c.heartbeatMonitor.Start()
+}
+
 func (c *BFTChain) createReconShares() []committee.ReconShare {
 	if c.committeeDisabled {
 		c.Logger.Debugf("Committee selection is disabled")
@@ -473,6 +479,8 @@ func (c *BFTChain) maybeAddedToCommittee(block *common.Block) {
 	if !committeeChanged {
 		return
 	}
+
+	defer c.setupHBM()
 
 	if !c.isInCommittee() {
 		committee := c.ct.CurrentCommittee().IDs()
@@ -610,7 +618,7 @@ func (c *BFTChain) committeeSelection(isMember committeeInstanceType) committee.
 	return committeeSelection
 }
 
-func (c *BFTChain) onCommitteeChange(prevCommittee []int32, allNodes []uint64) {
+func (c *BFTChain) onCommitteeChange(prevCommittee []int32) {
 	if c.committeeDisabled {
 		c.Logger.Debugf("Committee selection is disabled")
 		return
@@ -626,12 +634,8 @@ func (c *BFTChain) onCommitteeChange(prevCommittee []int32, allNodes []uint64) {
 
 	c.migrateTransactions(prevCommittee, currentCommittee.IDs())
 
-	if c.heartbeatMonitor != nil {
-		//myRole, heartbeatSenders, heartbeatReceivers := setupHeartbeatMonitor(uint64(selfID), currentCommittee, allNodes)
-		//hbm := NewHeartbeatMonitor(c.consensus.Comm.(MessageSender), heartbeatTicker.C, c.Logger, heartbeatTimeout, heartbeatCount, myRole, heartbeatSenders, heartbeatReceivers)
-		//c.heartbeatMonitor.Set(hbm)
-		//hbm.Start()
-	}
+	c.setupHBM()
+
 	committeeIdentifiers := currentCommittee.IDs()
 	c.Logger.Debugf("Current committee: %v", committeeIdentifiers)
 	committeeIDs := make(map[uint64]struct{})
@@ -837,43 +841,58 @@ func (c *BFTChain) getSuspectsFromSignatures(signatures []*smartbftprotos.Signat
 		cleanList := removeDuplicates(list)
 		allSuspects = append(allSuspects, cleanList...)
 	}
-	return agreedSuspects(allSuspects, 1) // TODO use f
+
+	n := len(c.ct.CurrentCommittee())
+	f := (n-1)/3 + 1
+
+	return agreedSuspects(allSuspects, int32(f))
 }
 
-func (c *BFTChain) getSuspectsFromBlock(proposal *smartbftprotos.Proposal) (bool, []int32) {
+func (c *BFTChain) getSuspectsFromBlock(proposal *smartbftprotos.Proposal, seq uint64) (error, []int32, bool) {
 	tuple := &ByteBufferTuple{}
 	if err := tuple.FromBytes(proposal.Payload); err != nil {
 		c.Logger.Warningf("Failed reading proposal payload, error: %v", err)
-		return false, nil
+		return err, nil, false
 	}
 	metadata := &common.BlockMetadata{}
 	if err := proto.Unmarshal(tuple.B, metadata); err != nil {
 		c.Logger.Warningf("Failed unmarshaling block metadata, error: %v", err)
-		return false, nil
+		return err, nil, false
 	}
 	if metadata == nil || len(metadata.Metadata) < len(common.BlockMetadataIndex_name) {
 		c.Logger.Warningf("Block metadata is either missing or contains too few entries")
-		return false, nil
+		return errors.Errorf("block metadata is either missing or too few entires"), nil, false
 	}
 	signatureMetadata := &common.Metadata{}
 	if err := proto.Unmarshal(metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], signatureMetadata); err != nil {
 		c.Logger.Warningf("Failed unmarshaling block signature metadata, error: %v", err)
-		return false, nil
+		return err, nil, false
 
 	}
 	ordererMDFromBlock := &common.OrdererBlockMetadata{}
 	if err := proto.Unmarshal(signatureMetadata.Value, ordererMDFromBlock); err != nil {
 		c.Logger.Warningf("Failed unmarshaling orderer block metadata, error: %v", err)
-		return false, nil
+		return err, nil, false
 	}
-	return true, ordererMDFromBlock.HeartbeatSuspects
+
+	committeeMD := &types2.CommitteeMetadata{}
+	if err := committeeMD.Unmarshal(ordererMDFromBlock.CommitteeMetadata); err != nil {
+		c.Logger.Warnf("Failed unmarshaling CommitteeMetadata: %v", err)
+		return err, nil, false
+	}
+
+	if committeeMD.CommitteeShiftAt != int64(seq) && len(ordererMDFromBlock.HeartbeatSuspects) > 0 {
+		c.Logger.Warnf("Committee metadata contains suspects but this block isn't a committee change block")
+		return errors.Errorf("committee metadata contains suspects but this block isn't a committee change block"), nil, false
+	}
+
+	return nil, ordererMDFromBlock.HeartbeatSuspects, committeeMD.CommitteeShiftAt == int64(seq)
 }
 
 func (c *BFTChain) verifySuspects(prp *smartbftprotos.PrePrepare) bool {
 	agreedSuspects := c.getSuspectsFromSignatures(prp.PrevCommitSignatures)
-	success, blockSuspects := c.getSuspectsFromBlock(prp.Proposal)
-	if !success {
-		c.Logger.Warningf("Couldn't read suspects from block")
+	err, blockSuspects, shouldContainSuspects := c.getSuspectsFromBlock(prp.Proposal, prp.Seq)
+	if err != nil {
 		return false
 	}
 
@@ -887,10 +906,18 @@ func (c *BFTChain) verifySuspects(prp *smartbftprotos.PrePrepare) bool {
 		return true
 	}
 
+	if !shouldContainSuspects {
+		return true
+	}
+
+	c.Logger.Debugf("Previous block signers are suspicious of %v", agreedSuspects)
+	c.Logger.Debugf("This block contains suspects: %v", blockSuspects)
+
 	if len(agreedSuspects) != len(blockSuspects) {
-		c.Logger.Warningf("Length of suspects list don't match, according to the signatures the length should be %d, while in the block the length is %d", len(agreedSuspects), len(blockSuspects))
+		c.Logger.Warningf("Length of suspects list doesn't match, according to the signatures the length should be %d, while in the block the length is %d", len(agreedSuspects), len(blockSuspects))
 		return false
 	}
+
 	for i, s := range agreedSuspects {
 		if blockSuspects[i] != s {
 			c.Logger.Warningf("Suspect doesn't match, according to the signatures the %d'th suspect should be %d, while in the block the suspect is %d", i, s, blockSuspects[i])
@@ -1202,7 +1229,7 @@ func (c *BFTChain) Start() {
 	c.consensus.Synchronizer.Sync()
 	c.Logger.Debugf("Finished startup sync")
 
-	c.heartbeatMonitor.Start()
+	c.setupHBM()
 
 	if !c.isInCommittee() {
 		c.launchPullerIfNeeded()
