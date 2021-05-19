@@ -531,8 +531,9 @@ func registerDiscoveryService(peerServer *comm.GRPCServer, polMgr policies.Chann
 	ccSup := ccsupport.NewDiscoverySupport(lc)
 	ea := endorsement.NewEndorsementAnalyzer(gSup, ccSup, acl, lc)
 	cew := &CommitteeEndpointWrapper{
-		supporters: make(map[string]*committeeSupport),
-		logger:     logger,
+		committeeDisabled: viper.GetBool("peer.deliveryclient.bft.committeeDisabled"),
+		supporters:        make(map[string]*committeeSupport),
+		logger:            logger,
 	}
 	confSup := config.NewDiscoverySupport(config.CurrentConfigBlockGetterFunc(peer.GetCurrConfigBlock), cew.endpoints)
 	support := discsupport.NewDiscoverySupport(acl, gSup, ea, confSup, acl)
@@ -1094,9 +1095,10 @@ type committeeSupport struct {
 type committeeEndpointConverter func(channel string, m map[string]*discprotos.Endpoints) map[string]*discprotos.Endpoints
 
 type CommitteeEndpointWrapper struct {
-	lock       sync.RWMutex
-	supporters map[string]*committeeSupport
-	logger     *flogging.FabricLogger
+	committeeDisabled bool
+	lock              sync.RWMutex
+	supporters        map[string]*committeeSupport
+	logger            *flogging.FabricLogger
 }
 
 func (cew *CommitteeEndpointWrapper) endpoints(channel string, m map[string]*discprotos.Endpoints) map[string]*discprotos.Endpoints {
@@ -1132,6 +1134,7 @@ func (cew *CommitteeEndpointWrapper) endpoints(channel string, m map[string]*dis
 
 func (cew *CommitteeEndpointWrapper) endpointCommitteeFilter(sup *committeeSupport) func(string, map[string]*discprotos.Endpoints) map[string]*discprotos.Endpoints {
 	cr := &smartbft.CommitteeRetriever{
+		CommitteeDisabled:     cew.committeeDisabled,
 		NewCommitteeSelection: cs.NewCommitteeSelection,
 		Logger:                flogging.MustGetLogger("peer.discovery.committee"),
 		Ledger:                &smartbft.CachingLedger{Ledger: sup.leger},
@@ -1179,7 +1182,7 @@ func (cew *CommitteeEndpointWrapper) endpointCommitteeFilter(sup *committeeSuppo
 				}
 				endpoints, exists := res[orgName]
 				if !exists {
-					endpoint = &discprotos.Endpoint{}
+					endpoints = &discprotos.Endpoints{}
 				}
 				endpoints.Endpoint = append(endpoints.Endpoint, &discprotos.Endpoint{
 					Host: endpoint.Host,

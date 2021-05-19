@@ -359,6 +359,9 @@ peer:
             # (f is the number of failures tolerated in the BFT cluster.)
             blockCensorshipTimeout: 10s
 
+            # Whether committee selection is disabled
+            committeeDisabled: false
+
     # Type for the local MSP - by default it's of type bccsp
     localMspType: bccsp
 

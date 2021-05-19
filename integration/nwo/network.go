@@ -478,7 +478,7 @@ func (n *Network) OrdererSelectionPK(o *Orderer) string {
 		KeyPath: n.OrdererSignKey(o),
 	})
 	Expect(err).NotTo(HaveOccurred())
-	Eventually(sess).Should(gexec.Exit(0))
+	Eventually(sess, time.Second*10).Should(gexec.Exit(0))
 
 	contents := sess.Buffer().Contents()
 	return string(contents)
