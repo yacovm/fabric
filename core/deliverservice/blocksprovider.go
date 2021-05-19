@@ -4,7 +4,7 @@ Copyright IBM Corp. All Rights Reserved.
 SPDX-License-Identifier: Apache-2.0
 */
 
-package blocksprovider
+package deliverclient
 
 import (
 	"fmt"
@@ -142,7 +142,6 @@ type blocksProviderImpl struct {
 const wrongStatusThreshold = 10
 
 var maxRetryDelay = time.Second * 10
-var logger = flogging.MustGetLogger("blocksProvider")
 
 // NewBlocksProvider constructor function to create blocks deliverer instance
 func NewBlocksProvider(chainID string, client StreamClient, gossip GossipServiceAdapter, mcs api.MessageCryptoService, ledger Ledger) BlocksProvider {

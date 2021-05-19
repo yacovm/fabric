@@ -3,7 +3,7 @@ Copyright IBM Corp. All Rights Reserved.
 
 SPDX-License-Identifier: Apache-2.0
 */
-package blocksprovider
+package deliverclient
 
 import (
 	"errors"
@@ -27,19 +27,19 @@ func init() {
 	maxRetryDelay = time.Second
 }
 
-type mockMCS struct {
+type mockBPMCS struct {
 	mock.Mock
 }
 
-func (*mockMCS) Expiration(peerIdentity api.PeerIdentityType) (time.Time, error) {
+func (*mockBPMCS) Expiration(peerIdentity api.PeerIdentityType) (time.Time, error) {
 	return time.Now().Add(time.Hour), nil
 }
 
-func (*mockMCS) GetPKIidOfCert(peerIdentity api.PeerIdentityType) common2.PKIidType {
+func (*mockBPMCS) GetPKIidOfCert(peerIdentity api.PeerIdentityType) common2.PKIidType {
 	return common2.PKIidType("pkiID")
 }
 
-func (m *mockMCS) VerifyBlock(chainID common2.ChainID, seqNum uint64, signedBlock []byte) error {
+func (m *mockBPMCS) VerifyBlock(chainID common2.ChainID, seqNum uint64, signedBlock []byte) error {
 	args := m.Called()
 	if args.Get(0) != nil {
 		return args.Get(0).(error)
@@ -47,7 +47,7 @@ func (m *mockMCS) VerifyBlock(chainID common2.ChainID, seqNum uint64, signedBloc
 	return nil
 }
 
-func (m *mockMCS) VerifyHeader(chainID string, signedBlock *common.Block) error {
+func (m *mockBPMCS) VerifyHeader(chainID string, signedBlock *common.Block) error {
 	args := m.Called()
 	if args.Get(0) != nil {
 		return args.Get(0).(error)
@@ -55,19 +55,19 @@ func (m *mockMCS) VerifyHeader(chainID string, signedBlock *common.Block) error 
 	return nil
 }
 
-func (*mockMCS) Sign(msg []byte) ([]byte, error) {
+func (*mockBPMCS) Sign(msg []byte) ([]byte, error) {
 	return msg, nil
 }
 
-func (*mockMCS) Verify(peerIdentity api.PeerIdentityType, signature, message []byte) error {
+func (*mockBPMCS) Verify(peerIdentity api.PeerIdentityType, signature, message []byte) error {
 	return nil
 }
 
-func (*mockMCS) VerifyByChannel(chainID common2.ChainID, peerIdentity api.PeerIdentityType, signature, message []byte) error {
+func (*mockBPMCS) VerifyByChannel(chainID common2.ChainID, peerIdentity api.PeerIdentityType, signature, message []byte) error {
 	return nil
 }
 
-func (*mockMCS) ValidateIdentity(peerIdentity api.PeerIdentityType) error {
+func (*mockBPMCS) ValidateIdentity(peerIdentity api.PeerIdentityType) error {
 	return nil
 }
 
@@ -138,7 +138,7 @@ func waitUntilOrFail(t *testing.T, pred func() bool) {
    oldest and that eventually it terminates after the Stop method has been called.
 */
 func TestBlocksProviderImpl_GetBlockFromTheOldest(t *testing.T) {
-	mcs := &mockMCS{}
+	mcs := &mockBPMCS{}
 	mcs.On("VerifyBlock", mock.Anything).Return(nil)
 	makeTestCase(uint64(0), mcs, true, mocks.MockRecv)(t)
 }
@@ -148,7 +148,7 @@ func TestBlocksProviderImpl_GetBlockFromTheOldest(t *testing.T) {
    oldest and that eventually it terminates after the Stop method has been called.
 */
 func TestBlocksProviderImpl_GetBlockFromSpecified(t *testing.T) {
-	mcs := &mockMCS{}
+	mcs := &mockBPMCS{}
 	mcs.On("VerifyBlock", mock.Anything).Return(nil)
 	makeTestCase(uint64(101), mcs, true, mocks.MockRecv)(t)
 }
@@ -243,7 +243,7 @@ func TestBlocksProvider_DeliveryWrongStatus(t *testing.T) {
 	}
 
 	bd := mocks.MockBlocksDeliverer{DisconnectCalled: make(chan struct{}, 10)}
-	mcs := &mockMCS{}
+	mcs := &mockBPMCS{}
 	mcs.On("VerifyBlock", mock.Anything).Return(nil)
 	gossipServiceAdapter := &mocks.MockGossipServiceAdapter{GossipBlockDisseminations: make(chan uint64, 2)}
 	info := &mocks.MockLedgerInfo{Height: 1}
@@ -314,7 +314,7 @@ func TestBlocksProvider_DeliveryWrongStatusClose(t *testing.T) {
 		DisconnectCalled: make(chan struct{}, 100),
 		CloseCalled:      make(chan struct{}, 1),
 	}
-	mcs := &mockMCS{}
+	mcs := &mockBPMCS{}
 	mcs.On("VerifyBlock", mock.Anything).Return(nil)
 	gossipServiceAdapter := &mocks.MockGossipServiceAdapter{GossipBlockDisseminations: make(chan uint64, 2)}
 	provider := &blocksProviderImpl{
@@ -352,7 +352,7 @@ func TestBlockFetchFailure(t *testing.T) {
 	rcvr := func(mock *mocks.MockBlocksDeliverer) (*orderer.DeliverResponse, error) {
 		return nil, errors.New("Failed fetching block")
 	}
-	mcs := &mockMCS{}
+	mcs := &mockBPMCS{}
 	mcs.On("VerifyBlock", mock.Anything).Return(nil)
 	makeTestCase(uint64(0), mcs, false, rcvr)(t)
 }
@@ -378,7 +378,7 @@ func TestBlockVerificationFailure(t *testing.T) {
 		}, nil
 	}
 
-	mcs := &mockMCS{}
+	mcs := &mockBPMCS{}
 	mcs.On("VerifyBlock", mock.Anything).Return(errors.New("Invalid signature"))
 
 	gossipServiceAdapter := &mocks.MockGossipServiceAdapter{GossipBlockDisseminations: make(chan uint64)}

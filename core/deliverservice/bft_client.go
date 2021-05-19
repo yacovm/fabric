@@ -14,7 +14,6 @@ import (
 
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/core/comm"
-	"github.com/hyperledger/fabric/core/deliverservice/blocksprovider"
 	"github.com/hyperledger/fabric/gossip/util"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/orderer"
@@ -55,11 +54,11 @@ type bftDeliveryClient struct {
 	stopFlag  bool
 	stopChan  chan struct{}
 
-	chainID            string                    // a.k.a. Channel ID
-	connectionFactory  comm.ConnectionFactory    // creates a gRPC connection
-	createClient       clientFactory             // creates orderer.AtomicBroadcastClient
-	ledgerInfoProvider blocksprovider.LedgerInfo // provides access to the ledger height
-	msgCryptoVerifier  MessageCryptoVerifier     // verifies headers
+	chainID            string                 // a.k.a. Channel ID
+	connectionFactory  comm.ConnectionFactory // creates a gRPC connection
+	createClient       clientFactory          // creates orderer.AtomicBroadcastClient
+	ledgerInfoProvider LedgerInfo             // provides access to the ledger height
+	msgCryptoVerifier  MessageCryptoVerifier  // verifies headers
 
 	// The total time a bft client tries to connect (to all available endpoints) before giving up leadership
 	reconnectTotalTimeThreshold time.Duration
@@ -89,7 +88,7 @@ func NewBFTDeliveryClient(
 	connFactory comm.ConnectionFactory,
 	endpoints []comm.EndpointCriteria,
 	clFactory clientFactory,
-	ledgerInfoProvider blocksprovider.LedgerInfo,
+	ledgerInfoProvider LedgerInfo,
 	msgVerifier MessageCryptoVerifier,
 ) *bftDeliveryClient {
 	c := &bftDeliveryClient{
@@ -390,7 +389,7 @@ func (c *bftDeliveryClient) newBlockClient(endpoint comm.EndpointCriteria) *broa
 	if height, err := c.ledgerInfoProvider.LedgerHeight(); err == nil {
 		c.nextBlockNumber = height
 	}
-	broadcastSetup := func(bd blocksprovider.BlocksDeliverer) error {
+	broadcastSetup := func(bd BlocksDeliverer) error {
 		return requester.RequestBlocks(c) // Do not ask the ledger directly, ask the bftDeliveryClient
 	}
 
@@ -414,7 +413,7 @@ func (c *bftDeliveryClient) newHeaderClient(endpoint comm.EndpointCriteria) *bro
 		tls:     viper.GetBool("peer.tls.enabled"),
 		chainID: c.chainID,
 	}
-	broadcastSetup := func(bd blocksprovider.BlocksDeliverer) error {
+	broadcastSetup := func(bd BlocksDeliverer) error {
 		return requester.RequestHeaders(c.ledgerInfoProvider)
 	}
 	backoffPolicy := func(attemptNum int, elapsedTime time.Duration) (time.Duration, bool) {

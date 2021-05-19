@@ -10,12 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hyperledger/fabric/core/deliverservice/blocksprovider"
-
-	"github.com/pkg/errors"
-
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/orderer"
+	"github.com/pkg/errors"
 )
 
 const bftHeaderWrongStatusThreshold = 10
@@ -29,7 +26,7 @@ type bftHeaderReceiver struct {
 	stopChan           chan struct{}
 	started            bool
 	endpoint           string
-	client             blocksprovider.StreamClient
+	client             StreamClient
 	msgCryptoVerifier  MessageCryptoVerifier
 	lastHeader         *common.Block // a block with Header & Metadata, without Data (i.e. lastHeader.Data==nil)
 	lastHeaderTime     time.Time
@@ -40,7 +37,7 @@ type bftHeaderReceiver struct {
 func newBFTHeaderReceiver(
 	chainID string,
 	endpoint string,
-	client blocksprovider.StreamClient,
+	client StreamClient,
 	msgVerifier MessageCryptoVerifier,
 	minBackOff time.Duration,
 	maxBackOff time.Duration,

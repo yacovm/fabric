@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/hyperledger/fabric/core/comm"
-	"github.com/hyperledger/fabric/core/deliverservice/blocksprovider"
 	"github.com/hyperledger/fabric/core/deliverservice/mocks"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/orderer"
@@ -61,14 +60,14 @@ func (*balancer) Close() error {
 	return nil
 }
 
-type blocksDelivererConsumer func(blocksprovider.BlocksDeliverer) error
+type blocksDelivererConsumer func(BlocksDeliverer) error
 
-var blockDelivererConsumerWithRecv = func(bd blocksprovider.BlocksDeliverer) error {
+var blockDelivererConsumerWithRecv = func(bd BlocksDeliverer) error {
 	_, err := bd.Recv()
 	return err
 }
 
-var blockDelivererConsumerWithSend = func(bd blocksprovider.BlocksDeliverer) error {
+var blockDelivererConsumerWithSend = func(bd BlocksDeliverer) error {
 	return bd.Send(&common.Envelope{})
 }
 
@@ -161,7 +160,7 @@ func testOrderingServiceConnFailure(t *testing.T, bdc blocksDelivererConsumer) {
 		return &abclient{}
 	}
 	setupInvoked := 0
-	setup := func(blocksprovider.BlocksDeliverer) error {
+	setup := func(BlocksDeliverer) error {
 		setupInvoked++
 		return nil
 	}
@@ -200,7 +199,7 @@ func testOrderingServiceStreamFailure(t *testing.T, bdc blocksDelivererConsumer)
 		return abcClient
 	}
 	setupInvoked := 0
-	setup := func(blocksprovider.BlocksDeliverer) error {
+	setup := func(BlocksDeliverer) error {
 		setupInvoked++
 		return nil
 	}
@@ -236,7 +235,7 @@ func testOrderingServiceSetupFailure(t *testing.T, bdc blocksDelivererConsumer) 
 		return &abclient{}
 	}
 	setupInvoked := 0
-	setup := func(blocksprovider.BlocksDeliverer) error {
+	setup := func(BlocksDeliverer) error {
 		setupInvoked++
 		if setupInvoked == 1 {
 			return errors.New("Setup failed")
@@ -272,7 +271,7 @@ func testOrderingServiceFirstOperationFailure(t *testing.T, bdc blocksDelivererC
 	}
 
 	setupInvoked := 0
-	setup := func(blocksprovider.BlocksDeliverer) error {
+	setup := func(BlocksDeliverer) error {
 		// Fix stream success logic at 2nd attempt
 		if setupInvoked == 1 {
 			abStream.shouldFail = false
@@ -309,7 +308,7 @@ func testOrderingServiceCrashAndRecover(t *testing.T, bdc blocksDelivererConsume
 	}
 
 	setupInvoked := 0
-	setup := func(blocksprovider.BlocksDeliverer) error {
+	setup := func(BlocksDeliverer) error {
 		// Fix stream success logic at 2nd attempt
 		if setupInvoked == 1 {
 			abStream.shouldFail = false
@@ -350,7 +349,7 @@ func testOrderingServicePermanentCrash(t *testing.T, bdc blocksDelivererConsumer
 	}
 
 	setupInvoked := 0
-	setup := func(blocksprovider.BlocksDeliverer) error {
+	setup := func(BlocksDeliverer) error {
 		setupInvoked++
 		return nil
 	}
@@ -384,7 +383,7 @@ func testLimitedConnAttempts(t *testing.T, bdc blocksDelivererConsumer) {
 		return &abclient{}
 	}
 	setupInvoked := 0
-	setup := func(blocksprovider.BlocksDeliverer) error {
+	setup := func(BlocksDeliverer) error {
 		setupInvoked++
 		return nil
 	}
@@ -419,7 +418,7 @@ func testLimitedTotalConnTime(t *testing.T, bdc blocksDelivererConsumer) {
 		return &abclient{}
 	}
 	setupInvoked := 0
-	setup := func(blocksprovider.BlocksDeliverer) error {
+	setup := func(BlocksDeliverer) error {
 		setupInvoked++
 		return nil
 	}
@@ -449,7 +448,7 @@ func testGreenPath(t *testing.T, bdc blocksDelivererConsumer) {
 	}
 
 	setupInvoked := 0
-	setup := func(blocksprovider.BlocksDeliverer) error {
+	setup := func(BlocksDeliverer) error {
 		setupInvoked++
 		return nil
 	}
@@ -484,7 +483,7 @@ func TestCloseWhileRecv(t *testing.T) {
 	}
 	mockLedgerInfo := &mocks.LedgerInfo{}
 	mockLedgerInfo.On("LedgerHeight").Return(uint64(5), nil)
-	broadcastSetup := func(bd blocksprovider.BlocksDeliverer) error {
+	broadcastSetup := func(bd BlocksDeliverer) error {
 		return requester.RequestBlocks(mockLedgerInfo)
 	}
 	backoffStrategy := func(attemptNum int, elapsedTime time.Duration) (time.Duration, bool) {
@@ -533,7 +532,7 @@ func testCloseWhileSleep(t *testing.T, bdc blocksDelivererConsumer) {
 	}
 
 	setupInvoked := 0
-	setup := func(blocksprovider.BlocksDeliverer) error {
+	setup := func(BlocksDeliverer) error {
 		setupInvoked++
 		return nil
 	}
@@ -587,7 +586,7 @@ func TestProductionUsage(t *testing.T) {
 	clFact := func(cc *grpc.ClientConn) orderer.AtomicBroadcastClient {
 		return orderer.NewAtomicBroadcastClient(cc)
 	}
-	onConnect := func(bd blocksprovider.BlocksDeliverer) error {
+	onConnect := func(bd BlocksDeliverer) error {
 		env, err := utils.CreateSignedEnvelope(common.HeaderType_CONFIG_UPDATE,
 			"TEST",
 			&signerMock{}, newTestSeekInfo(), 0, 0)
@@ -653,7 +652,7 @@ func TestDisconnect(t *testing.T) {
 	}
 	mockLedgerInfo := &mocks.LedgerInfo{}
 	mockLedgerInfo.On("LedgerHeight").Return(uint64(5), nil)
-	broadcastSetup := func(bd blocksprovider.BlocksDeliverer) error {
+	broadcastSetup := func(bd BlocksDeliverer) error {
 		return requester.RequestBlocks(mockLedgerInfo)
 	}
 	retryPol := func(attemptNum int, elapsedTime time.Duration) (time.Duration, bool) {

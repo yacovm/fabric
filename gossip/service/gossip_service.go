@@ -16,7 +16,6 @@ import (
 	"github.com/hyperledger/fabric/core/committer/txvalidator"
 	"github.com/hyperledger/fabric/core/common/privdata"
 	deliverclient "github.com/hyperledger/fabric/core/deliverservice"
-	"github.com/hyperledger/fabric/core/deliverservice/blocksprovider"
 	"github.com/hyperledger/fabric/gossip/api"
 	gossipCommon "github.com/hyperledger/fabric/gossip/common"
 	"github.com/hyperledger/fabric/gossip/election"
@@ -469,7 +468,7 @@ func (g *gossipServiceImpl) amIinChannel(myOrg string, config Config) bool {
 	return false
 }
 
-func (g *gossipServiceImpl) onStatusChangeFactory(chainID string, committer blocksprovider.Ledger) func(bool) {
+func (g *gossipServiceImpl) onStatusChangeFactory(chainID string, committer deliverclient.Ledger) func(bool) {
 	return func(isLeader bool) {
 		if isLeader {
 			yield := func() {

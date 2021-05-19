@@ -17,7 +17,6 @@ import (
 
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/core/comm"
-	"github.com/hyperledger/fabric/core/deliverservice/blocksprovider"
 	"github.com/hyperledger/fabric/core/deliverservice/mocks"
 	"github.com/hyperledger/fabric/gossip/api"
 	"github.com/hyperledger/fabric/gossip/common"
@@ -46,10 +45,10 @@ var (
 )
 
 type mockBlocksDelivererFactory struct {
-	mockCreate func() (blocksprovider.BlocksDeliverer, error)
+	mockCreate func() (BlocksDeliverer, error)
 }
 
-func (mock *mockBlocksDelivererFactory) Create() (blocksprovider.BlocksDeliverer, error) {
+func (mock *mockBlocksDelivererFactory) Create() (BlocksDeliverer, error) {
 	return mock.mockCreate()
 }
 
@@ -104,7 +103,7 @@ func TestNewDeliverService(t *testing.T) {
 			blocksDeliverer := &mocks.MockBlocksDeliverer{}
 			blocksDeliverer.MockRecv = mocks.MockRecv
 
-			factory.mockCreate = func() (blocksprovider.BlocksDeliverer, error) {
+			factory.mockCreate = func() (BlocksDeliverer, error) {
 				return blocksDeliverer, nil
 			}
 			abcf := func(*grpc.ClientConn) orderer.AtomicBroadcastClient {

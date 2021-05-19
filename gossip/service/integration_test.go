@@ -12,7 +12,6 @@ import (
 	"time"
 
 	deliverclient "github.com/hyperledger/fabric/core/deliverservice"
-	"github.com/hyperledger/fabric/core/deliverservice/blocksprovider"
 	"github.com/hyperledger/fabric/core/ledger"
 	"github.com/hyperledger/fabric/core/transientstore"
 	"github.com/hyperledger/fabric/gossip/api"
@@ -71,7 +70,7 @@ func (eds *embeddingDeliveryService) waitForDeliveryServiceTermination() {
 	eds.stopSignal.Wait()
 }
 
-func (eds *embeddingDeliveryService) StartDeliverForChannel(chainID string, ledger blocksprovider.Ledger, finalizer func()) error {
+func (eds *embeddingDeliveryService) StartDeliverForChannel(chainID string, ledger deliverclient.Ledger, finalizer func()) error {
 	eds.startOnce.Do(func() {
 		eds.startSignal.Done()
 	})

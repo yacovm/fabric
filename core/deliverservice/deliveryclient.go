@@ -16,7 +16,6 @@ import (
 
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/core/comm"
-	"github.com/hyperledger/fabric/core/deliverservice/blocksprovider"
 	"github.com/hyperledger/fabric/gossip/api"
 	"github.com/hyperledger/fabric/gossip/util"
 	"github.com/hyperledger/fabric/protos/orderer"
@@ -58,7 +57,7 @@ type DeliverService interface {
 	// StartDeliverForChannel dynamically starts delivery of new blocks from ordering service
 	// to channel peers.
 	// When the delivery finishes, the finalizer func is called
-	StartDeliverForChannel(chainID string, ledgerInfo blocksprovider.Ledger, finalizer func()) error
+	StartDeliverForChannel(chainID string, ledgerInfo Ledger, finalizer func()) error
 
 	// StopDeliverForChannel dynamically stops delivery of new blocks from ordering service
 	// to channel peers.
@@ -92,7 +91,7 @@ type EndpointUpdater interface {
 }
 
 type deliverClient struct {
-	bp      blocksprovider.BlocksProvider
+	bp      BlocksProvider
 	bclient EndpointUpdater
 }
 
@@ -111,7 +110,7 @@ type Config struct {
 	CryptoSvc api.MessageCryptoService
 	// Gossip enables to enumerate peers in the channel, send a message to peers,
 	// and add a block to the gossip state transfer layer
-	Gossip blocksprovider.GossipServiceAdapter
+	Gossip GossipServiceAdapter
 }
 
 // ConnectionCriteria defines how to connect to ordering service nodes.
@@ -236,7 +235,7 @@ func (d *deliverServiceImpl) validateConfiguration() error {
 // initializes the grpc stream for given chainID, creates blocks provider instance
 // that spawns in go routine to read new blocks starting from the position provided by ledger
 // info instance.
-func (d *deliverServiceImpl) StartDeliverForChannel(chainID string, ledger blocksprovider.Ledger, finalizer func()) error {
+func (d *deliverServiceImpl) StartDeliverForChannel(chainID string, ledger Ledger, finalizer func()) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.stopping {
@@ -253,13 +252,13 @@ func (d *deliverServiceImpl) StartDeliverForChannel(chainID string, ledger block
 		if !isBFTClientEnabled() {
 			client := d.newClient(chainID, ledger)
 			d.deliverClients[chainID] = &deliverClient{
-				bp:      blocksprovider.NewBlocksProvider(chainID, client, d.conf.Gossip, d.conf.CryptoSvc, ledger),
+				bp:      NewBlocksProvider(chainID, client, d.conf.Gossip, d.conf.CryptoSvc, ledger),
 				bclient: client,
 			}
 		} else {
 			bftClient := d.newBFTClient(chainID, ledger, d.conf.CryptoSvc)
 			d.deliverClients[chainID] = &deliverClient{
-				bp:      blocksprovider.NewBlocksProvider(chainID, bftClient, d.conf.Gossip, d.conf.CryptoSvc, ledger),
+				bp:      NewBlocksProvider(chainID, bftClient, d.conf.Gossip, d.conf.CryptoSvc, ledger),
 				bclient: bftClient,
 			}
 		}
@@ -313,14 +312,14 @@ func (d *deliverServiceImpl) Stop() {
 	}
 }
 
-func (d *deliverServiceImpl) newClient(chainID string, ledgerInfoProvider blocksprovider.LedgerInfo) *broadcastClient {
+func (d *deliverServiceImpl) newClient(chainID string, ledgerInfoProvider LedgerInfo) *broadcastClient {
 	reconnectBackoffThreshold := getReConnectBackoffThreshold()
 	reconnectTotalTimeThreshold := getReConnectTotalTimeThreshold()
 	requester := &blocksRequester{
 		tls:     viper.GetBool("peer.tls.enabled"),
 		chainID: chainID,
 	}
-	broadcastSetup := func(bd blocksprovider.BlocksDeliverer) error {
+	broadcastSetup := func(bd BlocksDeliverer) error {
 		return requester.RequestBlocks(ledgerInfoProvider)
 	}
 	backoffPolicy := func(attemptNum int, elapsedTime time.Duration) (time.Duration, bool) {
@@ -340,7 +339,7 @@ func (d *deliverServiceImpl) newClient(chainID string, ledgerInfoProvider blocks
 	return bClient
 }
 
-func (d *deliverServiceImpl) newBFTClient(chainID string, ledgerInfoProvider blocksprovider.LedgerInfo, mcs api.MessageCryptoService) *bftDeliveryClient {
+func (d *deliverServiceImpl) newBFTClient(chainID string, ledgerInfoProvider LedgerInfo, mcs api.MessageCryptoService) *bftDeliveryClient {
 	bftClient := NewBFTDeliveryClient(chainID, d.conf.ConnFactory(chainID, d.connConfig.OrdererEndpointOverrides), d.connConfig.toEndpointCriteria(), d.conf.ABCFactory, ledgerInfoProvider, mcs)
 	return bftClient
 }

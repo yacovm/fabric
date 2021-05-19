@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/hyperledger/fabric/core/comm"
-	"github.com/hyperledger/fabric/core/deliverservice/blocksprovider"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/orderer"
 	"google.golang.org/grpc"
@@ -23,7 +22,7 @@ import (
 
 // broadcastSetup is a function that is called by the broadcastClient immediately after each successful connection to
 // the ordering service in order to request the reception of a stream of blocks
-type broadcastSetup func(blocksprovider.BlocksDeliverer) error
+type broadcastSetup func(BlocksDeliverer) error
 
 // retryPolicy receives as parameters the number of times the attempt has failed
 // and a duration that specifies the total elapsed time passed since the first attempt.
@@ -44,7 +43,7 @@ type broadcastClient struct {
 	prod         comm.ConnectionProducer
 
 	mutex           sync.Mutex
-	blocksDeliverer blocksprovider.BlocksDeliverer
+	blocksDeliverer BlocksDeliverer
 	conn            *connection
 	endpoint        string
 }
