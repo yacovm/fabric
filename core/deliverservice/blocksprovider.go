@@ -9,21 +9,27 @@ package deliverclient
 import (
 	"fmt"
 	"math"
+	"net"
 	"sync/atomic"
 	"time"
 
 	cs "github.com/SmartBFT-Go/randomcommittees"
 	"github.com/golang/protobuf/proto"
+	"github.com/hyperledger/fabric/common/channelconfig"
+	"github.com/hyperledger/fabric/common/configtx"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/core/comm"
 	"github.com/hyperledger/fabric/gossip/api"
 	gossipcommon "github.com/hyperledger/fabric/gossip/common"
 	"github.com/hyperledger/fabric/gossip/discovery"
+	"github.com/hyperledger/fabric/orderer/common/cluster"
 	"github.com/hyperledger/fabric/orderer/consensus/smartbft"
 	"github.com/hyperledger/fabric/protos/common"
 	gossip_proto "github.com/hyperledger/fabric/protos/gossip"
 	"github.com/hyperledger/fabric/protos/orderer"
+	smartbft_protos "github.com/hyperledger/fabric/protos/orderer/smartbft"
 	"github.com/hyperledger/fabric/protos/utils"
+	"github.com/pkg/errors"
 )
 
 //go:generate mockery -dir . -name LedgerInfo -case underscore -output ../mocks/
@@ -63,6 +69,52 @@ func (sl *SimpleLedger) Height() uint64 {
 func (sl *SimpleLedger) Block(number uint64) *common.Block {
 	blocks := sl.ledger.GetBlocks([]uint64{number})
 	return blocks[0]
+}
+
+func lastConfigBlockFromLedger(ledger SimpleLedger) (*common.Block, error) {
+	lastBlockSeq := ledger.Height() - 1
+	lastBlock := ledger.Block(lastBlockSeq)
+	if lastBlock == nil {
+		return nil, errors.Errorf("unable to retrieve block [%d]", lastBlockSeq)
+	}
+	lastConfigBlock, err := cluster.LastConfigBlock(lastBlock, &ledger)
+	if err != nil {
+		return nil, err
+	}
+	return lastConfigBlock, nil
+}
+
+type GossipChannelConfig struct {
+	AC channelconfig.Application
+	OC channelconfig.Orderer
+	configtx.Validator
+	channelconfig.Channel
+}
+
+// ApplicationOrgs defines a mapping from ApplicationOrg by ID.
+type ApplicationOrgs map[string]channelconfig.ApplicationOrg
+
+func (gcp *GossipChannelConfig) ApplicationOrgs() ApplicationOrgs {
+	return gcp.AC.Organizations()
+}
+
+func (gcp *GossipChannelConfig) OrdererOrgs() []string {
+	var res []string
+	for _, org := range gcp.OC.Organizations() {
+		res = append(res, org.MSPID())
+	}
+	return res
+}
+
+func (gcp *GossipChannelConfig) OrdererAddressesByOrgs() map[string][]string {
+	res := make(map[string][]string)
+	for _, ordererOrg := range gcp.OC.Organizations() {
+		if len(ordererOrg.Endpoints()) == 0 {
+			continue
+		}
+		res[ordererOrg.MSPID()] = ordererOrg.Endpoints()
+	}
+	return res
 }
 
 // GossipServiceAdapter serves to provide basic functionality
@@ -254,23 +306,7 @@ func (b *blocksProviderImpl) DeliverBlocks() {
 				}
 			}
 
-			cr := &smartbft.CommitteeRetriever{
-				//committeeDisabled:     false,
-				NewCommitteeSelection: cs.NewCommitteeSelection,
-				Logger:                flogging.MustGetLogger("orderer.consensus.smartbft.committee"),
-				Ledger:                &SimpleLedger{ledger: b.ledger},
-			}
-
-			currentCommittee, err := cr.CurrentCommittee()
-			if err != nil {
-				logger.Panicf("[%s] Error getting current committee while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
-			}
-
-			committeeIdentifiers := currentCommittee.IDs()
-
-			logger.Debugf("Current committee: %v", committeeIdentifiers)
-
-			// TODO b.client.UpdateEndpoints()
+			b.client.UpdateEndpoints(b.getEndpoints(blockNum))
 
 		default:
 			logger.Warningf("[%s] Received unknown: %v", b.chainID, t)
@@ -301,6 +337,105 @@ func (b *blocksProviderImpl) isCommitteeChangeBlock(block *common.Block) bool {
 		logger.Panicf("[%s] Error unmarshaling committee metadata of block with sequence number %d, due to %s", b.chainID, block.Header.Number, err)
 	}
 	return cm.CommitteeShiftAt == int64(block.Header.Number)
+}
+
+func (b *blocksProviderImpl) getEndpoints(blockNum uint64) []comm.EndpointCriteria {
+	simpleLedger := SimpleLedger{ledger: b.ledger}
+
+	cr := &smartbft.CommitteeRetriever{
+		//committeeDisabled:     false,
+		NewCommitteeSelection: cs.NewCommitteeSelection,
+		Logger:                flogging.MustGetLogger("orderer.consensus.smartbft.committee"),
+		Ledger:                &simpleLedger,
+	}
+
+	currentCommittee, err := cr.CurrentCommittee()
+	if err != nil {
+		logger.Panicf("[%s] Error getting current committee while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
+	}
+
+	committeeIdentifiers := currentCommittee.IDs()
+
+	logger.Debugf("Current committee: %v", committeeIdentifiers)
+
+	committeeIDs := make(map[uint64]struct{})
+	for _, id := range committeeIdentifiers {
+		committeeIDs[uint64(id)] = struct{}{}
+	}
+
+	lastConfigBlock, err := lastConfigBlockFromLedger(simpleLedger)
+	if err != nil {
+		logger.Panicf("[%s] Error getting last config block while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
+	}
+
+	envelopeConfig, err := utils.ExtractEnvelope(lastConfigBlock, 0)
+	if err != nil {
+		logger.Panicf("[%s] Error getting envelope from config block while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
+	}
+	bundle, err := channelconfig.NewBundleFromEnvelope(envelopeConfig)
+	if err != nil {
+		logger.Panicf("[%s] Error getting new bundle while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
+	}
+	oc, exists := bundle.OrdererConfig()
+	if !exists {
+		logger.Panicf("[%s] No orderer config in bundle while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
+	}
+	consensusMD := &smartbft_protos.ConfigMetadata{}
+	if err := proto.Unmarshal(oc.ConsensusMetadata(), consensusMD); err != nil {
+		logger.Panicf("[%s] Error getting consensus metadata while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
+	}
+	endpointsInCommittee := make(map[string]struct{})
+	for _, consenter := range consensusMD.Consenters {
+		if _, exists := committeeIDs[consenter.ConsenterId]; !exists {
+			logger.Debugf("%d %s is not in the committee", consenter.ConsenterId, consenter.Host)
+			continue
+		}
+		endpointsInCommittee[consenter.Host] = struct{}{}
+	}
+	logger.Debugf("Endpoints in committee: %v", endpointsInCommittee)
+
+	ac, exists := bundle.ApplicationConfig()
+	if !exists {
+		logger.Panicf("[%s] No application config in bundle while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
+	}
+
+	gcc := &GossipChannelConfig{
+		Validator: bundle.ConfigtxValidator(),
+		AC:        ac,
+		OC:        oc,
+		Channel:   bundle.ChannelConfig(),
+	}
+
+	cc := &ConnectionCriteria{
+		OrdererEndpointsByOrg: gcc.OrdererAddressesByOrgs(),
+		Organizations:         gcc.OrdererOrgs(),
+		OrdererEndpoints:      gcc.OrdererAddresses(),
+	}
+
+	endpoints := cc.toEndpointCriteria()
+
+	if len(endpointsInCommittee) > 0 {
+		var filteredEndpoints []comm.EndpointCriteria
+		var filteredEndpointsURIs []string
+		for _, ep := range endpoints {
+			host, _, err := net.SplitHostPort(ep.Endpoint)
+			if err != nil {
+				logger.Warnf("Invalid host port string %s: %v", ep.Endpoint, err)
+				continue
+			}
+			if _, exists := endpointsInCommittee[host]; !exists {
+				continue
+			}
+			filteredEndpoints = append(filteredEndpoints, ep)
+			filteredEndpointsURIs = append(filteredEndpointsURIs, ep.Endpoint)
+		}
+		endpoints = filteredEndpoints
+		logger.Debugf("Filtering out endpoints of nodes not in the committee, remaining endpoints: %v", filteredEndpointsURIs)
+	} else {
+		logger.Debugf("Endpoints and consenter endpoints are disjoint, using the endpoints without filtering by committee")
+	}
+
+	return endpoints
 }
 
 func createGossipMsg(chainID string, payload *gossip_proto.Payload) *gossip_proto.GossipMessage {
