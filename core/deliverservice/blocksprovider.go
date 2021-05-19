@@ -24,6 +24,7 @@ import (
 	"github.com/hyperledger/fabric/gossip/discovery"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
 	"github.com/hyperledger/fabric/orderer/consensus/smartbft"
+	"github.com/hyperledger/fabric/orderer/consensus/smartbft/types"
 	"github.com/hyperledger/fabric/protos/common"
 	gossip_proto "github.com/hyperledger/fabric/protos/gossip"
 	"github.com/hyperledger/fabric/protos/orderer"
@@ -332,7 +333,7 @@ func (b *blocksProviderImpl) isCommitteeChangeBlock(block *common.Block) bool {
 	if len(md) == 0 {
 		return false
 	}
-	cm := &smartbft.CommitteeMetadata{}
+	cm := &types.CommitteeMetadata{}
 	if err := cm.Unmarshal(md); err != nil {
 		logger.Panicf("[%s] Error unmarshaling committee metadata of block with sequence number %d, due to %s", b.chainID, block.Header.Number, err)
 	}
