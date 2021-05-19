@@ -66,7 +66,7 @@ func newBlockPuller(
 	stdDialer.ClientConfig.SecOpts.VerifyCertificate = nil
 
 	cr := &CommitteeRetriever{
-		committeeDisabled:     committeeDisabled,
+		CommitteeDisabled:     committeeDisabled,
 		NewCommitteeSelection: cs.NewCommitteeSelection,
 		Logger:                flogging.MustGetLogger("orderer.consensus.smartbft.committee"),
 		Ledger:                support,

@@ -338,6 +338,7 @@ peer:
         #    to:
         #    caCertsFile:
 
+
         # Config parameters for the Byzantine Fault Tolerant (BFT) client implementation
         bft:
             # Whether to use a BFT client implementation
@@ -358,6 +359,9 @@ peer:
             # are ahead of the block receiver for a period larger than this timeout.
             # (f is the number of failures tolerated in the BFT cluster.)
             blockCensorshipTimeout: 10s
+
+            # Whether committee selection is disabled
+            committeeDisabled: false
 
     # Type for the local MSP - by default it's of type bccsp
     localMspType: bccsp
