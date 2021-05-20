@@ -89,7 +89,7 @@ func (p *BlocksStreamPuller) ContinuouslyPullBlocks() {
 			continue
 		}
 
-		p.Logger.Debugf("Appending block (%d) to the ledger", block.Header.Number)
+		p.Logger.Infof("Appending block (%d) to the ledger", block.Header.Number)
 		if err := p.Ledger.Append(block); err != nil {
 			p.Logger.Panicf("not able to append newly received block into the ledger, block number [%d], due to %s", block.Header.Number, err)
 		}
@@ -125,7 +125,7 @@ func (p *BlocksStreamPuller) assignEndpoint() {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 	p.blockDeliverEndpoint = p.Endpoints[rand.Intn(len(p.Endpoints))]
-	p.Logger.Debugf("Will pull from %s", p.blockDeliverEndpoint.Endpoint)
+	p.Logger.Infof("Will pull from %s", p.blockDeliverEndpoint.Endpoint)
 }
 
 func (p *BlocksStreamPuller) tryFetchBlocks() (*common.Block, error) {
