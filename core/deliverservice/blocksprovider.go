@@ -191,6 +191,8 @@ type blocksProviderImpl struct {
 	done int32
 
 	wrongStatusThreshold int
+
+	committeeDisabled bool
 }
 
 const wrongStatusThreshold = 10
@@ -206,6 +208,7 @@ func NewBlocksProvider(chainID string, client StreamClient, gossip GossipService
 		mcs:                  mcs,
 		ledger:               ledger,
 		wrongStatusThreshold: wrongStatusThreshold,
+		committeeDisabled:    viper.GetBool("peer.deliveryclient.bft.committeeDisabled"),
 	}
 }
 
@@ -292,10 +295,8 @@ func (b *blocksProviderImpl) DeliverBlocks() {
 
 			b.client.UpdateReceived(blockNum)
 
-			committeeDisabled := viper.GetBool("peer.deliveryclient.bft.committeeDisabled")
-
-			if !committeeDisabled && !b.isCommitteeChangeBlock(t.Block) {
-				logger.Infof("[%s] Not updating endpoints since this is not a committee change block , blockNum = [%d]", b.chainID, blockNum)
+			if !b.committeeDisabled && !b.isCommitteeChangeBlock(t.Block) {
+				logger.Infof("[%s] / this is not a committee change block , blockNum = [%d]", b.chainID, blockNum)
 				continue
 			}
 
@@ -309,7 +310,7 @@ func (b *blocksProviderImpl) DeliverBlocks() {
 				}
 			}
 
-			b.client.UpdateEndpoints(b.getEndpoints(blockNum, committeeDisabled))
+			b.client.UpdateEndpoints(b.getEndpoints(blockNum))
 
 		default:
 			logger.Warningf("[%s] Received unknown: %v", b.chainID, t)
@@ -342,7 +343,7 @@ func (b *blocksProviderImpl) isCommitteeChangeBlock(block *common.Block) bool {
 	return cm.CommitteeShiftAt == int64(block.Header.Number)
 }
 
-func (b *blocksProviderImpl) getEndpoints(blockNum uint64, committeeDisabled bool) []comm.EndpointCriteria {
+func (b *blocksProviderImpl) getEndpoints(blockNum uint64) []comm.EndpointCriteria {
 	simpleLedger := SimpleLedger{ledger: b.ledger}
 	lastConfigBlock, err := lastConfigBlockFromLedger(simpleLedger)
 	if err != nil {
@@ -381,7 +382,7 @@ func (b *blocksProviderImpl) getEndpoints(blockNum uint64, committeeDisabled boo
 
 	endpoints := cc.toEndpointCriteria()
 
-	if committeeDisabled {
+	if b.committeeDisabled {
 		logger.Infof("[%s] Committee is disabled, returning all endpoints, block [%d]", b.chainID, blockNum)
 		return endpoints
 	}

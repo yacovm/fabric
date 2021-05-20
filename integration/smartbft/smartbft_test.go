@@ -551,12 +551,23 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 				runner := network.OrdererRunner(orderer)
 				runner.Command.Env = append(runner.Command.Env, "FABRIC_LOGGING_SPEC=orderer.consensus.smartbft.committee=debug:orderer.consensus.smartbft=debug:grpc=debug")
 				runner.Command.Env = append(runner.Command.Env, "ORDERER_GENERAL_COMMITTEESELECTIONDISABLED=true")
-				runner.Command.Env = append(runner.Command.Env, "CORE_PEER_DELIVERYCLIENT_BFT_COMMITTEEDISABLED=true")
 				ordererRunners = append(ordererRunners, runner)
 				proc := ifrit.Invoke(runner)
 				ordererProcesses = append(ordererProcesses, proc)
 				Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
 			}
+
+			By("Taking down the peer")
+			peerProcesses.Signal(syscall.SIGTERM)
+			Eventually(peerProcesses.Wait(), network.EventuallyTimeout).Should(Receive())
+
+			By("Bringing up the peer")
+			peerGroupRunner, peerRunners = peerGroupRunners(network)
+			for _, peerRunner := range peerRunners {
+				peerRunner.Command.Env = append(peerRunner.Command.Env, "CORE_PEER_DELIVERYCLIENT_BFT_COMMITTEEDISABLED=true")
+			}
+			peerProcesses = ifrit.Invoke(peerGroupRunner)
+			Eventually(peerProcesses.Ready(), network.EventuallyTimeout).Should(BeClosed())
 
 			By("Waiting for followers to see the leader, again")
 			Eventually(ordererRunners[0].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 3 channel=testchannel1"))
