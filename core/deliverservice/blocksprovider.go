@@ -31,6 +31,7 @@ import (
 	smartbft_protos "github.com/hyperledger/fabric/protos/orderer/smartbft"
 	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 )
 
 //go:generate mockery -dir . -name LedgerInfo -case underscore -output ../mocks/
@@ -291,9 +292,10 @@ func (b *blocksProviderImpl) DeliverBlocks() {
 
 			b.client.UpdateReceived(blockNum)
 
-			// TODO if committee is disabled then update endpoints at each block
+			committeeDisabled := viper.GetBool("peer.deliveryclient.bft.committeeDisabled")
 
-			if !b.isCommitteeChangeBlock(t.Block) {
+			if !committeeDisabled && !b.isCommitteeChangeBlock(t.Block) {
+				logger.Infof("[%s] Not updating endpoints since this is not a committee change block , blockNum = [%d]", b.chainID, blockNum)
 				continue
 			}
 
@@ -307,7 +309,7 @@ func (b *blocksProviderImpl) DeliverBlocks() {
 				}
 			}
 
-			b.client.UpdateEndpoints(b.getEndpoints(blockNum))
+			b.client.UpdateEndpoints(b.getEndpoints(blockNum, committeeDisabled))
 
 		default:
 			logger.Warningf("[%s] Received unknown: %v", b.chainID, t)
@@ -340,8 +342,51 @@ func (b *blocksProviderImpl) isCommitteeChangeBlock(block *common.Block) bool {
 	return cm.CommitteeShiftAt == int64(block.Header.Number)
 }
 
-func (b *blocksProviderImpl) getEndpoints(blockNum uint64) []comm.EndpointCriteria {
+func (b *blocksProviderImpl) getEndpoints(blockNum uint64, committeeDisabled bool) []comm.EndpointCriteria {
 	simpleLedger := SimpleLedger{ledger: b.ledger}
+	lastConfigBlock, err := lastConfigBlockFromLedger(simpleLedger)
+	if err != nil {
+		logger.Panicf("[%s] Error getting last config block while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
+	}
+
+	envelopeConfig, err := utils.ExtractEnvelope(lastConfigBlock, 0)
+	if err != nil {
+		logger.Panicf("[%s] Error getting envelope from config block while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
+	}
+	bundle, err := channelconfig.NewBundleFromEnvelope(envelopeConfig)
+	if err != nil {
+		logger.Panicf("[%s] Error getting new bundle while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
+	}
+	oc, exists := bundle.OrdererConfig()
+	if !exists {
+		logger.Panicf("[%s] No orderer config in bundle while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
+	}
+	ac, exists := bundle.ApplicationConfig()
+	if !exists {
+		logger.Panicf("[%s] No application config in bundle while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
+	}
+
+	gcc := &GossipChannelConfig{
+		Validator: bundle.ConfigtxValidator(),
+		AC:        ac,
+		OC:        oc,
+		Channel:   bundle.ChannelConfig(),
+	}
+
+	cc := &ConnectionCriteria{
+		OrdererEndpointsByOrg: gcc.OrdererAddressesByOrgs(),
+		Organizations:         gcc.OrdererOrgs(),
+		OrdererEndpoints:      gcc.OrdererAddresses(),
+	}
+
+	endpoints := cc.toEndpointCriteria()
+
+	if committeeDisabled {
+		logger.Infof("[%s] Committee is disabled, returning all endpoints, block [%d]", b.chainID, blockNum)
+		return endpoints
+	}
+
+	logger.Infof("[%s] Committee is enabled, filtering endpoints by committee, block [%d]", b.chainID, blockNum)
 
 	cr := &smartbft.CommitteeRetriever{
 		//committeeDisabled:     false,
@@ -364,23 +409,6 @@ func (b *blocksProviderImpl) getEndpoints(blockNum uint64) []comm.EndpointCriter
 		committeeIDs[uint64(id)] = struct{}{}
 	}
 
-	lastConfigBlock, err := lastConfigBlockFromLedger(simpleLedger)
-	if err != nil {
-		logger.Panicf("[%s] Error getting last config block while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
-	}
-
-	envelopeConfig, err := utils.ExtractEnvelope(lastConfigBlock, 0)
-	if err != nil {
-		logger.Panicf("[%s] Error getting envelope from config block while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
-	}
-	bundle, err := channelconfig.NewBundleFromEnvelope(envelopeConfig)
-	if err != nil {
-		logger.Panicf("[%s] Error getting new bundle while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
-	}
-	oc, exists := bundle.OrdererConfig()
-	if !exists {
-		logger.Panicf("[%s] No orderer config in bundle while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
-	}
 	consensusMD := &smartbft_protos.ConfigMetadata{}
 	if err := proto.Unmarshal(oc.ConsensusMetadata(), consensusMD); err != nil {
 		logger.Panicf("[%s] Error getting consensus metadata while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
@@ -394,26 +422,6 @@ func (b *blocksProviderImpl) getEndpoints(blockNum uint64) []comm.EndpointCriter
 		endpointsInCommittee[consenter.Host] = struct{}{}
 	}
 	logger.Debugf("Endpoints in committee: %v", endpointsInCommittee)
-
-	ac, exists := bundle.ApplicationConfig()
-	if !exists {
-		logger.Panicf("[%s] No application config in bundle while handling block with sequence number %d, due to %s", b.chainID, blockNum, err)
-	}
-
-	gcc := &GossipChannelConfig{
-		Validator: bundle.ConfigtxValidator(),
-		AC:        ac,
-		OC:        oc,
-		Channel:   bundle.ChannelConfig(),
-	}
-
-	cc := &ConnectionCriteria{
-		OrdererEndpointsByOrg: gcc.OrdererAddressesByOrgs(),
-		Organizations:         gcc.OrdererOrgs(),
-		OrdererEndpoints:      gcc.OrdererAddresses(),
-	}
-
-	endpoints := cc.toEndpointCriteria()
 
 	if len(endpointsInCommittee) > 0 {
 		var filteredEndpoints []comm.EndpointCriteria

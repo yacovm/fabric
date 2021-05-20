@@ -91,12 +91,6 @@ func (ce *configEventer) ProcessConfigUpdate(config Config) {
 		logger.Debugf("Calling out because config was updated for channel %s", config.ChainID())
 		ce.receiver.updateAnchors(config)
 	}
-
-	ce.receiver.updateEndpoints(config.ChainID(), deliverclient.ConnectionCriteria{
-		OrdererEndpointsByOrg: config.OrdererAddressesByOrgs(),
-		Organizations:         config.OrdererOrgs(),
-		OrdererEndpoints:      config.OrdererAddresses(),
-	})
 }
 
 func cloneOrgConfig(src map[string]channelconfig.ApplicationOrg) map[string]channelconfig.ApplicationOrg {

@@ -551,6 +551,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 				runner := network.OrdererRunner(orderer)
 				runner.Command.Env = append(runner.Command.Env, "FABRIC_LOGGING_SPEC=orderer.consensus.smartbft.committee=debug:orderer.consensus.smartbft=debug:grpc=debug")
 				runner.Command.Env = append(runner.Command.Env, "ORDERER_GENERAL_COMMITTEESELECTIONDISABLED=true")
+				runner.Command.Env = append(runner.Command.Env, "CORE_PEER_DELIVERYCLIENT_BFT_COMMITTEEDISABLED=true")
 				ordererRunners = append(ordererRunners, runner)
 				proc := ifrit.Invoke(runner)
 				ordererProcesses = append(ordererProcesses, proc)
