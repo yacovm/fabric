@@ -178,7 +178,7 @@ func NewChain(
 		},
 		ct: &CommitteeTracker{
 			committeeDisabled: committeeDisabled,
-			logger:            logger,
+			logger:            committeeLogger,
 			ledger:            &CachingLedger{Ledger: support},
 		},
 		streamPuller: &BlocksStreamPuller{
@@ -495,7 +495,7 @@ func (c *BFTChain) maybeAddedToCommittee(block *common.Block) {
 		return
 	}
 
-	c.Logger.Infof("We were added to the committee")
+	c.Logger.Infof("We were added to the committee (%s)", c.ct.CurrentCommittee().IDs())
 	c.streamPuller.Stop()
 	c.updateConsensusInstance()
 	c.consensus.WALInitialContent = nil
@@ -630,7 +630,7 @@ func (c *BFTChain) onCommitteeChange(prevCommittee []int32) {
 	}
 
 	currentCommittee := c.ct.CurrentCommittee()
-	c.Logger.Debugf("changing committee from [%v], to [%v]", prevCommittee, currentCommittee.IDs())
+	c.Logger.Infof("Changing committee from [%v], to [%v]", prevCommittee, currentCommittee.IDs())
 
 	c.migrateTransactions(prevCommittee, currentCommittee.IDs())
 

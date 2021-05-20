@@ -47,7 +47,7 @@ func committeeHasPublicKeysDefined(nodes committee.Nodes) bool {
 func (ct *CommitteeTracker) CurrentCommittee() committee.Nodes {
 	if ct.cr == nil {
 		ct.cr = &CommitteeRetriever{
-			committeeDisabled:     ct.committeeDisabled,
+			CommitteeDisabled:     ct.committeeDisabled,
 			NewCommitteeSelection: cs.NewCommitteeSelection,
 			Ledger:                ct.ledger,
 			Logger:                ct.logger,
@@ -74,7 +74,7 @@ type CommitteeRetriever struct {
 	latestHeight    uint64
 	latestCommittee committee.Nodes
 
-	committeeDisabled     bool
+	CommitteeDisabled     bool
 	NewCommitteeSelection func(logger committee.Logger) committee.Selection
 	Ledger                Ledger
 	Logger                *flogging.FabricLogger
@@ -86,7 +86,7 @@ func (cr *CommitteeRetriever) CurrentState(forCommit bool) committee.State {
 		cr.Logger.Panicf("Failed initializing empty state: %v", err)
 	}
 
-	if cr.committeeDisabled {
+	if cr.CommitteeDisabled {
 		cr.Logger.Debugf("Committee selection is disabled, returning empty state")
 		return emptyState
 	}
@@ -298,7 +298,7 @@ func (cr *CommitteeRetriever) currentCommittee() (committee.Nodes, error) {
 	cfg := parseCommitteeConfig(nodeConf, committeeConfig, cr.Logger)
 
 	committeeSelection := cr.NewCommitteeSelection(cr.Logger)
-	cr.Logger.Infof("Determining committee for block %d with nodes %v", lastBlock.Header.Number+1, committeeMD.CommitteeAtShift.IDs())
+	cr.Logger.Debugf("Determining committee for block %d with nodes %v", lastBlock.Header.Number+1, committeeMD.CommitteeAtShift.IDs())
 	if err := committeeSelection.Initialize(math.MaxInt32, nil, committeeMD.CommitteeAtShift); err != nil {
 		return nil, errors.Wrap(err, "failed initializing committee")
 	}
@@ -319,6 +319,8 @@ func (cr *CommitteeRetriever) currentCommittee() (committee.Nodes, error) {
 	} else {
 		cr.Logger.Infof("Committee did not suspect any node outside of the committee")
 	}
+
+	cr.Logger.Debugf("Next committee config: %+v", cfg)
 
 	feedback, _, err := committeeSelection.Process(currentCommitteeState, committee.Input{
 		NextConfig:  cfg,
@@ -346,7 +348,7 @@ func (cr *CommitteeRetriever) currentCommittee() (committee.Nodes, error) {
 		})
 	}
 
-	cr.Logger.Debugf("Returning committee for block %d: %v", lastBlock.Header.Number+1, nodes.IDs())
+	cr.Logger.Infof("Returning committee for block %d: %v", lastBlock.Header.Number+1, nodes.IDs())
 	return nodes, nil
 
 }
@@ -408,7 +410,7 @@ func (cr *CommitteeRetriever) latestState(finalStateIndex int64) (committee.Stat
 }
 
 func (cr *CommitteeRetriever) disabled(config *smartbft.ConfigMetadata, nodeConf *nodeConfig) (bool, error) {
-	if cr.committeeDisabled {
+	if cr.CommitteeDisabled {
 		return true, nil
 	}
 
