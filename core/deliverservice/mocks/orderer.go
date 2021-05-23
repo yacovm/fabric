@@ -16,6 +16,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/orderer"
+	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 )
@@ -198,7 +199,11 @@ func (o *Orderer) sendBlock(stream orderer.AtomicBroadcast_DeliverServer, seq ui
 		block.Data = data
 	}
 
-	block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES] = []byte("good")
+	block.Metadata = &common.BlockMetadata{
+		Metadata: [][]byte{utils.MarshalOrPanic(&common.Metadata{
+			Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{}),
+		})},
+	}
 
 	_ = stream.Send(&orderer.DeliverResponse{
 		Type: &orderer.DeliverResponse_Block{Block: block},

@@ -23,7 +23,7 @@ import (
 	"time"
 
 	pb "github.com/golang/protobuf/proto"
-	"github.com/hyperledger/fabric/core/deliverservice/blocksprovider"
+	deliverclient "github.com/hyperledger/fabric/core/deliverservice"
 	"github.com/hyperledger/fabric/protos/common"
 	proto "github.com/hyperledger/fabric/protos/gossip"
 	"github.com/hyperledger/fabric/protos/orderer"
@@ -32,7 +32,7 @@ import (
 
 func TestMockBlocksDeliverer(t *testing.T) {
 	// Make sure it implements BlocksDeliverer
-	var bd blocksprovider.BlocksDeliverer
+	var bd deliverclient.BlocksDeliverer
 	bd = &MockBlocksDeliverer{}
 	_ = bd
 
@@ -74,7 +74,7 @@ func TestMockBlocksDeliverer(t *testing.T) {
 
 func TestMockGossipServiceAdapter(t *testing.T) {
 	// Make sure it implements GossipServiceAdapter
-	var gsa blocksprovider.GossipServiceAdapter
+	var gsa deliverclient.GossipServiceAdapter
 	seqNums := make(chan uint64, 1)
 	gsa = &MockGossipServiceAdapter{GossipBlockDisseminations: seqNums}
 	_ = gsa
@@ -119,7 +119,7 @@ func TestMockAtomicBroadcastClient(t *testing.T) {
 }
 
 func TestMockLedgerInfo(t *testing.T) {
-	var li blocksprovider.LedgerInfo
+	var li deliverclient.LedgerInfo
 	li = &MockLedgerInfo{uint64(8)}
 	_ = li
 

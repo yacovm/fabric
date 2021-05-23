@@ -20,7 +20,6 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/core/comm"
-	"github.com/hyperledger/fabric/core/deliverservice/blocksprovider"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/orderer"
 	"github.com/hyperledger/fabric/protos/utils"
@@ -180,7 +179,7 @@ func loadCertificates(t *testing.T) (cert []byte, key []byte, caCert []byte) {
 }
 
 type mockClient struct {
-	blocksprovider.BlocksDeliverer
+	BlocksDeliverer
 	conn *grpc.ClientConn
 }
 

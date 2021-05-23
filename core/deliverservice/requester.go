@@ -22,7 +22,6 @@ import (
 	"github.com/hyperledger/fabric/common/localmsp"
 	"github.com/hyperledger/fabric/common/util"
 	"github.com/hyperledger/fabric/core/comm"
-	"github.com/hyperledger/fabric/core/deliverservice/blocksprovider"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/orderer"
 	"github.com/hyperledger/fabric/protos/utils"
@@ -31,10 +30,10 @@ import (
 type blocksRequester struct {
 	tls     bool
 	chainID string
-	client  blocksprovider.BlocksDeliverer
+	client  BlocksDeliverer
 }
 
-func (b *blocksRequester) RequestBlocks(ledgerInfoProvider blocksprovider.LedgerInfo) error {
+func (b *blocksRequester) RequestBlocks(ledgerInfoProvider LedgerInfo) error {
 	height, err := ledgerInfoProvider.LedgerHeight()
 	if err != nil {
 		logger.Errorf("Can't get ledger height for channel %s from committer [%s]", b.chainID, err)
@@ -56,7 +55,7 @@ func (b *blocksRequester) RequestBlocks(ledgerInfoProvider blocksprovider.Ledger
 	return nil
 }
 
-func (b *blocksRequester) RequestHeaders(ledgerInfoProvider blocksprovider.LedgerInfo) error {
+func (b *blocksRequester) RequestHeaders(ledgerInfoProvider LedgerInfo) error {
 	height, err := ledgerInfoProvider.LedgerHeight()
 	if err != nil {
 		logger.Errorf("Can't get ledger height for channel %s from committer [%s]", b.chainID, err)

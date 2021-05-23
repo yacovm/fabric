@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/hyperledger/fabric/core/comm"
 	gossip_common "github.com/hyperledger/fabric/gossip/common"
 	"github.com/hyperledger/fabric/gossip/discovery"
 	"github.com/hyperledger/fabric/protos/common"
@@ -70,6 +71,7 @@ type MockBlocksDeliverer struct {
 	grpc.ClientStream
 	recvCnt  int32
 	MockRecv func(mock *MockBlocksDeliverer) (*orderer.DeliverResponse, error)
+	Info     MockLedgerInfo
 }
 
 // Recv gets responses from the ordering service, currently mocked to return
@@ -90,6 +92,7 @@ func MockRecv(mock *MockBlocksDeliverer) (*orderer.DeliverResponse, error) {
 
 	// Advance position for the next call
 	mock.Pos++
+	mock.Info.Set(mock.Pos)
 	return &orderer.DeliverResponse{
 		Type: &orderer.DeliverResponse_Block{
 			Block: &common.Block{
@@ -100,6 +103,11 @@ func MockRecv(mock *MockBlocksDeliverer) (*orderer.DeliverResponse, error) {
 				},
 				Data: &common.BlockData{
 					Data: [][]byte{},
+				},
+				Metadata: &common.BlockMetadata{
+					Metadata: [][]byte{utils.MarshalOrPanic(&common.Metadata{
+						Value: utils.MarshalOrPanic(&common.OrdererBlockMetadata{}),
+					})},
 				},
 			}},
 	}, nil
@@ -138,12 +146,12 @@ func (mock *MockBlocksDeliverer) Close() {
 	mock.CloseCalled <- struct{}{}
 }
 
-func (mock *MockBlocksDeliverer) UpdateEndpoints(endpoints []string) {
+func (mock *MockBlocksDeliverer) UpdateEndpoints(endpoints []comm.EndpointCriteria) {
 
 }
 
-func (mock *MockBlocksDeliverer) GetEndpoints() []string {
-	return []string{} // empty slice
+func (mock *MockBlocksDeliverer) GetEndpoint() string {
+	return ""
 }
 
 // MockLedgerInfo mocking implementation of LedgerInfo interface, needed
@@ -159,4 +167,8 @@ func (li *MockLedgerInfo) LedgerHeight() (uint64, error) {
 
 func (li *MockLedgerInfo) Set(height uint64) {
 	atomic.StoreUint64(&li.Height, height)
+}
+
+func (li *MockLedgerInfo) GetBlocks(blockSeqs []uint64) []*common.Block {
+	return nil
 }

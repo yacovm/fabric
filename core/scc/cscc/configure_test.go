@@ -38,7 +38,6 @@ import (
 	"github.com/hyperledger/fabric/core/container"
 	"github.com/hyperledger/fabric/core/container/inproccontroller"
 	deliverclient "github.com/hyperledger/fabric/core/deliverservice"
-	"github.com/hyperledger/fabric/core/deliverservice/blocksprovider"
 	"github.com/hyperledger/fabric/core/ledger/ledgermgmt"
 	ccprovidermocks "github.com/hyperledger/fabric/core/mocks/ccprovider"
 	"github.com/hyperledger/fabric/core/peer"
@@ -85,7 +84,7 @@ func (ds *mockDeliveryClient) UpdateEndpoints(chainID string, _ deliverclient.Co
 
 // StartDeliverForChannel dynamically starts delivery of new blocks from ordering service
 // to channel peers.
-func (ds *mockDeliveryClient) StartDeliverForChannel(chainID string, ledgerInfo blocksprovider.LedgerInfo, f func()) error {
+func (ds *mockDeliveryClient) StartDeliverForChannel(chainID string, ledgerInfo deliverclient.Ledger, f func()) error {
 	return nil
 }
 

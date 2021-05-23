@@ -557,6 +557,18 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 				Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
 			}
 
+			By("Taking down the peer")
+			peerProcesses.Signal(syscall.SIGTERM)
+			Eventually(peerProcesses.Wait(), network.EventuallyTimeout).Should(Receive())
+
+			By("Bringing up the peer")
+			peerGroupRunner, peerRunners = peerGroupRunners(network)
+			for _, peerRunner := range peerRunners {
+				peerRunner.Command.Env = append(peerRunner.Command.Env, "CORE_PEER_DELIVERYCLIENT_BFT_COMMITTEEDISABLED=true")
+			}
+			peerProcesses = ifrit.Invoke(peerGroupRunner)
+			Eventually(peerProcesses.Ready(), network.EventuallyTimeout).Should(BeClosed())
+
 			By("Waiting for followers to see the leader, again")
 			Eventually(ordererRunners[0].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 3 channel=testchannel1"))
 			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 3 channel=testchannel1"))

@@ -19,7 +19,6 @@ import (
 	"github.com/hyperledger/fabric/common/metrics/disabled"
 	"github.com/hyperledger/fabric/core/comm"
 	deliverclient "github.com/hyperledger/fabric/core/deliverservice"
-	"github.com/hyperledger/fabric/core/deliverservice/blocksprovider"
 	"github.com/hyperledger/fabric/core/ledger"
 	"github.com/hyperledger/fabric/core/transientstore"
 	"github.com/hyperledger/fabric/gossip/api"
@@ -339,7 +338,7 @@ func (ds *mockDeliverService) UpdateEndpoints(_ string, _ deliverclient.Connecti
 	panic("implement me")
 }
 
-func (ds *mockDeliverService) StartDeliverForChannel(chainID string, ledgerInfo blocksprovider.LedgerInfo, finalizer func()) error {
+func (ds *mockDeliverService) StartDeliverForChannel(chainID string, ledger deliverclient.Ledger, finalizer func()) error {
 	ds.running[chainID] = true
 	return nil
 }
