@@ -8,17 +8,14 @@ package smartbft
 
 import (
 	"encoding/asn1"
-
-	types2 "github.com/hyperledger/fabric/orderer/consensus/smartbft/types"
-
-	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
-
 	"sync/atomic"
 
 	"github.com/SmartBFT-Go/consensus/pkg/types"
+	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
+	types2 "github.com/hyperledger/fabric/orderer/consensus/smartbft/types"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/orderer/smartbft"
 	"github.com/hyperledger/fabric/protos/utils"
@@ -116,9 +113,10 @@ func (a *Assembler) committeeCommitmentAndMetadata(blockNum int64) ([]byte, *typ
 
 	currentCommittee := a.CurrentCommittee()
 	expectedCommitters := (len(currentCommittee)-1)/3 + 1
+	committeeSize := nextCommitteeSize(a.Logger, rtc)
 	committeeMD := CommitteeMetadataForProposal(a.Logger, commitment, newState, rtc.CommitteeMetadata, blockNum,
 		expectedCommitters,
-		rtc.committeeMinimumLifespan, currentCommittee, int32(rtc.id))
+		rtc.committeeMinimumLifespan, currentCommittee, int32(rtc.id), committeeSize)
 
 	a.Logger.Infof("Creating committee metadata for block %d: %+v and previous metadata: %+v", blockNum, committeeMD, rtc.CommitteeMetadata)
 

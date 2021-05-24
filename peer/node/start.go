@@ -354,11 +354,11 @@ func serve(args []string) error {
 
 		block := result.(*cb.Block)
 
-		logger.Debugf("Extracting committee metadata of block %d", block.Header.Number)
-
 		if md, _ := types.CommitteeMetadataFromBlock(block); md != nil {
+			logger.Debugf("Extracting committee size of block %d: %d", block.Header.Number, md.CommitteeSize)
 			return int(md.CommitteeSize)
 		}
+		logger.Debugf("Committee metadata for block %d is nil, returning 0", block.Header.Number)
 		return 0
 	}
 

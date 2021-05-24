@@ -25,7 +25,7 @@ type CommitteeMetadata struct {
 	CommitteeShiftAt int64           // The block number that contains reconstruction shares that reveal this committee
 	CommitteeAtShift committee.Nodes // The committee at the time of the shift to this committee
 	GenesisConfigAt  int64           // The block number of the first ever committee instance
-	CommitteeSize    int32
+	CommitteeSize    int32           // The committee size of the next block
 }
 
 func CommitteeMetadataFromBlock(block *common.Block) (*CommitteeMetadata, error) {

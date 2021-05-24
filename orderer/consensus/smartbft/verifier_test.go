@@ -97,8 +97,10 @@ func TestVerifySignature(t *testing.T) {
 func TestVerifyConsenterSig(t *testing.T) {
 	logger := flogging.MustGetLogger("test")
 
+	certMap, cleanup := generateCerts(t)
+	defer cleanup()
 	lastBlock := makeNonConfigBlock(19, 10)
-	lastConfigBlock := makeConfigBlock(10)
+	lastConfigBlock := makeCommitteeConfigBlock(10, certMap, false)
 
 	ac := &mocks.AccessController{}
 	ac.On("Evaluate", mock.Anything).Return(nil)
@@ -406,7 +408,9 @@ func TestVerifyProposal(t *testing.T) {
 	logger := flogging.MustGetLogger("test")
 	lastBlock := makeNonConfigBlock(19, 10)
 	notLastBlock := makeNonConfigBlock(18, 10)
-	lastConfigBlock := makeConfigBlock(10)
+	certMap, cleanup := generateCerts(t)
+	defer cleanup()
+	lastConfigBlock := makeCommitteeConfigBlock(10, certMap, false)
 
 	ledger := &mocks.Ledger{}
 	ledger.On("Height").Return(uint64(20))
@@ -454,15 +458,6 @@ func TestVerifyProposal(t *testing.T) {
 			bftMetadataMutator:          noopMutator,
 			ordererBlockMetadataMutator: noopOrdererBlockMetadataMutator,
 			expectedErr:                 "expected verification sequence 12, but proposal has 11",
-		},
-		{
-			description:                 "wrong verification sequence 2",
-			verificationSequence:        12,
-			lastBlock:                   lastBlock,
-			lastConfigBlock:             common.NewBlock(666, nil),
-			bftMetadataMutator:          noopMutator,
-			ordererBlockMetadataMutator: noopOrdererBlockMetadataMutator,
-			expectedErr:                 "last config in block orderer metadata points to 666 but our persisted last config is 10",
 		},
 		{
 			description:                 "wrong verification sequence 3",
