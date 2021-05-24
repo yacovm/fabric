@@ -577,8 +577,9 @@ func (c *BFTChain) verifyCommitment(block *common.Block) error {
 	currentCommittee := c.ct.CurrentCommittee()
 	rtc := c.RuntimeConfig.Load().(RuntimeConfig)
 	expectedCommitters := (len(currentCommittee)-1)/3 + 1
+	committeeSize := nextCommitteeSize(c.Logger, rtc)
 	committeeMD := CommitteeMetadataForProposal(c.Logger, commitment.Data, newState.ToBytes(), rtc.CommitteeMetadata,
-		int64(block.Header.Number), expectedCommitters, rtc.committeeMinimumLifespan, currentCommittee, commitment.From)
+		int64(block.Header.Number), expectedCommitters, rtc.committeeMinimumLifespan, currentCommittee, commitment.From, committeeSize)
 
 	expected := committeeMD.Marshal()
 	if !bytes.Equal(ordererMDFromBlock.CommitteeMetadata, expected) {

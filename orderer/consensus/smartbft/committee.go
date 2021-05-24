@@ -441,6 +441,7 @@ func CommitteeMetadataForProposal(
 	committeeMinimumLifespan uint32,
 	currentCommittee committee.Nodes,
 	id int32,
+	nextCommitteeSize int,
 ) *types.CommitteeMetadata {
 	committeeMD := &types.CommitteeMetadata{}
 
@@ -453,11 +454,11 @@ func CommitteeMetadataForProposal(
 
 	var prevStateSize int
 	if prevCommitteeMD == nil {
+		committeeMD.CommitteeSize = int32(len(currentCommittee))
 		committeeMD.GenesisConfigAt = blockNum - 1
-		logger.Debugf("This is the first committee metadata, setting genesis config to be %d", committeeMD.GenesisConfigAt)
+		logger.Debugf("This is the first committee metadata, setting genesis config to be %d and next committee size to be %d",
+			committeeMD.GenesisConfigAt, committeeMD.CommitteeSize)
 	}
-
-	committeeMD.CommitteeSize = int32(len(currentCommittee))
 
 	if prevCommitteeMD != nil {
 		prevStateSize = len(prevCommitteeMD.State)
@@ -466,6 +467,7 @@ func CommitteeMetadataForProposal(
 		copy(committeeMD.Committers, prevCommitteeMD.Committers)
 		committeeMD.CommitteeShiftAt = prevCommitteeMD.CommitteeShiftAt
 		committeeMD.FinalStateIndex = prevCommitteeMD.FinalStateIndex
+		committeeMD.CommitteeSize = prevCommitteeMD.CommitteeSize
 
 		// If we shifted committees in the previous block, this is a new committee.
 		// So wipe out all the previous committers.
@@ -504,8 +506,10 @@ func CommitteeMetadataForProposal(
 	if len(committeeMD.Committers) == expectedCommitters && lastIndex > 0 && blockNum-lastIndex > int64(committeeMinimumLifespan) {
 		committeeMD.CommitteeShiftAt = blockNum
 		committeeMD.CommitteeAtShift = currentCommittee
-		logger.Debugf("This block ends the committee, setting CommitteeShiftAt to be %d with committee of %v",
-			committeeMD.CommitteeShiftAt, committeeMD.CommitteeAtShift.IDs())
+		committeeMD.CommitteeSize = int32(nextCommitteeSize)
+		logger.Debugf("This block ends the committee, setting CommitteeShiftAt to be %d "+
+			"with committee of %v and next committee will be of size %d",
+			committeeMD.CommitteeShiftAt, committeeMD.CommitteeAtShift.IDs(), committeeMD.CommitteeSize)
 	}
 
 	return committeeMD

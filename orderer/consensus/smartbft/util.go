@@ -22,14 +22,10 @@ import (
 	"sort"
 	"time"
 
-	types2 "github.com/hyperledger/fabric/orderer/consensus/smartbft/types"
-
-	cs "github.com/SmartBFT-Go/randomcommittees"
-
-	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
-
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
+	cs "github.com/SmartBFT-Go/randomcommittees"
+	committee "github.com/SmartBFT-Go/randomcommittees/pkg"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/channelconfig"
 	"github.com/hyperledger/fabric/common/configtx"
@@ -39,6 +35,7 @@ import (
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
 	"github.com/hyperledger/fabric/orderer/consensus"
 	"github.com/hyperledger/fabric/orderer/consensus/etcdraft"
+	types2 "github.com/hyperledger/fabric/orderer/consensus/smartbft/types"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/msp"
 	"github.com/hyperledger/fabric/protos/orderer/smartbft"
@@ -842,4 +839,30 @@ func agreedSuspects(allSuspects []int32, f int32) []int32 {
 	sort.Slice(agreedSuspects, func(i, j int) bool { return agreedSuspects[i] < agreedSuspects[j] })
 
 	return agreedSuspects
+}
+
+func nextCommitteeSize(logger *flogging.FabricLogger, rtc RuntimeConfig) int {
+	if rtc.LastConfigBlock == nil {
+		return 0
+	}
+
+	consensusMD, err := consensusMDFromBlock(rtc.LastConfigBlock)
+	if err != nil {
+		logger.Panicf("failed extracting consensus metadata from config block %d", rtc.LastConfigBlock.Header.Number)
+		return 0
+	}
+
+	var committeeConfig *smartbft.CommitteeConfig
+	if consensusMD.Options != nil {
+		committeeConfig = consensusMD.Options.CommitteeConfig
+	}
+
+	if committeeConfig == nil {
+		committeeConfig = defaultCommitteeConfig
+	}
+
+	failureChance := big.NewRat(1, int64(committeeConfig.InverseFailureChance))
+	size := cs.CommitteeSize(int64(len(consensusMD.Consenters)), int64(committeeConfig.FailedTotalNodesPercentage), *failureChance)
+	logger.Debugf("Committee size computed from config block %d is %d", rtc.LastConfigBlock.Header.Number, size)
+	return size
 }

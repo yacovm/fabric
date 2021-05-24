@@ -69,8 +69,11 @@ func TestSignProposal(t *testing.T) {
 		HeartbeatMonitor: monitor,
 	}
 
+	certMap, cleanup := generateCerts(t)
+	defer cleanup()
+
 	lastBlock := makeNonConfigBlock(19, 10)
-	lastConfigBlock := makeConfigBlock(10)
+	lastConfigBlock := makeCommitteeConfigBlock(10, certMap, false)
 	ledger := &mocks.Ledger{}
 	ledger.On("Height").Return(uint64(20))
 	ledger.On("Block", uint64(19)).Return(lastBlock)

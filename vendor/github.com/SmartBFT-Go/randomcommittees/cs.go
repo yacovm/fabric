@@ -27,3 +27,7 @@ func StateFromBytes(b []byte) (*cs.State, error) {
 	s := &cs.State{}
 	return s, s.Initialize(b)
 }
+
+func CommitteeSize(totalNodeCount int64, failedTotalNodesPercentage int64, failureChance big.Rat) int {
+	return cs.CommitteeSize(totalNodeCount, failedTotalNodesPercentage, failureChance)
+}

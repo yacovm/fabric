@@ -32,7 +32,10 @@ var (
 func TestAssembler(t *testing.T) {
 	lastBlock := makeNonConfigBlock(19, 10)
 	lastHash := lastBlock.Header.Hash()
-	lastConfigBlock := makeConfigBlock(10)
+
+	certMap, cleanup := generateCerts(t)
+	defer cleanup()
+	lastConfigBlock := makeCommitteeConfigBlock(10, certMap, false)
 
 	ledger := &mocks.Ledger{}
 	ledger.On("Height").Return(uint64(20))
