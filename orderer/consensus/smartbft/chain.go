@@ -182,7 +182,13 @@ func NewChain(
 			ledger:            &CachingLedger{Ledger: support},
 		},
 		streamPuller: &BlocksStreamPuller{
-			Ledger:        support,
+			WriteBlock: func(block *common.Block) {
+				if utils.IsConfigBlock(block) {
+					support.WriteConfigBlock(block, nil)
+				} else {
+					support.WriteBlock(block, nil)
+				}
+			},
 			Logger:        logger,
 			Channel:       support.ChainID(),
 			RetryTimeout:  500 * time.Millisecond,

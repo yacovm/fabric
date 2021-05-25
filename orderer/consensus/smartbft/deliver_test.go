@@ -125,7 +125,9 @@ func TestBlocksStreamPuller_ContinuouslyPullBlocks(t *testing.T) {
 		OnBlockCommit: func(_ *common.Block) {},
 		RetryTimeout:  time.Millisecond,
 		FetchTimeout:  5 * time.Second,
-		Ledger:        ledger,
+		WriteBlock: func(block *common.Block) {
+			ledger.Append(block)
+		},
 		Dialer:        &testDialer{},
 		BlockVerifier: blockVerifier,
 		Signer:        signer,
