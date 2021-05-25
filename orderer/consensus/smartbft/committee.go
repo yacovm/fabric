@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SmartBFT-Go/consensus/smartbftprotos"
+
 	utils2 "github.com/hyperledger/fabric/protos/utils"
 
 	cs "github.com/SmartBFT-Go/randomcommittees"
@@ -320,6 +322,16 @@ func (cr *CommitteeRetriever) currentCommittee() (committee.Nodes, error) {
 		cr.Logger.Infof("Committee did not suspect any node outside of the committee")
 	}
 
+	viewMD := &smartbftprotos.ViewMetadata{}
+	if err := proto.Unmarshal(obm.ConsenterMetadata, viewMD); err != nil {
+		cr.Logger.Errorf("Failed unmarshaling view metadata: %v", err)
+		return nil, err
+	}
+
+	blackListedNodes := uintListToint32List(viewMD.BlackList)
+	cr.Logger.Debugf("Blacklisted nodes: %v", blackListedNodes)
+	cfg.ExcludedNodes = append(cfg.ExcludedNodes, blackListedNodes...)
+
 	cr.Logger.Debugf("Next committee config: %+v", cfg)
 
 	feedback, _, err := committeeSelection.Process(currentCommitteeState, committee.Input{
@@ -610,4 +622,12 @@ func (c *CachingLedger) evictOldest() {
 
 	// Remove the minimum
 	delete(c.cache, oldestSeqUsed)
+}
+
+func uintListToint32List(in []uint64) []int32 {
+	var out []int32
+	for _, n := range in {
+		out = append(out, int32(n))
+	}
+	return out
 }
