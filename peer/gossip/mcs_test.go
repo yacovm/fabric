@@ -229,12 +229,16 @@ func TestVerifyBlock(t *testing.T) {
 	_, msgInvalid := mockBlock(t, "C", 42, aliceSigner, []byte{0})
 
 	t.Run("verify block", func(t *testing.T) {
-		// - Verify block
-		assert.NoError(t, msgCryptoService.VerifyBlock([]byte("C"), 42, blockRaw))
 		// Wrong sequence number claimed
 		err := msgCryptoService.VerifyBlock([]byte("C"), 43, blockRaw)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "but actual seqNum inside block is")
+		assert.Zero(t, msgCryptoService.nodeCountCache.size())
+
+		// - Verify block
+		assert.NoError(t, msgCryptoService.VerifyBlock([]byte("C"), 42, blockRaw))
+		assert.Equal(t, 1, msgCryptoService.nodeCountCache.size())
+
 		delete(policyManagerGetter.Managers, "D")
 		nilPolMgrErr := msgCryptoService.VerifyBlock([]byte("D"), 42, blockRaw2)
 		assert.Contains(t, nilPolMgrErr.Error(), "Could not acquire policy manager")
@@ -398,4 +402,31 @@ func TestExpiration(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "No MSP found able to do that")
 	assert.Zero(t, exp)
+}
+
+func TestNodeCountBlockCache(t *testing.T) {
+	cache := nodeCountBlockCache{}
+	_, found := cache.lookup("mychannel", 10)
+	assert.False(t, found)
+
+	cache.put("mychannel", 10, 5)
+	count, found := cache.lookup("mychannel", 10)
+	assert.True(t, found)
+	assert.Equal(t, 5, count)
+
+	cache.put("mychannel", 8, 4)
+	_, found = cache.lookup("mychannel", 8)
+	assert.False(t, found)
+
+	count, found = cache.lookup("mychannel", 10)
+	assert.True(t, found)
+	assert.Equal(t, 5, count)
+
+	cache.put("mychannel", 11, 7)
+	_, found = cache.lookup("mychannel", 10)
+	assert.False(t, found)
+
+	count, found = cache.lookup("mychannel", 11)
+	assert.True(t, found)
+	assert.Equal(t, 7, count)
 }
