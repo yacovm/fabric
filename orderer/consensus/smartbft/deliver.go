@@ -26,6 +26,7 @@ import (
 
 // BlocksStreamPuller fetches stream of blocks from active committee members
 type BlocksStreamPuller struct {
+	WriteBlock        func(block *common.Block)
 	CommitteeSize     func() int
 	lastCommitteeSize int
 	OnBlockCommit     func(block *common.Block)
@@ -42,7 +43,6 @@ type BlocksStreamPuller struct {
 
 	BlockVerifier BlockVerifier
 	Dialer        cluster.Dialer
-	Ledger        LedgerWriter
 
 	abortStream          func()
 	lock                 sync.RWMutex
@@ -89,10 +89,8 @@ func (p *BlocksStreamPuller) ContinuouslyPullBlocks() {
 			continue
 		}
 
-		p.Logger.Infof("Appending block (%d) to the ledger", block.Header.Number)
-		if err := p.Ledger.Append(block); err != nil {
-			p.Logger.Panicf("not able to append newly received block into the ledger, block number [%d], due to %s", block.Header.Number, err)
-		}
+		p.Logger.Infof("Writing block (%d) to the ledger", block.Header.Number)
+		p.WriteBlock(block)
 		p.LastBlock = block
 
 		p.OnBlockCommit(block)
