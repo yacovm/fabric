@@ -9,7 +9,11 @@ package gossip
 import (
 	"bytes"
 	"fmt"
+	"sync"
 	"time"
+
+	"github.com/golang/protobuf/proto"
+	"github.com/hyperledger/fabric/orderer/consensus/smartbft/types"
 
 	"github.com/hyperledger/fabric/bccsp"
 	"github.com/hyperledger/fabric/bccsp/factory"
@@ -38,6 +42,7 @@ var mcsLogger = flogging.MustGetLogger("peer.gossip.mcs")
 // A similar mechanism needs to be in place to update the local MSP, as well.
 // This implementation assumes that these mechanisms are all in place and working.
 type MSPMessageCryptoService struct {
+	nodeCountCache             nodeCountBlockCache
 	nodeCount                  func(string, uint64) int
 	id2IdentitiesFetcher       Id2IdentitiesFetcher
 	channelPolicyManagerGetter policies.ChannelPolicyManagerGetter
@@ -163,7 +168,6 @@ func (s *MSPMessageCryptoService) VerifyBlock(chainID common.ChainID, seqNum uin
 	if !bytes.Equal(block.Data.Hash(), block.Header.DataHash) {
 		return fmt.Errorf("Header.DataHash is different from Hash(block.Data) for block with id [%d] on channel [%s]", block.Header.Number, chainID)
 	}
-
 	return s.verifyHeaderWithMetadata(channelID, block.Header, metadata)
 }
 
@@ -210,8 +214,21 @@ func (s *MSPMessageCryptoService) verifyHeaderWithMetadata(channelID string, hea
 		)
 	}
 
+	// The previous block contains the committee size for this block
+	nodeCount, found := s.nodeCountCache.lookup(channelID, header.Number-1)
+	isCached := "(cached)"
+	if !found {
+		nodeCount = s.nodeCount(channelID, header.Number)
+		isCached = ""
+	}
+	mcsLogger.Debugf("Committee size for block %d is %d %s", header.Number, nodeCount, isCached)
+
 	// - Evaluate policy
-	return policy.(policies.BFTPolicy).BFTEvaluate(signatureSet, s.nodeCount(channelID, header.Number))
+	err := policy.(policies.BFTPolicy).BFTEvaluate(signatureSet, nodeCount)
+	if err == nil {
+		s.maybeCacheNodeCount(channelID, metadata, header.Number)
+	}
+	return err
 }
 
 func (s *MSPMessageCryptoService) VerifyHeader(chainID string, signedBlock *pcommon.Block) error {
@@ -381,4 +398,57 @@ func (s *MSPMessageCryptoService) getValidatedIdentity(peerIdentity api.PeerIden
 	}
 
 	return nil, nil, fmt.Errorf("Peer Identity [% x] cannot be validated. No MSP found able to do that.", peerIdentity)
+}
+
+func (s *MSPMessageCryptoService) maybeCacheNodeCount(chainID string, metadata *pcommon.Metadata, blockSeq uint64) {
+	obm := &pcommon.OrdererBlockMetadata{}
+	if err := proto.Unmarshal(metadata.Value, obm); err != nil {
+		mcsLogger.Errorf("Failed unmarshaling OrdererBlockMetadata of block %d: %v", blockSeq, err)
+		return
+	}
+
+	cm := &types.CommitteeMetadata{}
+	if err := cm.Unmarshal(obm.CommitteeMetadata); err != nil {
+		mcsLogger.Errorf("Failed unmarshaling CommitteeMetadata of block %d: %v", blockSeq, err)
+		return
+	}
+
+	s.nodeCountCache.put(chainID, blockSeq, int(cm.CommitteeSize))
+}
+
+type nodeCountBlockCache struct {
+	cache sync.Map
+}
+
+type nodeCountAtBlock struct {
+	nodeCount int
+	blockSeq  uint64
+}
+
+func (ncbc *nodeCountBlockCache) lookup(chainID string, seqNum uint64) (int, bool) {
+	item, exists := ncbc.cache.Load(chainID)
+	if !exists {
+		return 0, false
+	}
+
+	nodeCountAtBlockStored := item.(nodeCountAtBlock)
+
+	return nodeCountAtBlockStored.nodeCount, nodeCountAtBlockStored.blockSeq == seqNum
+}
+
+func (ncbc *nodeCountBlockCache) put(chainID string, blockSeq uint64, nodeCount int) {
+	item, exists := ncbc.cache.Load(chainID)
+	if exists && item.(nodeCountAtBlock).blockSeq >= blockSeq {
+		return
+	}
+	ncbc.cache.Store(chainID, nodeCountAtBlock{nodeCount: nodeCount, blockSeq: blockSeq})
+}
+
+func (ncbc *nodeCountBlockCache) size() int {
+	var c int
+	ncbc.cache.Range(func(_, _ interface{}) bool {
+		c++
+		return true
+	})
+	return c
 }
