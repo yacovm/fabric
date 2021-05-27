@@ -52,6 +52,7 @@ type ConfigTxValidator interface {
 }
 
 type ConfigBlockValidator struct {
+	CommitteeDisabled      bool
 	ChannelConfigTemplator ChannelConfigTemplator
 	ConfigUpdateProposer   ConfigUpdateProposer
 	ValidatingChannel      string
@@ -59,7 +60,7 @@ type ConfigBlockValidator struct {
 	Logger                 *flogging.FabricLogger
 }
 
-func (cbv *ConfigBlockValidator) ValidateConfig(envelope *common.Envelope) error {
+func (cbv *ConfigBlockValidator) ValidateConfig(envelope *common.Envelope, committee []int32) error {
 	payload, err := utils.UnmarshalPayload(envelope.Payload)
 	if err != nil {
 		return err
@@ -84,7 +85,7 @@ func (cbv *ConfigBlockValidator) ValidateConfig(envelope *common.Envelope) error
 		if err = proto.Unmarshal(payload.Data, configEnvelope); err != nil {
 			return fmt.Errorf("data unmarshalling error: %s", err)
 		}
-		return cbv.verifyConfigUpdateMsg(envelope, configEnvelope, chdr)
+		return cbv.verifyConfigUpdateMsg(envelope, configEnvelope, chdr, committee)
 
 	case int32(common.HeaderType_ORDERER_TRANSACTION):
 		env, err := utils.UnmarshalEnvelope(payload.Data)
@@ -97,14 +98,15 @@ func (cbv *ConfigBlockValidator) ValidateConfig(envelope *common.Envelope) error
 		if err != nil {
 			return fmt.Errorf("data unmarshalling error: %s", err)
 		}
-		return cbv.verifyConfigUpdateMsg(envelope, configEnvelope, chdr)
+		return cbv.verifyConfigUpdateMsg(envelope, configEnvelope, chdr, committee)
 
 	default:
 		return errors.Errorf("unexpected envelope type %s", common.HeaderType_name[chdr.Type])
 	}
 }
 
-func (cbv *ConfigBlockValidator) verifyConfigUpdateMsg(outEnv *common.Envelope, confEnv *common.ConfigEnvelope, chdr *common.ChannelHeader) error {
+func (cbv *ConfigBlockValidator) verifyConfigUpdateMsg(outEnv *common.Envelope, confEnv *common.ConfigEnvelope,
+	chdr *common.ChannelHeader, committee []int32) error {
 	if confEnv == nil || confEnv.LastUpdate == nil || confEnv.Config == nil {
 		return errors.New("invalid config envelope")
 	}
@@ -165,7 +167,7 @@ func (cbv *ConfigBlockValidator) verifyConfigUpdateMsg(outEnv *common.Envelope, 
 		}
 	}
 
-	if err := cbv.verifyCommittee(confEnv.Config); err != nil {
+	if err := cbv.verifyCommittee(confEnv.Config, committee); err != nil {
 		return err
 	}
 
@@ -178,7 +180,7 @@ func (cbv *ConfigBlockValidator) verifyConfigUpdateMsg(outEnv *common.Envelope, 
 	return errors.Errorf("pending config does not match calculated expected config")
 }
 
-func (cbv *ConfigBlockValidator) verifyCommittee(config *common.Config) error {
+func (cbv *ConfigBlockValidator) verifyCommittee(config *common.Config, committee []int32) error {
 	bundle, err := channelconfig.NewBundle(cbv.ValidatingChannel, config)
 	if err != nil {
 		cbv.Logger.Warnf("cannot construct new config from last update: %v", err)
@@ -200,8 +202,29 @@ func (cbv *ConfigBlockValidator) verifyCommittee(config *common.Config) error {
 		return nil
 	}
 	conf := configMD.Options.CommitteeConfig
-	if conf.Disabled {
+	if conf.Disabled || cbv.CommitteeDisabled {
 		return nil
+	}
+
+	// Populate a set of nodes in the pending configuration
+	nodesInPendingConfig := make(map[int32]struct{})
+	for _, consenter := range configMD.Consenters {
+		nodesInPendingConfig[int32(consenter.ConsenterId)] = struct{}{}
+	}
+
+	// We iterate over the current committee identifiers and search for nodes that are no longer in the configuration
+	var missing int
+	for _, id := range committee {
+		if _, exists := nodesInPendingConfig[id]; !exists {
+			missing++
+		}
+	}
+
+	n := len(committee)
+	f := (n - 1) / 3
+	remaining := n - missing
+	if remaining < 2*f+1 {
+		return errors.Errorf("config update leaves committee with %d nodes but we need 2f+1 (%d) nodes to choose the next committee safely", remaining, 2*f+1)
 	}
 
 	var consentersWithoutSelectionPK int

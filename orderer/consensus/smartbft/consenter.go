@@ -184,6 +184,7 @@ func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *co
 	c.Logger.Debugf("SmartBFT-Go config: %+v", config)
 
 	configValidator := &ConfigBlockValidator{
+		CommitteeDisabled:      c.Conf.General.CommitteeSelectionDisabled,
 		ChannelConfigTemplator: c.Registrar,
 		ValidatingChannel:      support.ChainID(),
 		Filters:                c.Registrar,

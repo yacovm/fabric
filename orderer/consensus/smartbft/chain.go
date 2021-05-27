@@ -62,7 +62,7 @@ type WALConfig struct {
 }
 
 type ConfigValidator interface {
-	ValidateConfig(env *common.Envelope) error
+	ValidateConfig(env *common.Envelope, committee []int32) error
 }
 
 type signerSerializer interface {
@@ -381,6 +381,9 @@ func buildVerifier(
 	channelDecorator := zap.String("channel", support.ChainID())
 	logger := flogging.MustGetLogger("orderer.consensus.smartbft.verifier").With(channelDecorator)
 	return &Verifier{
+		CommitteeIDs: func() []int32 {
+			return c.ct.CurrentCommittee().IDs()
+		},
 		VerifyCommitment:      c.verifyCommitment,
 		ConfigValidator:       cv,
 		VerificationSequencer: support,
@@ -1101,8 +1104,6 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 		c.support.WriteBlock(block, nil)
 	}
 
-	// TODO: call c.cs.Process() with the commitment from the block
-
 	reconfig := c.updateRuntimeConfig(block)
 	return reconfig
 }
@@ -1204,7 +1205,7 @@ func (c *BFTChain) Configure(config *common.Envelope, configSeq uint64) error {
 		}
 	}
 
-	if err := c.cv.ValidateConfig(config); err != nil {
+	if err := c.cv.ValidateConfig(config, c.ct.CurrentCommittee().IDs()); err != nil {
 		return errors.Wrap(err, "illegal config update attempted")
 	}
 

@@ -291,7 +291,7 @@ func TestValidateConfig(t *testing.T) {
 					return nil
 				},
 			}, true)
-			err = cbv.ValidateConfig(env)
+			err = cbv.ValidateConfig(env, nil)
 			if testCase.expectedError == "" {
 				assert.NoError(t, err)
 			} else {
