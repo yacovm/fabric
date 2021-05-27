@@ -853,7 +853,7 @@ func (c *BFTChain) getSuspectsFromSignatures(signatures []*smartbftprotos.Signat
 	}
 
 	n := len(c.ct.CurrentCommittee())
-	f := (n-1)/3 + 1
+	f := (n - 1) / 3
 
 	return agreedSuspects(allSuspects, int32(f))
 }
