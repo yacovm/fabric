@@ -76,6 +76,7 @@ func (nibd NodeIdentitiesByID) IdentityToID(identity []byte) (uint64, bool) {
 }
 
 type Verifier struct {
+	CommitteeIDs          func() []int32
 	RuntimeConfig         *atomic.Value
 	ReqInspector          *RequestInspector
 	ConsenterVerifier     ConsenterVerifier
@@ -186,7 +187,7 @@ func (v *Verifier) verifyRequest(rawRequest []byte, noConfigAllowed bool) (types
 	}
 
 	if req.chHdr.Type == int32(common.HeaderType_CONFIG) || req.chHdr.Type == int32(common.HeaderType_ORDERER_TRANSACTION) {
-		err := v.ConfigValidator.ValidateConfig(req.envelope)
+		err := v.ConfigValidator.ValidateConfig(req.envelope, v.CommitteeIDs())
 		if err != nil {
 			v.Logger.Errorf("Error verifying config update: %v", err)
 			return types.RequestInfo{}, err
