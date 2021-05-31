@@ -65,11 +65,21 @@ func (a *Assembler) AssembleProposal(metadata []byte, requests [][]byte) (nextPr
 
 	commitment, newCommitteeMetadata := a.committeeCommitmentAndMetadata(int64(block.Header.Number))
 
-	var suspects []int32
-	// if last block is a config block or not a committee change block, then leave the suspects list empty
-	if !rtc.isConfig && newCommitteeMetadata.CommitteeShiftAt == int64(block.Header.Number) {
-		suspects = assembleSuspectsList(lastBlock)
+	obm := utils.GetOrdererblockMetadataOrPanic(lastBlock)
+
+	cm := &types2.CommitteeMetadata{}
+	if err := cm.Unmarshal(obm.CommitteeMetadata); err != nil {
+		a.Logger.Panicf("Failed unmarshaling committee metadata of last block: %v", err)
 	}
+
+	var suspects []int32
+	if !rtc.isConfig && cm.CommitteeShiftAt != int64(lastBlock.Header.Number) { // if last block is a config block or committee change block then leave the suspects list empty
+		n := len(a.CurrentCommittee())
+		f := (n - 1) / 3
+		suspects = assembleSuspectsList(lastBlock, int32(f))
+	}
+
+	a.Logger.Debugf("The assembled suspects list for block %d is %v", block.Header.Number, suspects)
 
 	block.Metadata.Metadata[common.BlockMetadataIndex_LAST_CONFIG] = utils.MarshalOrPanic(&common.Metadata{
 		Value: utils.MarshalOrPanic(&common.LastConfig{Index: lastConfigBlockNum}),
@@ -186,7 +196,7 @@ func LastBlockFromLedgerOrPanic(ledger Ledger, logger Logger) *common.Block {
 	return lastBlock
 }
 
-func assembleSuspectsList(lastBlock *common.Block) []int32 {
+func assembleSuspectsList(lastBlock *common.Block, f int32) []int32 {
 	blockMetadataSignatures := &common.Metadata{}
 	if err := proto.Unmarshal(lastBlock.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], blockMetadataSignatures); err != nil {
 		panic(err)
@@ -205,7 +215,7 @@ func assembleSuspectsList(lastBlock *common.Block) []int32 {
 		allSuspects = append(allSuspects, cleanList...)
 	}
 
-	return agreedSuspects(allSuspects, 1) // TODO use f
+	return agreedSuspects(allSuspects, f)
 }
 
 type ByteBufferTuple struct {

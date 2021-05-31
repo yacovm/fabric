@@ -316,7 +316,7 @@ func (cr *CommitteeRetriever) currentCommittee() (committee.Nodes, error) {
 
 	obm := utils2.GetOrdererblockMetadataOrPanic(reconstructionSharesBlock)
 	if len(obm.HeartbeatSuspects) > 0 {
-		cr.Logger.Infof("Committee suspects nodes %v outside of the committee, excluding them from being candidates")
+		cr.Logger.Infof("Committee suspects nodes %v outside of the committee, excluding them from being candidates", obm.HeartbeatSuspects)
 		cfg.ExcludedNodes = obm.HeartbeatSuspects
 	} else {
 		cr.Logger.Infof("Committee did not suspect any node outside of the committee")

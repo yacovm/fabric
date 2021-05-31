@@ -858,65 +858,56 @@ func (c *BFTChain) getSuspectsFromSignatures(signatures []*smartbftprotos.Signat
 	return agreedSuspects(allSuspects, int32(f))
 }
 
-func (c *BFTChain) getSuspectsFromBlock(proposal *smartbftprotos.Proposal, seq uint64) (error, []int32, bool) {
+func (c *BFTChain) getSuspectsFromBlock(proposal *smartbftprotos.Proposal, seq uint64) (error, []int32) {
 	tuple := &ByteBufferTuple{}
 	if err := tuple.FromBytes(proposal.Payload); err != nil {
 		c.Logger.Warningf("Failed reading proposal payload, error: %v", err)
-		return err, nil, false
+		return err, nil
 	}
 	metadata := &common.BlockMetadata{}
 	if err := proto.Unmarshal(tuple.B, metadata); err != nil {
 		c.Logger.Warningf("Failed unmarshaling block metadata, error: %v", err)
-		return err, nil, false
+		return err, nil
 	}
 	if metadata == nil || len(metadata.Metadata) < len(common.BlockMetadataIndex_name) {
 		c.Logger.Warningf("Block metadata is either missing or contains too few entries")
-		return errors.Errorf("block metadata is either missing or too few entires"), nil, false
+		return errors.Errorf("block metadata is either missing or too few entires"), nil
 	}
 	signatureMetadata := &common.Metadata{}
 	if err := proto.Unmarshal(metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], signatureMetadata); err != nil {
 		c.Logger.Warningf("Failed unmarshaling block signature metadata, error: %v", err)
-		return err, nil, false
+		return err, nil
 
 	}
 	ordererMDFromBlock := &common.OrdererBlockMetadata{}
 	if err := proto.Unmarshal(signatureMetadata.Value, ordererMDFromBlock); err != nil {
 		c.Logger.Warningf("Failed unmarshaling orderer block metadata, error: %v", err)
-		return err, nil, false
+		return err, nil
 	}
 
-	committeeMD := &types2.CommitteeMetadata{}
-	if err := committeeMD.Unmarshal(ordererMDFromBlock.CommitteeMetadata); err != nil {
-		c.Logger.Warnf("Failed unmarshaling CommitteeMetadata: %v", err)
-		return err, nil, false
-	}
-
-	if committeeMD.CommitteeShiftAt != int64(seq) && len(ordererMDFromBlock.HeartbeatSuspects) > 0 {
-		c.Logger.Warnf("Committee metadata contains suspects but this block isn't a committee change block")
-		return errors.Errorf("committee metadata contains suspects but this block isn't a committee change block"), nil, false
-	}
-
-	return nil, ordererMDFromBlock.HeartbeatSuspects, committeeMD.CommitteeShiftAt == int64(seq)
+	return nil, ordererMDFromBlock.HeartbeatSuspects
 }
 
 func (c *BFTChain) verifySuspects(prp *smartbftprotos.PrePrepare) bool {
 	agreedSuspects := c.getSuspectsFromSignatures(prp.PrevCommitSignatures)
-	err, blockSuspects, shouldContainSuspects := c.getSuspectsFromBlock(prp.Proposal, prp.Seq)
+	err, blockSuspects := c.getSuspectsFromBlock(prp.Proposal, prp.Seq)
 	if err != nil {
 		return false
 	}
 
 	rtc := c.RuntimeConfig.Load().(RuntimeConfig)
-	if rtc.isConfig {
-		if len(blockSuspects) != 0 {
-			c.Logger.Warningf("Last block was a config block, but the suggested suspects list is not empty")
-			return false
-		}
-		c.Logger.Infof("Last block was a config block, therefore disregarding the suspects verification")
-		return true
+	obm := utils.GetOrdererblockMetadataOrPanic(rtc.LastBlock)
+	cm := &types2.CommitteeMetadata{}
+	if err := cm.Unmarshal(obm.CommitteeMetadata); err != nil {
+		c.Logger.Panicf("Failed unmarshaling committee metadata of last block: %v", err)
 	}
 
-	if !shouldContainSuspects {
+	if rtc.isConfig || cm.CommitteeShiftAt == int64(rtc.LastBlock.Header.Number) {
+		if len(blockSuspects) != 0 {
+			c.Logger.Warningf("Last block was a config block or a committee change block, but the suggested suspects list is not empty")
+			return false
+		}
+		c.Logger.Infof("Last block was a config block or a committee change block, therefore disregarding the suspects verification")
 		return true
 	}
 

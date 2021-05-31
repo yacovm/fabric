@@ -1304,6 +1304,102 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			invokeQuery(network, peer, network.Orderers[3], "testchannel1", 10)
 			invokeQuery(network, peer, network.Orderers[3], "testchannel1", 0)
 		})
+		It("smartbft suspected node not in committee", func() {
+
+			if os.Getenv("ORDERER_GENERAL_COMMITTEESELECTIONDISABLED") == "true" {
+				return
+			}
+
+			network = nwo.New(moreNodesConfig(), testDir, client, StartPort(), components)
+			network.BoostrapDockerNetwork()
+			network.GenerateAndBoostrapCrypto()
+			network.GenerateAndBoostrapConfig()
+
+			var ordererRunners []*ginkgomon.Runner
+			for _, orderer := range network.Orderers {
+				runner := network.OrdererRunner(orderer)
+				ordererRunners = append(ordererRunners, runner)
+				proc := ifrit.Invoke(runner)
+				ordererProcesses = append(ordererProcesses, proc)
+				Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
+			}
+
+			peerRunner := network.PeerGroupRunner()
+			peerProcesses = ifrit.Invoke(peerRunner)
+			Eventually(peerProcesses.Ready(), network.EventuallyTimeout).Should(BeClosed())
+
+			By("Waiting for followers to see the leader")
+			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+			Eventually(ordererRunners[4].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+
+			peer := network.Peer("Org1", "peer0")
+
+			channel := "testchannel1"
+
+			network.CreateAndJoinChannel(network.Orderers[0], channel)
+
+			assertBlockReception(map[string]int{"systemchannel": 1}, network.Orderers, peer, network)
+
+			nwo.DeployChaincode(network, channel, network.Orderers[0], nwo.Chaincode{
+				Name:    "mycc",
+				Version: "0.0",
+				Path:    "github.com/hyperledger/fabric/integration/chaincode/simple/cmd",
+				Ctor:    `{"Args":["init","a","100","b","200"]}`,
+				Policy:  `AND ('Org1MSP.member','Org2MSP.member')`,
+			})
+
+			assertBlockReception(map[string]int{"testchannel1": 1}, network.Orderers, peer, network)
+
+			By("check block validation policy on sys channel")
+			assertBlockValidationPolicy(network, peer, network.Orderers[0], "systemchannel", common.Policy_IMPLICIT_ORDERER)
+			By("check block validation policy on app channel")
+			assertBlockValidationPolicy(network, peer, network.Orderers[0], channel, common.Policy_IMPLICIT_ORDERER)
+
+			By("Transacting on testchannel1")
+			invokeQuery(network, peer, network.Orderers[0], channel, 90)
+			invokeQuery(network, peer, network.Orderers[0], channel, 80)
+			invokeQuery(network, peer, network.Orderers[0], channel, 70)
+			invokeQuery(network, peer, network.Orderers[0], channel, 60)
+
+			Eventually(ordererRunners[0].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Committee did not suspect any node outside of the committee"))
+
+			By("Finding a non committee node")
+			nonCommitteeNode := 0
+			committeeNode := 0
+			committeeNodes := getCommittee(ordererRunners[0], 5)
+			for i := 0; i < 5; i++ {
+				if _, exists := committeeNodes[i+1]; exists {
+					committeeNode = i
+					continue
+				}
+				nonCommitteeNode = i
+				break
+			}
+
+			By("Taking down a non committee node")
+			ordererProcesses[nonCommitteeNode].Signal(syscall.SIGTERM)
+			Eventually(ordererProcesses[nonCommitteeNode].Wait(), network.EventuallyTimeout).Should(Receive())
+
+			By("Waiting for heartbeat timeout")
+			time.Sleep(time.Second * 60)
+
+			invokeQuery(network, peer, network.Orderers[committeeNode], channel, 50)
+			invokeQuery(network, peer, network.Orderers[committeeNode], channel, 40)
+			invokeQuery(network, peer, network.Orderers[committeeNode], channel, 30)
+			invokeQuery(network, peer, network.Orderers[committeeNode], channel, 20)
+			invokeQuery(network, peer, network.Orderers[committeeNode], channel, 10)
+
+			By("Making sure there is a suspect")
+			Eventually(ordererRunners[committeeNode].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Committee suspects nodes"))
+
+			By("Making sure the suspect is not picked for next committee")
+			committeeNodes = getCommittee(ordererRunners[committeeNode], 10)
+			if _, exists := committeeNodes[nonCommitteeNode+1]; exists {
+				Fail("The suspect is in the committee")
+			}
+		})
 	})
 })
 
@@ -1566,4 +1662,35 @@ func findLeader(ordererRunners []*ginkgomon.Runner, skipIndex int) int {
 	}
 
 	return int(foundLeader)
+}
+
+func moreNodesConfig() *nwo.Config {
+	config := nwo.BasicSmartBFT()
+	config.Orderers = []*nwo.Orderer{
+		{Name: "orderer1", Organization: "OrdererOrg"},
+		{Name: "orderer2", Organization: "OrdererOrg"},
+		{Name: "orderer3", Organization: "OrdererOrg"},
+		{Name: "orderer4", Organization: "OrdererOrg"},
+		{Name: "orderer5", Organization: "OrdererOrg"},
+	}
+	config.Profiles = []*nwo.Profile{{
+		Name:     "SampleDevModeSmartBFT",
+		Orderers: []string{"orderer1", "orderer2", "orderer3", "orderer4", "orderer5"},
+	}, {
+		Name:          "TwoOrgsChannel",
+		Consortium:    "SampleConsortium",
+		Organizations: []string{"Org1", "Org2"},
+	}}
+
+	config.Channels = []*nwo.Channel{
+		{Name: "testchannel1", Profile: "TwoOrgsChannel"},
+		{Name: "testchannel2", Profile: "TwoOrgsChannel"}}
+
+	for _, peer := range config.Peers {
+		peer.Channels = []*nwo.PeerChannel{
+			{Name: "testchannel1", Anchor: true},
+			{Name: "testchannel2", Anchor: true},
+		}
+	}
+	return config
 }
