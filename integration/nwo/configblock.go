@@ -172,6 +172,28 @@ func UpdateOrdererConfig(n *Network, orderer *Orderer, channel string, current, 
 	Eventually(ccb, n.EventuallyTimeout).Should(BeNumerically(">", currentBlockNumber))
 }
 
+// UpdateOrdererConfigFails computes, signs, and submits a configuration update which requires orderers signature and waits
+// for the update to fail.
+func UpdateOrdererConfigFails(n *Network, orderer *Orderer, channel string, current, updated *common.Config, submitter *Peer, additionalSigners ...*Orderer) string {
+	tempDir, err := ioutil.TempDir("", "updateConfig")
+	Expect(err).NotTo(HaveOccurred())
+	updateFile := filepath.Join(tempDir, "update.pb")
+	defer os.RemoveAll(tempDir)
+
+	ComputeUpdateOrdererConfig(updateFile, n, channel, current, updated, submitter, additionalSigners...)
+
+	sess, err := n.OrdererAdminSession(orderer, submitter, commands.ChannelUpdate{
+		ChannelID: channel,
+		Orderer:   n.OrdererAddress(orderer, ListenPort),
+		File:      updateFile,
+	})
+	if err != nil {
+		return err.Error()
+	}
+	sess.Wait(n.EventuallyTimeout)
+	return string(sess.Err.Contents())
+}
+
 // CurrentConfigBlockNumber retrieves the block number from the header of the
 // current config block. This can be used to detect when configuration change
 // has completed. If an orderer is not provided, the current config block will
@@ -336,6 +358,25 @@ func UpdateConsensusMetadata(network *Network, peer *Peer, orderer *Orderer, cha
 	}
 
 	UpdateOrdererConfig(network, orderer, channel, config, updatedConfig, peer, orderer)
+}
+
+func UpdateConsensusMetadataFails(network *Network, peer *Peer, orderer *Orderer, channel string, mutateMetadata ConsensusMetadataMutator) string {
+	config := GetConfig(network, peer, orderer, channel)
+	updatedConfig := proto.Clone(config).(*common.Config)
+
+	consensusTypeConfigValue := updatedConfig.ChannelGroup.Groups["Orderer"].Values["ConsensusType"]
+	consensusTypeValue := &protosorderer.ConsensusType{}
+	err := proto.Unmarshal(consensusTypeConfigValue.Value, consensusTypeValue)
+	Expect(err).NotTo(HaveOccurred())
+
+	consensusTypeValue.Metadata = mutateMetadata(consensusTypeValue.Metadata)
+
+	updatedConfig.ChannelGroup.Groups["Orderer"].Values["ConsensusType"] = &common.ConfigValue{
+		ModPolicy: "Admins",
+		Value:     utils.MarshalOrPanic(consensusTypeValue),
+	}
+
+	return UpdateOrdererConfigFails(network, orderer, channel, config, updatedConfig, peer, orderer)
 }
 
 // UpdateConsensusMetadata executes a config update that updates the consensus metadata according to the given ConsensusMetadataMutator

@@ -26,6 +26,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/golang/protobuf/proto"
+
 	"github.com/tedsuo/ifrit/grouper"
 
 	docker "github.com/fsouza/go-dockerclient"
@@ -791,7 +793,11 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			assertBlockReception(map[string]int{"testchannel1": 7}, network.Orderers, peer, network)
 		})
 
-		PIt("smartbft iterated addition and iterated removal", func() {
+		It("smartbft preventing from shooting yourself in the foot", func() {
+			if os.Getenv("ORDERER_GENERAL_COMMITTEESELECTIONDISABLED") == "true" {
+				return
+			}
+
 			network = nwo.New(nwo.MultiNodeSmartBFT(), testDir, client, StartPort(), components)
 			network.BoostrapDockerNetwork()
 			network.GenerateAndBoostrapCrypto()
@@ -833,7 +839,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			By("check block validation policy on app channel")
 			assertBlockValidationPolicy(network, peer, network.Orderers[0], channel, common.Policy_IMPLICIT_ORDERER)
 
-			for i := 0; i < 6; i++ {
+			for i := 0; i < 3; i++ {
 				By(fmt.Sprintf("Adding orderer %d", i+5))
 
 				name := fmt.Sprintf("orderer%d", i+5)
@@ -890,6 +896,9 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 					"testchannel1":  1 + i,
 				}, network.Orderers[:4], peer, network)
 
+				By(fmt.Sprintf("Make sure the peers are up to date with the orderers and have height of %d", 1+i))
+				waitForBlockReceptionByPeer(peer, network, "testchannel1", uint64(1+i))
+
 				By("Planting last config block in the orderer's file system")
 				configBlock := nwo.GetConfigBlock(network, peer, orderer, "systemchannel")
 				err = ioutil.WriteFile(filepath.Join(testDir, "systemchannel_block.pb"), utils.MarshalOrPanic(configBlock), 0644)
@@ -904,57 +913,53 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 				ordererProcesses = append(ordererProcesses, proc)
 				Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
 
-				By("Waiting for the added orderer to see the leader")
-				sysChanBlockHeight := 2 + i
-				n := 4 + i + 1
-				leaderIndex := sysChanBlockHeight % n
-				if leaderIndex != 4 {
-					Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say(fmt.Sprintf("Message from %d", leaderIndex+1)))
-				} else {
-					By("Added orderer is orderer5, will not wait for it to send heartbeats")
-				}
-
 				By("Ensure all orderers are in sync")
 				assertBlockReception(map[string]int{
 					"systemchannel": 2 + i,
 					"testchannel1":  1 + i,
 				}, network.Orderers, peer, network)
 
-				By(fmt.Sprintf("Make sure the peers are up to date with the orderers and have height of %d", 1+i))
-				waitForBlockReceptionByPeer(peer, network, "testchannel1", uint64(1+i))
-
 			} // for loop that adds orderers
 
-			lastOrdererRunner := ordererRunners[len(ordererRunners)-1]
-			lastOrderer := network.Orderers[len(network.Orderers)-1]
-			// Put the endpoint of the last 4 orderers instead of the first 4
-			var lastOrdererEndpoints []string
-			for i := 1; i <= 4; i++ {
-				o := network.Orderers[len(network.Orderers)-i]
-				ordererEndpoint := fmt.Sprintf("127.0.0.1:%d", network.OrdererPort(o, nwo.ListenPort))
-				lastOrdererEndpoints = append(lastOrdererEndpoints, ordererEndpoint)
-			}
-
-			By(fmt.Sprintf("Updating the addresses of the orderers to be %s", lastOrdererEndpoints))
-			nwo.UpdateOrdererEndpoints(network, peer, lastOrderer, channel, lastOrdererEndpoints...)
-
 			By("Shrinking the cluster back")
-			for i := 0; i < 6; i++ {
-				By(fmt.Sprintf("Waiting for the added orderer to see the leader %d", i+1))
-				Eventually(lastOrdererRunner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say(fmt.Sprintf("Message from %d", 1+i)))
-				By(fmt.Sprintf("Removing the added node from the application channel (block %d)", 8+i))
-				nwo.UpdateSmartBFTMetadata(network, peer, lastOrderer, channel, func(md *smartbft.ConfigMetadata) {
-					md.Consenters = md.Consenters[1:]
-				})
+			committee := getCommittee(ordererRunners[0], 5)
 
-				assertBlockReception(map[string]int{
-					"systemchannel": 7,
-					"testchannel1":  8 + i,
-				}, network.Orderers[i+1:], peer, network)
-
-				By(fmt.Sprintf("Make sure the peers are up to date with the orderers and have height of %d", 8+i))
-				waitForBlockReceptionByPeer(peer, network, channel, uint64(8+i))
+			var someNodeInCommittee int
+			for n := range committee {
+				someNodeInCommittee = n
+				break
 			}
+
+			By("Performing an illegal config update")
+			By(fmt.Sprintf("Submitting config update to orderer %d", someNodeInCommittee-1))
+
+			var consentersRemoved int
+
+			illegalUpdate := func(originalMetadata []byte) []byte {
+				metadata := &smartbft.ConfigMetadata{}
+				err := proto.Unmarshal(originalMetadata, metadata)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Remove too many from the committee
+				var pendingConsenters []*smartbft.Consenter
+				for _, consenter := range metadata.Consenters {
+					if _, inCommittee := committee[int(consenter.ConsenterId)]; !inCommittee || len(committee)-consentersRemoved < 3 {
+						pendingConsenters = append(pendingConsenters, consenter)
+					} else {
+						consentersRemoved++
+					}
+				}
+
+				metadata.Consenters = pendingConsenters
+
+				newMetadata, err := proto.Marshal(metadata)
+				Expect(err).NotTo(HaveOccurred())
+				return newMetadata
+			}
+
+			result := nwo.UpdateConsensusMetadataFails(network, peer, network.Orderers[someNodeInCommittee-1], "systemchannel", illegalUpdate)
+			expected := fmt.Sprintf("illegal config update attempted: config update leaves committee with %d nodes but we need 2f+1 (3) nodes to choose the next committee safely", len(committee)-consentersRemoved)
+			Expect(result).To(ContainSubstring(expected))
 		})
 
 		It("smartbft multiple nodes view change", func() {

@@ -10,7 +10,10 @@ import (
 	"io/ioutil"
 	"testing"
 
-	mock2 "github.com/hyperledger/fabric/orderer/common/blockcutter/mock"
+	"github.com/hyperledger/fabric/common/channelconfig"
+	"github.com/hyperledger/fabric/common/configtx"
+	"github.com/hyperledger/fabric/protos/orderer"
+	smartbft2 "github.com/hyperledger/fabric/protos/orderer/smartbft"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
@@ -31,6 +34,8 @@ func TestValidateConfig(t *testing.T) {
 
 	configBlock := &common.Block{}
 	require.NoError(t, proto.Unmarshal(configBlockBytes, configBlock))
+
+	injectConsenters(t, configBlock, nil)
 
 	configBlockEnvelope := utils.UnmarshalEnvelopeOrPanic(configBlock.Data.Data[0])
 	configBlockEnvelopePayload := utils.UnmarshalPayloadOrPanic(configBlockEnvelope.Payload)
@@ -55,6 +60,24 @@ func TestValidateConfig(t *testing.T) {
 	newChannelEnvelope := &common.ConfigEnvelope{}
 	err = proto.Unmarshal(newChannelBlockYetAnotherPayload.Data, newChannelEnvelope)
 	assert.NoError(t, err)
+
+	consensus := newChannelEnvelope.Config.ChannelGroup.Groups[channelconfig.OrdererGroupKey].Values[channelconfig.ConsensusTypeKey]
+	consensus.Value = utils.MarshalOrPanic(&orderer.ConsensusType{
+		Type: "smartbft",
+		Metadata: utils.MarshalOrPanic(&smartbft2.ConfigMetadata{
+			Consenters: []*smartbft2.Consenter{
+				{
+					ConsenterId: 1,
+				},
+				{
+					ConsenterId: 2,
+				},
+				{
+					ConsenterId: 3,
+				},
+			},
+		}),
+	})
 
 	for _, testCase := range []struct {
 		name                       string
@@ -256,12 +279,6 @@ func TestValidateConfig(t *testing.T) {
 			mutateEnvelope:        func(_ *common.Envelope) {},
 			expectedError:         "error proposing config update",
 		},
-		{
-			name:                       "green path - new channel block",
-			envelope:                   newChannelBlockEnvelope,
-			proposeConfigUpdateReturns: newChannelEnvelope,
-			mutateEnvelope:             func(_ *common.Envelope) {},
-		},
 	} {
 		testCase := testCase
 		t.Run(testCase.name, func(t *testing.T) {
@@ -286,12 +303,8 @@ func TestValidateConfig(t *testing.T) {
 			b.On("ConfigtxValidator").Return(ctv)
 			ctv.On("ProposeConfigUpdate", mock.Anything, mock.Anything).
 				Return(testCase.proposeConfigUpdateReturns, testCase.proposeConfigUpdaterr)
-			b.On("OrdererConfig").Return(&mock2.OrdererConfig{
-				ConsensusMetadataStub: func() []byte {
-					return nil
-				},
-			}, true)
-			err = cbv.ValidateConfig(env, nil)
+
+			err = cbv.ValidateConfig(env, []int32{1, 2, 3, 4})
 			if testCase.expectedError == "" {
 				assert.NoError(t, err)
 			} else {
@@ -299,4 +312,35 @@ func TestValidateConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func injectConsenters(t *testing.T, block *common.Block, tlsCert []byte) {
+	env, err := utils.ExtractEnvelope(block, 0)
+	assert.NoError(t, err)
+	payload, err := utils.ExtractPayload(env)
+	assert.NoError(t, err)
+	confEnv, err := configtx.UnmarshalConfigEnvelope(payload.Data)
+	assert.NoError(t, err)
+	consensus := confEnv.Config.ChannelGroup.Groups[channelconfig.OrdererGroupKey].Values[channelconfig.ConsensusTypeKey]
+	consensus.Value = utils.MarshalOrPanic(&orderer.ConsensusType{
+		Type: "smartbft",
+		Metadata: utils.MarshalOrPanic(&smartbft2.ConfigMetadata{
+			Consenters: []*smartbft2.Consenter{
+				{
+					ConsenterId: 1,
+				},
+				{
+					ConsenterId: 2,
+				},
+				{
+					ConsenterId: 3,
+				},
+			},
+		}),
+	})
+
+	payload.Data = utils.MarshalOrPanic(confEnv)
+	env.Payload = utils.MarshalOrPanic(payload)
+	block.Data.Data[0] = utils.MarshalOrPanic(env)
+	block.Header.DataHash = block.Data.Hash()
 }
