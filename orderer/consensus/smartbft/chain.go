@@ -347,16 +347,17 @@ func bftSmartConsensusBuild(
 		Logger:   logger,
 		Verifier: c.verifier,
 		// Signer is initialized later (after heartbeat monitor)
-		Metadata:          latestMetadata,
-		WAL:               consensusWAL,
-		WALInitialContent: walInitState, // Read from WAL entries
-		Application:       c,
-		Assembler:         c.assembler,
-		RequestInspector:  requestInspector,
-		Synchronizer:      sync,
-		Comm:              c.egress,
-		Scheduler:         time.NewTicker(time.Second).C,
-		ViewChangerTicker: time.NewTicker(time.Second).C,
+		Metadata:           latestMetadata,
+		WAL:                consensusWAL,
+		WALInitialContent:  walInitState, // Read from WAL entries
+		Application:        c,
+		Assembler:          c.assembler,
+		RequestInspector:   requestInspector,
+		MembershipNotifier: c,
+		Synchronizer:       sync,
+		Comm:               c.egress,
+		Scheduler:          time.NewTicker(time.Second).C,
+		ViewChangerTicker:  time.NewTicker(time.Second).C,
 	}
 
 	proposal, signatures := c.lastPersistedProposalAndSignatures()
@@ -1023,6 +1024,24 @@ func (c *BFTChain) HandleRequest(sender uint64, req []byte) {
 func (c *BFTChain) HandleHeartbeat(sender uint64) {
 	c.Logger.Debugf("HandleHeartbeat from %d", sender)
 	c.heartbeatMonitor.ProcessHeartbeat(sender)
+}
+
+func (c *BFTChain) MembershipChange() bool {
+	if c.committeeDisabled {
+		return false
+	}
+
+	rtc := c.RuntimeConfig.Load().(RuntimeConfig)
+	obm := utils.GetOrdererblockMetadataOrPanic(rtc.LastBlock)
+	cm := &types2.CommitteeMetadata{}
+	if err := cm.Unmarshal(obm.CommitteeMetadata); err != nil {
+		c.Logger.Panicf("Failed unmarshaling committee metadata of last block: %v", err)
+	}
+	if cm.CommitteeShiftAt != int64(rtc.LastBlock.Header.Number) {
+		return false
+	}
+
+	return true
 }
 
 func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature) types.Reconfig {

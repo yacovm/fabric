@@ -1247,6 +1247,151 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			}
 		})
 
+		It("smartbft committee change prevents blacklisting", func() {
+			if os.Getenv("ORDERER_GENERAL_COMMITTEESELECTIONDISABLED") == "true" {
+				return
+			}
+
+			network = nwo.New(moreNodesConfig(), testDir, client, StartPort(), components)
+			network.BoostrapDockerNetwork()
+			network.GenerateAndBoostrapCrypto()
+			network.GenerateAndBoostrapConfig()
+
+			network.EventuallyTimeout *= 2
+
+			var ordererRunners []*ginkgomon.Runner
+			for _, orderer := range network.Orderers {
+				runner := network.OrdererRunner(orderer)
+				runner.Command.Env = append(runner.Command.Env, "FABRIC_LOGGING_SPEC=orderer.consensus.smartbft.committee=debug:orderer.common.cluster=debug:orderer.consensus.smartbft=debug:policies.ImplicitOrderer=debug")
+				ordererRunners = append(ordererRunners, runner)
+				proc := ifrit.Invoke(runner)
+				ordererProcesses = append(ordererProcesses, proc)
+				Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
+			}
+
+			peerRunner := network.PeerGroupRunner()
+			peerProcesses = ifrit.Invoke(peerRunner)
+
+			Eventually(peerProcesses.Ready(), network.EventuallyTimeout).Should(BeClosed())
+
+			peer := network.Peer("Org1", "peer0")
+
+			assertBlockReception(map[string]int{"systemchannel": 0}, network.Orderers, peer, network)
+			By("check block validation policy on sys channel")
+			assertBlockValidationPolicy(network, peer, network.Orderers[0], "systemchannel", common.Policy_IMPLICIT_ORDERER)
+
+			By("Waiting for followers to see the leader")
+			Eventually(ordererRunners[1].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+			Eventually(ordererRunners[2].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+			Eventually(ordererRunners[3].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+			Eventually(ordererRunners[4].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Message from 1"))
+
+			channel := "testchannel1"
+
+			orderer := network.Orderers[0]
+			network.CreateAndJoinChannel(orderer, channel)
+
+			assertBlockReception(map[string]int{"systemchannel": 1}, network.Orderers, peer, network)
+
+			nwo.DeployChaincode(network, channel, network.Orderers[0], nwo.Chaincode{
+				Name:    "mycc",
+				Version: "0.0",
+				Path:    "github.com/hyperledger/fabric/integration/chaincode/simple/cmd",
+				Ctor:    `{"Args":["init","a","100","b","200"]}`,
+				Policy:  `AND ('Org1MSP.member','Org2MSP.member')`,
+			})
+
+			assertBlockReception(map[string]int{"testchannel1": 1}, network.Orderers, peer, network)
+
+			By("check block validation policy on app channel")
+			assertBlockValidationPolicy(network, peer, network.Orderers[0], channel, common.Policy_IMPLICIT_ORDERER)
+
+			// Drain all buffers
+			for i := 0; i < 5; i++ {
+				n := len(ordererRunners[i].Err().Contents())
+				ordererRunners[i].Err().Read(make([]byte, n))
+			}
+
+			By("Transacting on testchannel1")
+			invokeQuery(network, peer, orderer, channel, 90)
+			assertBlockReception(map[string]int{"testchannel1": 2}, network.Orderers, peer, network)
+
+			leader := findLeader(ordererRunners, 999)
+			By(fmt.Sprintf("Waiting for followers to see the leader (%d) of the application channel", leader))
+			for i := 0; i < 5; i++ {
+				if i == leader-1 {
+					continue
+				}
+				msg := fmt.Sprintf("%d got message from %d: <HeartBeat with view: 0, seq: 3 channel=testchannel1", i+1, leader)
+				Eventually(ordererRunners[i].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say(msg))
+			}
+
+			// Drain all buffers
+			for i := 0; i < 5; i++ {
+				n := len(ordererRunners[i].Err().Contents())
+				ordererRunners[i].Err().Read(make([]byte, n))
+			}
+
+			By("Transacting again on testchannel1")
+			invokeQuery(network, peer, orderer, channel, 80)
+			assertBlockReception(map[string]int{"testchannel1": 3}, network.Orderers, peer, network)
+
+			// Drain all buffers
+			for i := 0; i < 5; i++ {
+				n := len(ordererRunners[i].Err().Contents())
+				ordererRunners[i].Err().Read(make([]byte, n))
+			}
+
+			By("Transacting again on testchannel1")
+			invokeQuery(network, peer, orderer, channel, 70)
+			assertBlockReception(map[string]int{"testchannel1": 4}, network.Orderers, peer, network)
+
+			leader = findLeader(ordererRunners, 999)
+			By(fmt.Sprintf("Killing the leader (%d)", leader))
+			ordererProcesses[leader-1].Signal(syscall.SIGTERM)
+			Eventually(ordererProcesses[leader-1].Wait(), network.EventuallyTimeout).Should(Receive())
+
+			By("Finding a node that is not the killed leader")
+			node := 0
+			for i := 0; i < 5; i++ {
+				if i == leader-1 {
+					continue
+				}
+				node = i
+				break
+			}
+
+			By("Making sure there was a committee change")
+			committee := getCommittee(ordererRunners[node], 5)
+
+			By("Waiting for view change to occur")
+			committeeNode := 0
+			for i := 0; i < 5; i++ {
+				if i == leader-1 {
+					continue
+				}
+				if _, exists := committee[i+1]; !exists {
+					continue
+				}
+				Eventually(ordererRunners[i].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Starting view with number 1, sequence 5, and decisions 0 channel=testchannel1"))
+				committeeNode = i
+			}
+
+			By("Transacting one last time testchannel1")
+			invokeQuery(network, peer, network.Orderers[committeeNode], channel, 60)
+
+			By("Ensuring blacklisting is skipped due to membership change")
+			for i := 0; i < 5; i++ {
+				if i == leader-1 {
+					continue
+				}
+				if _, exists := committee[i+1]; !exists {
+					continue
+				}
+				Eventually(ordererRunners[i].Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Skipping verifying prev commits due to membership change channel=testchannel1"))
+			}
+		})
+
 		It("smartbft upgrade BFT-3 to BFT-4", func() {
 			wd, err := os.Getwd()
 			Expect(err).To(Not(HaveOccurred()))
