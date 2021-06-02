@@ -22,6 +22,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hyperledger/fabric-protos-go/orderer/etcdraft"
+
 	docker "github.com/fsouza/go-dockerclient"
 	"github.com/golang/protobuf/proto"
 	conftx "github.com/hyperledger/fabric-config/configtx"
@@ -78,6 +80,112 @@ var _ = Describe("EndToEnd Crash Fault Tolerance", func() {
 			network.Cleanup()
 		}
 		os.RemoveAll(testDir)
+	})
+
+	When("leader is restarted", func() {
+		It("follower retransmits transactions", func() {
+			network = nwo.New(nwo.MultiNodeEtcdRaft(), testDir, client, StartPort(), components)
+
+			o1, o2, o3 := network.Orderer("orderer1"), network.Orderer("orderer2"), network.Orderer("orderer3")
+
+			peer = network.Peer("Org1", "peer0")
+
+			network.GenerateConfigTree()
+			network.Bootstrap()
+
+			By("Running the orderer nodes")
+			o1Runner := network.OrdererRunner(o1)
+			o2Runner := network.OrdererRunner(o2)
+			o3Runner := network.OrdererRunner(o3)
+
+			o1Proc = ifrit.Invoke(o1Runner)
+			o2Proc = ifrit.Invoke(o2Runner)
+			o3Proc = ifrit.Invoke(o3Runner)
+
+			ordererProcs := []ifrit.Process{o1Proc, o2Proc, o3Proc}
+
+			Eventually(o1Proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
+			Eventually(o2Proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
+			Eventually(o3Proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
+
+			leaderIndex := findLeader([]*ginkgomon.Runner{o1Runner}) - 1
+			followerIndex := (leaderIndex + 1) % 3
+
+			By("Updating the heartbeat interval")
+			nwo.UpdateConsensusMetadata(network, peer, network.Orderers[leaderIndex], "systemchannel", func(originalMetadata []byte) []byte {
+				metadata := &etcdraft.ConfigMetadata{}
+				err := proto.Unmarshal(originalMetadata, metadata)
+				Expect(err).NotTo(HaveOccurred())
+
+				metadata.Options.ElectionTick = 20
+
+				// write metadata back
+				newMetadata, err := proto.Marshal(metadata)
+				Expect(err).NotTo(HaveOccurred())
+				return newMetadata
+			})
+
+			block := FetchBlock(network, o2, 1, network.SystemChannel.Name)
+			Expect(block).NotTo(BeNil())
+
+			var ordererRunners []*ginkgomon.Runner
+
+			By("Restarting nodes to take effect")
+			for i := range network.Orderers {
+				ordererProcs[i].Signal(syscall.SIGTERM)
+				Eventually(ordererProcs[i].Wait(), network.EventuallyTimeout).Should(Receive())
+
+				runner := network.OrdererRunner(network.Orderers[i])
+				ordererRunners = append(ordererRunners, runner)
+				proc := ifrit.Invoke(runner)
+				ordererProcs[i] = proc
+				Eventually(proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
+			}
+
+			o1Proc = ordererProcs[0]
+			o2Proc = ordererProcs[1]
+			o3Proc = ordererProcs[2]
+
+			By("Waiting for the leader to be found")
+			leaderIndex = findLeader(ordererRunners) - 1
+			followerIndex = (leaderIndex + 1) % 3
+
+			By("sending transaction to follower")
+			env := CreateBroadcastEnvelope(network, network.Orderers[followerIndex], network.SystemChannel.Name, []byte("foo"))
+			resp, err := ordererclient.Broadcast(network, network.Orderers[followerIndex], env)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(resp.Status).To(Equal(common.Status_SUCCESS))
+
+			block = FetchBlock(network, o1, 2, network.SystemChannel.Name)
+			Expect(block).NotTo(BeNil())
+
+			By("killing the leader")
+			ordererProcs[leaderIndex].Signal(syscall.SIGKILL)
+			Eventually(ordererProcs[leaderIndex].Wait(), network.EventuallyTimeout).Should(Receive(MatchError("exit status 137")))
+
+			By("restarting the leader")
+			leaderRunner := network.OrdererRunner(network.Orderers[leaderIndex])
+			leaderRunner.Command.Env = append(leaderRunner.Command.Env, "ORDERER_CONSENSUS_TICKINTERVALOVERRIDE=50ms")
+			leaderProc := ifrit.Invoke(leaderRunner)
+			Eventually(leaderProc.Ready(), network.EventuallyTimeout).Should(BeClosed())
+
+			// Wait some time for the connection to heal
+			time.Sleep(time.Second * 15)
+
+			By("broadcasting envelope to the follower")
+			//Un-mapping transaction stream to 2 because encountered a stale stream
+			resp, err = ordererclient.Broadcast(network, network.Orderers[followerIndex], env)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(resp.Status).To(Equal(common.Status_SUCCESS))
+
+			block = FetchBlock(network, o2, 3, network.SystemChannel.Name)
+			Expect(block).NotTo(BeNil())
+
+			leaderProc.Signal(syscall.SIGTERM)
+			Eventually(leaderProc.Wait(), network.EventuallyTimeout).Should(Receive())
+
+			Fail("bla")
+		})
 	})
 
 	When("orderer stops and restarts", func() {

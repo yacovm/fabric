@@ -248,7 +248,7 @@ func New(c *Config, rootDir string, dockerClient *docker.Client, startPort int, 
 	}
 
 	if dockerClient != nil {
-		assertImagesExist(dockerClient, RequiredImages...)
+		//assertImagesExist(dockerClient, RequiredImages...)
 	}
 
 	return network

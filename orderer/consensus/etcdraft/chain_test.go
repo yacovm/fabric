@@ -3615,7 +3615,7 @@ func (n *network) addChain(c *chain) {
 		return c.step(dest, msg)
 	}
 
-	c.rpc.SendSubmitStub = func(dest uint64, msg *orderer.SubmitRequest) error {
+	c.rpc.SendSubmitStub = func(dest uint64, msg *orderer.SubmitRequest, _ func(error)) error {
 		if !n.linked(c.id, dest) {
 			return errors.Errorf("connection refused")
 		}
