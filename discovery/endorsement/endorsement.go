@@ -432,6 +432,7 @@ func (ea *endorsementAnalyzer) satisfiesPrincipal(channel string, identitiesOfMe
 		if err == nil {
 			// TODO: log the principals in a human readable form
 			logger.Debug(member, "satisfies principal", principal)
+			fmt.Println(member, "satisfies principal", principal)
 			return true
 		}
 		logger.Debug(member, "doesn't satisfy principal", principal, ":", err)
