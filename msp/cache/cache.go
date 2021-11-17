@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	deserializeIdentityCacheSize = 100
-	validateIdentityCacheSize    = 100
-	satisfiesPrincipalCacheSize  = 100
+	deserializeIdentityCacheSize = 1025
+	validateIdentityCacheSize    = 1025
+	satisfiesPrincipalCacheSize  = 1025
 )
 
 var mspLogger = flogging.MustGetLogger("msp")

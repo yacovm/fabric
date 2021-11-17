@@ -8,10 +8,16 @@ package lifecycle
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/base64"
 	"io/ioutil"
+	rand2 "math/rand"
 	"os"
 	"path/filepath"
 	"syscall"
+
+	"github.com/hyperledger/fabric-protos-go/msp"
+	"github.com/hyperledger/fabric/protoutil"
 
 	docker "github.com/fsouza/go-dockerclient"
 	"github.com/golang/protobuf/proto"
@@ -403,4 +409,115 @@ var _ = Describe("Lifecycle", func() {
 		Expect(sess.Err).To(gbytes.Say(`\Qcommitted with status (VALID)\E`))
 		Expect(sess.Err).To(gbytes.Say(`Chaincode invoke successful. result: status:200`))
 	})
+
+	It("deploys and executes chaincode with an identity based policy", func() {
+		orderer := network.Orderer("orderer")
+		testPeers := network.PeersWithChannel("testchannel")
+		org1peer0 := network.Peer("Org1", "peer0")
+
+
+		endorsementPolicy := base64.StdEncoding.EncodeToString(protoutil.MarshalOrPanic(identityBasedEndorsementPolicy(network, org1peer0)))
+		chaincodePath := components.Build("github.com/hyperledger/fabric/integration/chaincode/simple/cmd")
+		chaincode := nwo.Chaincode{
+			SignaturePolicy: endorsementPolicy,
+			Name:                "My_1st-Chaincode",
+			Version:             "Version-0.0",
+			Path:                chaincodePath,
+			Lang:                "binary",
+			PackageFile:         filepath.Join(testDir, "simplecc.tar.gz"),
+			Ctor:                `{"Args":["init","a","100","b","200"]}`,
+			Sequence:            "1",
+			InitRequired:        true,
+			Label:               "my_simple_chaincode",
+		}
+
+		By("setting up the channel")
+		network.CreateAndJoinChannels(orderer)
+		network.UpdateChannelAnchors(orderer, "testchannel")
+		network.VerifyMembership(network.PeersWithChannel("testchannel"), "testchannel")
+		nwo.EnableCapabilities(network, "testchannel", "Application", "V2_0", orderer, network.Peer("Org1", "peer0"), network.Peer("Org2", "peer0"))
+
+		By("deploying the chaincode")
+		nwo.PackageChaincodeBinary(chaincode)
+		chaincode.SetPackageIDFromPackageFile()
+
+		nwo.InstallChaincode(network, chaincode, testPeers...)
+
+		nwo.ApproveChaincodeForMyOrg(network, "testchannel", orderer, chaincode, testPeers...)
+
+		nwo.CheckCommitReadinessUntilReady(network, "testchannel", chaincode, network.PeerOrgs(), testPeers...)
+		nwo.CommitChaincode(network, "testchannel", orderer, chaincode, testPeers[0], testPeers...)
+		nwo.InitChaincode(network, "testchannel", orderer, chaincode, testPeers...)
+
+		By("ensuring the chaincode can be invoked and queried")
+		endorsers := []*nwo.Peer{
+			network.Peer("Org1", "peer0"),
+		}
+		RunQueryInvokeQuery(network, orderer, "My_1st-Chaincode", 100, endorsers...)
+		RunQueryInvokeQuery(network, orderer, "My_1st-Chaincode", 90, endorsers...)
+		RunQueryInvokeQuery(network, orderer, "My_1st-Chaincode", 80, endorsers...)
+		RunQueryInvokeQuery(network, orderer, "My_1st-Chaincode", 70, endorsers...)
+
+
+		Fail("bla")
+	})
 })
+
+func identityBasedEndorsementPolicy(network *nwo.Network, somePeer *nwo.Peer) *common.SignaturePolicyEnvelope {
+	someMSPID := network.Organization(somePeer.Organization).MSPID
+	rule := &common.SignaturePolicy{
+		Type: &common.SignaturePolicy_NOutOf_{
+			NOutOf: &common.SignaturePolicy_NOutOf{
+				N: 1,
+				Rules: []*common.SignaturePolicy{},
+			},
+		},
+	}
+
+	var identityBasedPrincipals [][]byte
+
+	// Grab all peer certificates and add them into identityBasedPrincipals
+	for _, p := range network.PeersWithChannel("testchannel") {
+		peer := network.DiscoveredPeer(p)
+		identityBasedPrincipals = append(identityBasedPrincipals, protoutil.MarshalOrPanic(&msp.SerializedIdentity{
+			Mspid: peer.MSPID,
+			IdBytes: []byte(peer.Identity)}))
+	}
+
+	// Expand the principals with random identities that no one can satisfy and add them into identityBasedPrincipals
+	for i := 0; i < 100; i++ {
+		buff := make([]byte, 700)
+		_, err := rand.Read(buff)
+		Expect(err).NotTo(HaveOccurred())
+
+		identityBasedPrincipals = append(identityBasedPrincipals, protoutil.MarshalOrPanic(&msp.SerializedIdentity{
+			Mspid: someMSPID,
+			IdBytes: buff}))
+	}
+
+	// Permute the order between the principals
+	var permutedIdentityBasedPrincipals [][]byte
+	for _, index := range rand2.Perm(len(identityBasedPrincipals)) {
+		permutedIdentityBasedPrincipals = append(permutedIdentityBasedPrincipals, identityBasedPrincipals[index])
+	}
+
+	// Build the principals used for our policy
+	var principals []*msp.MSPPrincipal
+	for i, principal := range permutedIdentityBasedPrincipals {
+		principals = append(principals, &msp.MSPPrincipal{
+			Principal: principal,
+			PrincipalClassification: msp.MSPPrincipal_IDENTITY,
+		})
+
+		rule.GetNOutOf().Rules = append(rule.GetNOutOf().Rules, &common.SignaturePolicy{
+			Type: &common.SignaturePolicy_SignedBy{
+				SignedBy: int32(i),
+			},
+		})
+	}
+
+	return &common.SignaturePolicyEnvelope{
+		Rule: rule,
+		Identities: principals,
+	}
+}

@@ -8,8 +8,10 @@ package chaincode
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/hyperledger/fabric-protos-go/common"
 	"io"
 
 	"github.com/golang/protobuf/proto"
@@ -83,9 +85,20 @@ func createPolicyBytes(signaturePolicy, channelConfigPolicy string) ([]byte, err
 
 	var applicationPolicy *pb.ApplicationPolicy
 	if signaturePolicy != "" {
-		signaturePolicyEnvelope, err := policydsl.FromString(signaturePolicy)
+		var signaturePolicyEnvelope *common.SignaturePolicyEnvelope
+		rawPolicy, err := base64.StdEncoding.DecodeString(signaturePolicy)
 		if err != nil {
-			return nil, errors.Errorf("invalid signature policy: %s", signaturePolicy)
+			// This is not a valid base64 policy, so it is probably the standard human readable policy format
+			signaturePolicyEnvelope, err = policydsl.FromString(signaturePolicy)
+			if err != nil {
+				return nil, errors.Errorf("invalid signature policy: %s", signaturePolicy)
+			}
+		} else {
+			// This was an encoded base64 policy, in raw form.
+			signaturePolicyEnvelope = &common.SignaturePolicyEnvelope{}
+			if err := proto.Unmarshal(rawPolicy, signaturePolicyEnvelope); err != nil {
+				return nil, errors.Errorf("cannot parse raw policy: %v", err)
+			}
 		}
 
 		applicationPolicy = &pb.ApplicationPolicy{
