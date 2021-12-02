@@ -248,3 +248,36 @@ func (l *Logging) Logger(name string) *FabricLogger {
 	zl := l.ZapLogger(name)
 	return NewFabricLogger(zl)
 }
+
+
+func ConfigureLoggingOutputs(file string, stderr bool) ([]io.Writer, error) {
+	var outputs []io.Writer
+	if file != "" {
+		f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return nil, fmt.Errorf("failed opening file %s: %v", file, err)
+		}
+		outputs = append(outputs, f)
+	}
+
+	if stderr || file == "" {
+		outputs = append(outputs, os.Stderr)
+	}
+
+	return outputs, nil
+}
+
+type Multiplexer struct {
+	Outputs []io.Writer
+}
+
+func (m Multiplexer) Write(p []byte) (n int, err error) {
+	for _, out := range m.Outputs {
+		n, err := out.Write(p)
+		if err != nil {
+			return n, err
+		}
+	}
+
+	return len(p), nil
+}

@@ -84,7 +84,8 @@ func Main() {
 		logger.Error("failed to parse config: ", err)
 		os.Exit(1)
 	}
-	initializeLogging()
+	logger.Infof("Logging output destination file: %s, standard error: %v", conf.General.Logging.File, conf.General.Logging.STDERR)
+	initializeLogging(conf.General.Logging.File, conf.General.Logging.STDERR)
 
 	prettyPrintStruct(conf)
 
@@ -443,12 +444,17 @@ func selectClusterBootBlock(bootstrapBlock, sysChanLastConfig *cb.Block) *cb.Blo
 	return bootstrapBlock
 }
 
-func initializeLogging() {
+func initializeLogging(file string, stderr bool) {
+	outputs, err := flogging.ConfigureLoggingOutputs(file, stderr)
+	if err != nil {
+		logger.Panicf("Failed initializing logging: %v", err)
+	}
+
 	loggingSpec := os.Getenv("FABRIC_LOGGING_SPEC")
 	loggingFormat := os.Getenv("FABRIC_LOGGING_FORMAT")
 	flogging.Init(flogging.Config{
 		Format:  loggingFormat,
-		Writer:  os.Stderr,
+		Writer:  &flogging.Multiplexer{Outputs: outputs},
 		LogSpec: loggingSpec,
 	})
 }

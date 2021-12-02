@@ -18,6 +18,13 @@ General:
     # Listen port: The port on which to bind to listen.
     ListenPort: 7050
 
+    # Logging: Controls the places we log output to.
+    # Defaults to standard error (stderr) when both File and Stderr are unspecified.
+    # When Stderr and File are both specified, logs to both file and stderr.
+    #Logging:
+    #    File: ""
+    #    STDERR: true
+
     # TLS: TLS settings for the GRPC server.
     TLS:
         # Require server-side TLS

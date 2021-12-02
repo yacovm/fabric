@@ -37,6 +37,7 @@ type TopLevel struct {
 type General struct {
 	ListenAddress     string
 	ListenPort        uint16
+	Logging           Logging
 	TLS               TLS
 	Cluster           Cluster
 	Keepalive         Keepalive
@@ -52,6 +53,11 @@ type General struct {
 	Authentication    Authentication
 	MaxRecvMsgSize    int32
 	MaxSendMsgSize    int32
+}
+
+type Logging struct {
+	File   string
+	STDERR bool
 }
 
 type Cluster struct {

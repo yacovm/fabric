@@ -7,7 +7,9 @@ SPDX-License-Identifier: Apache-2.0
 package server_test
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -52,18 +54,25 @@ func TestSpawnEtcdRaft(t *testing.T) {
 	cryptoPath := generateCryptoMaterials(gt, cryptogen, tempSharedDir)
 
 	t.Run("Bad", func(t *testing.T) {
-		t.Run("Invalid bootstrap block", func(t *testing.T) {
-			testEtcdRaftOSNFailureInvalidBootstrapBlock(NewGomegaWithT(t), tempSharedDir, orderer, configtxgen, cryptoPath)
-		})
 
-		t.Run("TLS disabled single listener", func(t *testing.T) {
-			testEtcdRaftOSNNoTLSSingleListener(NewGomegaWithT(t), tempSharedDir, orderer, configtxgen, cryptoPath)
-		})
+		/*		t.Run("Invalid bootstrap block", func(t *testing.T) {
+					testEtcdRaftOSNFailureInvalidBootstrapBlock(NewGomegaWithT(t), tempSharedDir, orderer, configtxgen, cryptoPath)
+				})
+
+				t.Run("TLS disabled single listener", func(t *testing.T) {
+					testEtcdRaftOSNNoTLSSingleListener(NewGomegaWithT(t), tempSharedDir, orderer, configtxgen, cryptoPath)
+				})*/
 	})
 
 	t.Run("Good", func(t *testing.T) {
 		// tests in this suite actually launch process with success, hence we need to avoid
 		// conflicts in listening port, opening files.
+		t.Run("Logging redirection to a file", func(t *testing.T) {
+			testEtcdRaftLoggingRedirection(NewGomegaWithT(t), tempSharedDir, orderer, configtxgen, cryptoPath)
+		})
+
+		return
+
 		t.Run("TLS disabled dual listener", func(t *testing.T) {
 			testEtcdRaftOSNNoTLSDualListener(NewGomegaWithT(t), tempSharedDir, orderer, configtxgen, cryptoPath)
 		})
@@ -123,6 +132,74 @@ func generateCryptoMaterials(gt *GomegaWithT, cryptogen, path string) string {
 	gt.Eventually(cryptogenProcess, time.Minute).Should(gexec.Exit(0))
 
 	return cryptoPath
+}
+
+func testEtcdRaftLoggingRedirection(gt *GomegaWithT, configPath, orderer string, configtxgen, cryptoPath string) {
+	tempDir, err := ioutil.TempDir("", "etcdraft-test")
+	gt.Expect(err).NotTo(HaveOccurred())
+	defer os.RemoveAll(tempDir)
+
+	genesisBlockPath := generateBootstrapBlock(gt, configPath, configtxgen, "system", "SampleEtcdRaftSystemChannel")
+
+	// Create temporary folder
+	dir, err := ioutil.TempDir("", "logging_test")
+	gt.Expect(err).NotTo(HaveOccurred())
+
+	defer os.RemoveAll(dir)
+
+	logFile := filepath.Join(dir, "orderer.log")
+	//logFileEnvVar := fmt.Sprintf("ORDERER_GENERAL_LOGGING_FILE=%s", logFile)
+	logStderrEnvVar := "ORDERER_GENERAL_LOGGING_STDERR=true"
+
+	// Launch the OSN
+	ordererProcess := launchOrderer(gt, orderer, tempDir, configPath, genesisBlockPath, cryptoPath, "file", "false", "info", logStderrEnvVar)
+	defer func() { gt.Eventually(ordererProcess.Kill(), time.Minute).Should(gexec.Exit()) }()
+
+	var f *os.File
+
+	deadline := time.Now().Add(time.Second * 10)
+
+	for time.Now().Before(deadline) {
+		f, err = os.Open(logFile)
+		if err == nil {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+
+	fmt.Println(string(ordererProcess.Err.Contents()))
+	gt.Expect(err).NotTo(HaveOccurred())
+
+	stop := make(chan struct{})
+	defer close(stop)
+	buff := gbytes.NewBuffer()
+	redirectFile(f, buff, stop)
+
+	gt.Eventually(buff.Contents, time.Second * 15).Should(ContainSubstring("Beginning to serve requests"))
+	gt.Eventually(buff.Contents, time.Second * 15).Should(ContainSubstring("becomeLeader"))
+	gt.Eventually(ordererProcess.Err, time.Second * 15).Should(gbytes.Say("Beginning to serve requests"))
+	gt.Eventually(ordererProcess.Err, time.Second * 15).Should(gbytes.Say("becomeLeader"))
+}
+
+func redirectFile(f *os.File, out io.Writer, stop <- chan struct{}) {
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				break
+			}
+
+			f.SetDeadline(time.Now().Add(time.Second))
+			tmpBuff := make([]byte, 1024*1024)
+			n, err := f.Read(tmpBuff)
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				continue
+			}
+			out.Write(tmpBuff[:n])
+		}
+	}()
 }
 
 func testEtcdRaftOSNRestart(gt *GomegaWithT, tempDir, configtxgen, orderer, cryptoPath string) {
@@ -293,7 +370,7 @@ func testEtcdRaftOSNNoTLSDualListener(gt *GomegaWithT, configPath, orderer strin
 	gt.Eventually(ordererProcess.Err, time.Minute).Should(gbytes.Say("becomeLeader"))
 }
 
-func launchOrderer(gt *GomegaWithT, orderer, tempDir, configPath, genesisBlockPath, cryptoPath, bootstrapMethod, channelParticipationEnabled, logSpec string) *gexec.Session {
+func launchOrderer(gt *GomegaWithT, orderer, tempDir, configPath, genesisBlockPath, cryptoPath, bootstrapMethod, channelParticipationEnabled, logSpec string, env ...string) *gexec.Session {
 	ordererTLSPath := filepath.Join(cryptoPath, "ordererOrganizations", "example.com", "orderers", "127.0.0.1.example.com", "tls")
 	// Launch the orderer process
 	cmd := exec.Command(orderer)
@@ -322,6 +399,7 @@ func launchOrderer(gt *GomegaWithT, orderer, tempDir, configPath, genesisBlockPa
 		"FABRIC_CFG_PATH=" + configPath,
 		"FABRIC_LOGGING_SPEC=" + logSpec,
 	}
+	cmd.Env = append(cmd.Env, env...)
 	sess, err := gexec.Start(cmd, nil, nil)
 	gt.Expect(err).NotTo(HaveOccurred())
 	return sess

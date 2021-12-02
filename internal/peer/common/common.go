@@ -42,7 +42,6 @@ const (
 
 var (
 	mainLogger = flogging.MustGetLogger("main")
-	logOutput  = os.Stderr
 )
 
 var (
@@ -340,9 +339,14 @@ func InitCmd(cmd *cobra.Command, args []string) {
 	loggingSpec := os.Getenv("FABRIC_LOGGING_SPEC")
 	loggingFormat := os.Getenv("FABRIC_LOGGING_FORMAT")
 
+	outputs, err := flogging.ConfigureLoggingOutputs(viper.GetString("logging.file"), viper.GetBool("logging.stderr"))
+	if err != nil {
+		logger.Panicf("Failed initializing logging: %v", err)
+	}
+
 	flogging.Init(flogging.Config{
 		Format:  loggingFormat,
-		Writer:  logOutput,
+		Writer:  &flogging.Multiplexer{Outputs: outputs},
 		LogSpec: loggingSpec,
 	})
 

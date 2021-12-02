@@ -97,7 +97,7 @@ func copyYamlFiles(src, dst string) {
 func TestInitializeLogging(t *testing.T) {
 	origEnvValue := os.Getenv("FABRIC_LOGGING_SPEC")
 	os.Setenv("FABRIC_LOGGING_SPEC", "foo=debug")
-	initializeLogging()
+	initializeLogging("", false)
 	require.Equal(t, "debug", flogging.LoggerLevel("foo"))
 	os.Setenv("FABRIC_LOGGING_SPEC", origEnvValue)
 }

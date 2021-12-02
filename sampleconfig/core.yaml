@@ -17,6 +17,14 @@ peer:
     # The networkId allows for logical separation of networks and is used when
     # naming docker resources.
     networkId: dev
+    # Settings for the Peer's logging output.
+    # Defaults to standard error (stderr) when both file and stderr are unspecified.
+    # When stderr and file are both specified, logs to both file and stderr.
+    logging:
+        # Whether to log to standard error or not.
+        stderr: true
+        # Which file to redirect logging output to
+    #   file:
 
     # The Address at local network interface this Peer will listen on.
     # By default, it will listen on all network interfaces
