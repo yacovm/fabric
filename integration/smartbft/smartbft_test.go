@@ -782,7 +782,7 @@ var _ = Describe("EndToEnd Smart BFT configuration test", func() {
 			time.Sleep(time.Second * 20)
 
 			By("Waiting for follower to synchronize itself")
-			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("Synchronized to view 1 and sequence 5 with verification sequence 1 channel=testchannel1"))
+			Eventually(runner.Err(), network.EventuallyTimeout, time.Second).Should(gbytes.Say("up to view 1 and sequence 5 with verification sequence 1 channel=testchannel1"))
 
 			By("Waiting for all nodes to have the latest block sequence")
 			assertBlockReception(map[string]int{"testchannel1": 5}, network.Orderers, peer, network)
