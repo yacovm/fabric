@@ -56,5 +56,6 @@ func main() {
 		fmt.Println(base64.StdEncoding.EncodeToString(pk))
 		return nil
 	})
+
 	cli.Run(os.Args[1:])
 }

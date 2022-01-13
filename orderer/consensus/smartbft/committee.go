@@ -209,7 +209,7 @@ func (cr *CommitteeRetriever) currentCommittee() (committee.Nodes, error) {
 		return nil, errors.Wrap(err, "failed extracting committee metadata from latest block")
 	}
 
-	config, err := consensusMDFromBlock(lastConfigBlock)
+	config, err := ConsensusMDFromBlock(lastConfigBlock)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed extracting consensus config from latest config block")
 	}
@@ -283,7 +283,7 @@ func (cr *CommitteeRetriever) currentCommittee() (committee.Nodes, error) {
 
 	cr.Logger.Debugf("Detected %d ReconShares in block %d", len(reconShares), reconstructionSharesBlock.Header.Number)
 
-	consensusMD, err := consensusMDFromBlock(lastConfigBlock)
+	consensusMD, err := ConsensusMDFromBlock(lastConfigBlock)
 	if err != nil {
 		return nil, err
 	}

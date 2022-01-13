@@ -106,3 +106,35 @@ func (d Detect) Args() []string {
 func (d Detect) SessionName() string {
 	return "detect-selection-pk"
 }
+
+type Bench struct {
+	TLSCAPath string
+	UserCert  string
+	UserKey   string
+	TLSKey    string
+	TLSCert   string
+	MSPID     string
+	Endpoint  string
+	Channel   string
+}
+
+func (b Bench) Args() []string {
+	return []string{
+		"--peerTLSCA", b.TLSCAPath,
+		"--userCert", b.UserCert,
+		"--userKey", b.UserKey,
+		"--MSP", b.MSPID,
+		"--tlsCert", b.TLSCert,
+		"--tlsKey", b.TLSKey,
+		"committee",
+		"--endpoint", b.Endpoint,
+		"--channel", b.Channel,
+		"--TPS", "1",
+		"--workerNum", "10",
+		"--verbose",
+	}
+}
+
+func (b Bench) SessionName() string {
+	return "benchmark"
+}

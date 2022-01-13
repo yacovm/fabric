@@ -13,6 +13,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -20,6 +21,8 @@ import (
 	"syscall"
 	"text/template"
 	"time"
+
+	"github.com/onsi/gomega/gbytes"
 
 	docker "github.com/fsouza/go-dockerclient"
 	"github.com/hyperledger/fabric/integration/helpers"
@@ -482,6 +485,23 @@ func (n *Network) OrdererSelectionPK(o *Orderer) string {
 
 	contents := sess.Buffer().Contents()
 	return string(contents)
+}
+
+func (n *Network) Benchmark(o *Orderer, channel string) {
+	sess, err := n.Bench(commands.Bench{
+		TLSCAPath: path.Join(n.OrdererLocalTLSDir(o), "ca.crt"),
+		TLSKey:    path.Join(n.OrdererLocalTLSDir(o), "server.key"),
+		TLSCert:   path.Join(n.OrdererLocalTLSDir(o), "server.crt"),
+		UserKey:   n.OrdererSignKey(o),
+		UserCert:  n.OrdererCert(o),
+		Endpoint:  n.OrdererAddress(o, ListenPort),
+		Channel:   channel,
+		MSPID:     n.OrdererMSPID(o),
+	})
+	Expect(err).NotTo(HaveOccurred())
+	Eventually(sess.Out, time.Minute).Should(gbytes.Say("Block 44 changes committee"))
+	sess.Terminate()
+	sess.Kill()
 }
 
 // peerLocalCryptoDir returns the path to the local crypto directory for the peer.
@@ -959,6 +979,12 @@ func (n *Network) Discover(command Command) (*gexec.Session, error) {
 // Detect starts a gexec.Session for the provided committee selection detect pk command.
 func (n *Network) Detect(command Command) (*gexec.Session, error) {
 	cmd := NewCommand(n.Components.Detect(), command)
+	return n.StartSession(cmd, command.SessionName())
+}
+
+// Bench starts a gexec.Session for the provided benchmark command.
+func (n *Network) Bench(command Command) (*gexec.Session, error) {
+	cmd := NewCommand(n.Components.Bench(), command)
 	return n.StartSession(cmd, command.SessionName())
 }
 

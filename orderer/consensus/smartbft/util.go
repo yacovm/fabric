@@ -652,7 +652,7 @@ func parseCommitteeConfig(nodeConf *nodeConfig, committeeConfig *smartbft.Commit
 	}
 }
 
-func consensusMDFromBlock(block *common.Block) (*smartbft.ConfigMetadata, error) {
+func ConsensusMDFromBlock(block *common.Block) (*smartbft.ConfigMetadata, error) {
 	if block == nil || block.Data == nil || len(block.Data.Data) == 0 {
 		return nil, errors.New("empty block")
 	}
@@ -686,7 +686,7 @@ func consensusMDFromBlock(block *common.Block) (*smartbft.ConfigMetadata, error)
 }
 
 func configBlockToBFTConfig(selfID uint64, block *common.Block) (*smartbft.CommitteeConfig, types.Configuration, error) {
-	consensusMD, err := consensusMDFromBlock(block)
+	consensusMD, err := ConsensusMDFromBlock(block)
 	if err != nil {
 		return nil, types.Configuration{}, err
 	}
@@ -851,7 +851,7 @@ func nextCommitteeSize(logger *flogging.FabricLogger, rtc RuntimeConfig) int {
 		return 0
 	}
 
-	consensusMD, err := consensusMDFromBlock(rtc.LastConfigBlock)
+	consensusMD, err := ConsensusMDFromBlock(rtc.LastConfigBlock)
 	if err != nil {
 		logger.Panicf("failed extracting consensus metadata from config block %d", rtc.LastConfigBlock.Header.Number)
 		return 0
