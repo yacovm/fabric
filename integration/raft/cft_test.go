@@ -109,13 +109,16 @@ var _ = Describe("EndToEnd Crash Fault Tolerance", func() {
 			findLeader([]*ginkgomon.Runner{o1Runner})
 
 			By("performing operation with orderer1")
-			env := CreateBroadcastEnvelope(network, o1, network.SystemChannel.Name, []byte("foo"))
-			resp, err := ordererclient.Broadcast(network, o1, env)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(resp.Status).To(Equal(common.Status_SUCCESS))
+			for i := 1; i < 100; i++ {
+				env := CreateBroadcastEnvelope(network, o1, network.SystemChannel.Name, make([]byte, 1024 * 10))
+				resp, err := ordererclient.Broadcast(network, o1, env)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(resp.Status).To(Equal(common.Status_SUCCESS))
 
-			block := FetchBlock(network, o1, 1, network.SystemChannel.Name)
-			Expect(block).NotTo(BeNil())
+				block := FetchBlock(network, o1, uint64(i), network.SystemChannel.Name)
+				Expect(block).NotTo(BeNil())
+			}
+
 
 			By("killing orderer1")
 			o1Proc.Signal(syscall.SIGKILL)
@@ -124,29 +127,13 @@ var _ = Describe("EndToEnd Crash Fault Tolerance", func() {
 			By("observing active nodes to shrink")
 			Eventually(o2Runner.Err(), network.EventuallyTimeout).Should(gbytes.Say("Current active nodes in cluster are: \\[2 3\\]"))
 
-			By("broadcasting envelope to running orderer")
-			resp, err = ordererclient.Broadcast(network, o2, env)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(resp.Status).To(Equal(common.Status_SUCCESS))
-
-			block = FetchBlock(network, o2, 2, network.SystemChannel.Name)
-			Expect(block).NotTo(BeNil())
-
 			By("restarting orderer1")
 			o1Runner = network.OrdererRunner(o1)
 			o1Proc = ifrit.Invoke(o1Runner)
 			Eventually(o1Proc.Ready(), network.EventuallyTimeout).Should(BeClosed())
 			findLeader([]*ginkgomon.Runner{o1Runner})
 
-			By("broadcasting envelope to restarted orderer")
-			resp, err = ordererclient.Broadcast(network, o1, env)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(resp.Status).To(Equal(common.Status_SUCCESS))
-
-			blko1 := FetchBlock(network, o1, 3, network.SystemChannel.Name)
-			blko2 := FetchBlock(network, o2, 3, network.SystemChannel.Name)
-
-			Expect(blko1.Header.DataHash).To(Equal(blko2.Header.DataHash))
+			Fail("bla")
 		})
 	})
 

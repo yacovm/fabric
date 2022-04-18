@@ -9,6 +9,7 @@ package etcdraft
 import (
 	"context"
 	"crypto/sha256"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -48,6 +49,11 @@ type node struct {
 	subscriberC chan chan uint64
 
 	raft.Node
+}
+
+func (n *node) ApplyConfChange(cc raftpb.ConfChange) *raftpb.ConfState {
+	debug.PrintStack()
+	return n.Node.ApplyConfChange(cc)
 }
 
 func (n *node) start(fresh, join bool) {
