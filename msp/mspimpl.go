@@ -263,6 +263,10 @@ func (msp *bccspmsp) Setup(conf1 *m.MSPConfig) error {
 	msp.name = conf.Name
 	mspLogger.Debugf("Setting up MSP instance %s", msp.name)
 
+	if err := msp.sanitizeCAs(conf); err != nil {
+		return err
+	}
+
 	// setup
 	return msp.internalSetupFunc(conf)
 }

@@ -11,6 +11,8 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"time"
 
@@ -20,6 +22,139 @@ import (
 	"github.com/hyperledger/fabric/bccsp/utils"
 	errors "github.com/pkg/errors"
 )
+
+func (msp *bccspmsp) sanitizeCAs(conf *m.FabricMSPConfig) error {
+	var allRootAndIntermediateCerts [][]byte
+	allRootAndIntermediateCerts = append(allRootAndIntermediateCerts, conf.RootCerts...)
+	allRootAndIntermediateCerts = append(allRootAndIntermediateCerts, conf.IntermediateCerts...)
+
+	var newRootCerts [][]byte
+	var newIntermediateCerts [][]byte
+
+	for _, rawCert := range conf.RootCerts {
+		newRaw, err := msp.sanitizeRawCACert(rawCert, allRootAndIntermediateCerts)
+		if err != nil {
+			return err
+		}
+
+		newRootCerts = append(newRootCerts, newRaw)
+	}
+
+	for _, rawCert := range conf.IntermediateCerts {
+		newRaw, err := msp.sanitizeRawCACert(rawCert, allRootAndIntermediateCerts)
+		if err != nil {
+			return err
+		}
+
+		newIntermediateCerts = append(newIntermediateCerts, newRaw)
+	}
+
+	conf.RootCerts = newRootCerts
+	conf.IntermediateCerts = newIntermediateCerts
+
+	if conf.FabricNodeOus == nil || ! conf.FabricNodeOus.Enable {
+		return nil
+	}
+
+	var err error
+	if conf.FabricNodeOus.ClientOuIdentifier != nil && len(conf.FabricNodeOus.ClientOuIdentifier.Certificate) > 0 {
+		conf.FabricNodeOus.ClientOuIdentifier.Certificate, err = msp.sanitizeRawCACert(conf.FabricNodeOus.ClientOuIdentifier.Certificate, allRootAndIntermediateCerts)
+		if err != nil {
+			return err
+		}
+	}
+
+	if conf.FabricNodeOus.AdminOuIdentifier != nil && len(conf.FabricNodeOus.AdminOuIdentifier.Certificate) > 0{
+		conf.FabricNodeOus.AdminOuIdentifier.Certificate, err = msp.sanitizeRawCACert(conf.FabricNodeOus.AdminOuIdentifier.Certificate, allRootAndIntermediateCerts)
+		if err != nil {
+			return err
+		}
+	}
+
+	if conf.FabricNodeOus.PeerOuIdentifier != nil && len(conf.FabricNodeOus.PeerOuIdentifier.Certificate) > 0{
+		conf.FabricNodeOus.PeerOuIdentifier.Certificate, err = msp.sanitizeRawCACert(conf.FabricNodeOus.PeerOuIdentifier.Certificate, allRootAndIntermediateCerts)
+		if err != nil {
+			return err
+		}
+	}
+
+	if conf.FabricNodeOus.OrdererOuIdentifier != nil && len(conf.FabricNodeOus.OrdererOuIdentifier.Certificate) > 0{
+		conf.FabricNodeOus.OrdererOuIdentifier.Certificate, err = msp.sanitizeRawCACert(conf.FabricNodeOus.OrdererOuIdentifier.Certificate, allRootAndIntermediateCerts)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (msp *bccspmsp) sanitizeRawCACert(rawCert []byte, allRootAndIntermediateCerts [][]byte) ([]byte, error) {
+	cert, err := msp.getCertFromPem(rawCert)
+	if err != nil {
+		return nil, err
+	}
+
+	parentCert, err := msp.locateParentCert(cert, allRootAndIntermediateCerts)
+	if err != nil {
+		return nil, err
+	}
+
+	cert, err = sanitizeECDSASignedCert(cert, parentCert)
+	if err != nil {
+		return nil, err
+	}
+
+	var newCert certificate
+	newCert, err = certFromX509Cert(cert)
+	if err != nil {
+		return nil, err
+	}
+
+	newCert.Raw = nil
+	newRaw, err := asn1.Marshal(newCert)
+	if err != nil {
+		return nil, err
+	}
+
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: newRaw}), nil
+}
+
+func (msp *bccspmsp) locateParentCert(cert *x509.Certificate, candidates [][]byte) (*x509.Certificate, error) {
+	var res *x509.Certificate
+
+	// Self signed cert
+	if (bytes.Equal(cert.RawSubject, cert.RawIssuer) || bytes.Equal(cert.SubjectKeyId, cert.AuthorityKeyId)) && cert.IsCA && cert.CheckSignatureFrom(cert) == nil {
+		return cert, nil
+	}
+
+	publicKeys := make(map[string]struct{})
+
+	for _, candidate := range candidates {
+		candidateCert, err := msp.getCertFromPem(candidate)
+		if err != nil {
+			return nil, err
+		}
+		if candidateCert.IsCA && (bytes.Equal(candidateCert.SubjectKeyId, cert.AuthorityKeyId) || bytes.Equal(candidateCert.RawSubject, cert.RawIssuer)) &&
+			cert.CheckSignatureFrom(candidateCert) == nil {
+			pk, err := x509.MarshalPKIXPublicKey(candidateCert.PublicKey)
+			if err != nil {
+				return nil, err
+			}
+			publicKeys[hex.EncodeToString(pk)] = struct{}{}
+			res = candidateCert
+		}
+	}
+
+	if len(publicKeys) == 0 {
+		return nil, fmt.Errorf("failed to find issuer of %s", cert.Subject)
+	}
+
+	if len(publicKeys) > 1 {
+		return nil, fmt.Errorf("found two or more issuers of %s", cert.Subject)
+	}
+
+	return res, nil
+}
 
 func (msp *bccspmsp) getCertifiersIdentifier(certRaw []byte) ([]byte, error) {
 	// 1. check that certificate is registered in msp.rootCerts or msp.intermediateCerts
