@@ -243,7 +243,6 @@ func configFromMetadataOptions(selfID uint64, options *smartbft.Options) (types.
 }
 
 type request struct {
-	sigHdr   *cb.SignatureHeader
 	envelope *cb.Envelope
 	chHdr    *cb.ChannelHeader
 }
@@ -253,38 +252,14 @@ type RequestInspector struct {
 	ValidateIdentityStructure func(identity *msp.SerializedIdentity) error
 }
 
-func (ri *RequestInspector) requestIDFromSigHeader(sigHdr *cb.SignatureHeader) (types.RequestInfo, error) {
-	sID := &msp.SerializedIdentity{}
-	if err := proto.Unmarshal(sigHdr.Creator, sID); err != nil {
-		return types.RequestInfo{}, errors.Wrap(err, "identity isn't an MSP Identity")
-	}
-
-	if err := ri.ValidateIdentityStructure(sID); err != nil {
-		return types.RequestInfo{}, err
-	}
-
-	var preimage []byte
-	preimage = append(preimage, sigHdr.Nonce...)
-	preimage = append(preimage, sigHdr.Creator...)
-	txID := sha256.Sum256(preimage)
-	clientID := sha256.Sum256(sigHdr.Creator)
-	return types.RequestInfo{
-		ID:       hex.EncodeToString(txID[:]),
-		ClientID: hex.EncodeToString(clientID[:]),
-	}, nil
-}
-
 // RequestID unwraps the request info from the raw request
 func (ri *RequestInspector) RequestID(rawReq []byte) types.RequestInfo {
-	req, err := ri.unwrapReq(rawReq)
-	if err != nil {
-		return types.RequestInfo{}
+	h := sha256.New()
+	h.Write(rawReq)
+	digest := h.Sum(nil)
+	return types.RequestInfo{
+		ID: hex.EncodeToString(digest),
 	}
-	reqInfo, err := ri.requestIDFromSigHeader(req.sigHdr)
-	if err != nil {
-		return types.RequestInfo{}
-	}
-	return reqInfo
 }
 
 func (ri *RequestInspector) unwrapReq(req []byte) (*request, error) {
@@ -301,11 +276,6 @@ func (ri *RequestInspector) unwrapReq(req []byte) (*request, error) {
 		return nil, errors.Errorf("no header in payload")
 	}
 
-	sigHdr := &cb.SignatureHeader{}
-	if err := proto.Unmarshal(payload.Header.SignatureHeader, sigHdr); err != nil {
-		return nil, err
-	}
-
 	if len(payload.Header.ChannelHeader) == 0 {
 		return nil, errors.New("no channel header in payload")
 	}
@@ -317,7 +287,6 @@ func (ri *RequestInspector) unwrapReq(req []byte) (*request, error) {
 
 	return &request{
 		chHdr:    chdr,
-		sigHdr:   sigHdr,
 		envelope: envelope,
 	}, nil
 }

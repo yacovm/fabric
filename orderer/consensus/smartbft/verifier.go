@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/hex"
-	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -158,41 +157,7 @@ func (v *Verifier) VerifyRequest(rawRequest []byte) (types.RequestInfo, error) {
 }
 
 func (v *Verifier) verifyRequest(rawRequest []byte, noConfigAllowed bool) (types.RequestInfo, error) {
-	req, err := v.ReqInspector.unwrapReq(rawRequest)
-	if err != nil {
-		return types.RequestInfo{}, err
-	}
-
-	err = v.AccessController.Evaluate([]*protoutil.SignedData{
-		{Identity: req.sigHdr.Creator, Data: req.envelope.Payload, Signature: req.envelope.Signature},
-	})
-
-	if err != nil {
-		return types.RequestInfo{}, errors.Wrap(err, "access denied")
-	}
-
-	if noConfigAllowed && req.chHdr.Type != int32(cb.HeaderType_ENDORSER_TRANSACTION) {
-		return types.RequestInfo{}, errors.Errorf("only endorser transactions can be sent with other transactions")
-	}
-
-	switch req.chHdr.Type {
-	case int32(cb.HeaderType_CONFIG):
-	case int32(cb.HeaderType_ORDERER_TRANSACTION):
-		return types.RequestInfo{}, fmt.Errorf("orderer transactions are not supported in v3")
-	case int32(cb.HeaderType_ENDORSER_TRANSACTION):
-	default:
-		return types.RequestInfo{}, errors.Errorf("transaction of type %s is not allowed to be included in blocks", cb.HeaderType_name[req.chHdr.Type])
-	}
-
-	if req.chHdr.Type == int32(cb.HeaderType_CONFIG) {
-		err := v.ConfigValidator.ValidateConfig(req.envelope)
-		if err != nil {
-			v.Logger.Errorf("Error verifying config update: %v", err)
-			return types.RequestInfo{}, err
-		}
-	}
-
-	return v.ReqInspector.requestIDFromSigHeader(req.sigHdr)
+	return v.ReqInspector.RequestID(rawRequest), nil
 }
 
 // VerifyConsenterSig verifies consenter signature
