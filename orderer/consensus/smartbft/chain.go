@@ -8,7 +8,9 @@ package smartbft
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"sync"
@@ -67,6 +69,7 @@ type signerSerializer interface {
 // BFTChain implements Chain interface to wire with
 // BFT smart library
 type BFTChain struct {
+	certStore        *CertStore
 	RuntimeConfig    *atomic.Value
 	Channel          string
 	Config           types.Configuration
@@ -116,7 +119,10 @@ func NewChain(
 		Logger: logger,
 	}
 
+	certStorePath := filepath.Join(filepath.Dir(walDir), "certstore")
+
 	c := &BFTChain{
+		certStore:         newCertStore(certStorePath),
 		RuntimeConfig:     &atomic.Value{},
 		Channel:           support.ChannelID(),
 		Config:            config,
@@ -206,6 +212,7 @@ func bftSmartConsensusBuild(
 		selfID:          rtc.id,
 		BlockToDecision: c.blockToDecision,
 		OnCommit: func(block *cb.Block) types.Reconfig {
+			defer IndexIdentitiesInTransactions(block.Data.Data, c.certStore.Insert)
 			c.pruneCommittedRequests(block)
 			return c.updateRuntimeConfig(block)
 		},
@@ -228,6 +235,18 @@ func bftSmartConsensusBuild(
 		Logger:          flogging.MustGetLogger("orderer.consensus.smartbft.assembler").With(channelDecorator),
 	}
 
+	egress := &Egress{
+		RuntimeConfig: c.RuntimeConfig,
+		Channel:       c.support.ChannelID(),
+		Logger:        flogging.MustGetLogger("orderer.consensus.smartbft.egress").With(channelDecorator),
+		RPC: &cluster.RPC{
+			Logger:        flogging.MustGetLogger("orderer.consensus.smartbft.rpc").With(channelDecorator),
+			Channel:       c.support.ChannelID(),
+			StreamsByType: cluster.NewStreamsByType(),
+			Comm:          c.Comm,
+			Timeout:       5 * time.Minute, // Externalize configuration
+		},
+	}
 	consensus := &smartbft.Consensus{
 		Config:   c.Config,
 		Logger:   logger,
@@ -258,17 +277,10 @@ func bftSmartConsensusBuild(
 		Assembler:         c.assembler,
 		RequestInspector:  requestInspector,
 		Synchronizer:      sync,
-		Comm: &Egress{
-			RuntimeConfig: c.RuntimeConfig,
-			Channel:       c.support.ChannelID(),
-			Logger:        flogging.MustGetLogger("orderer.consensus.smartbft.egress").With(channelDecorator),
-			RPC: &cluster.RPC{
-				Logger:        flogging.MustGetLogger("orderer.consensus.smartbft.rpc").With(channelDecorator),
-				Channel:       c.support.ChannelID(),
-				StreamsByType: cluster.NewStreamsByType(),
-				Comm:          c.Comm,
-				Timeout:       5 * time.Minute, // Externalize configuration
-			},
+		Comm: &egressWrapper{
+			Comm:   egress,
+			lookup: c.certStore.Lookup,
+			logger: c.Logger,
 		},
 		Scheduler:         time.NewTicker(time.Second).C,
 		ViewChangerTicker: time.NewTicker(time.Second).C,
@@ -377,6 +389,8 @@ func (c *BFTChain) Deliver(proposal types.Proposal, signatures []types.Signature
 	if err != nil {
 		c.Logger.Panicf("failed to read proposal, err: %s", err)
 	}
+
+	defer IndexIdentitiesInTransactions(block.Data.Data, c.certStore.Insert)
 
 	var sigs []*cb.MetadataSignature
 	var ordererBlockMetadata []byte
@@ -549,7 +563,52 @@ func (c *BFTChain) blockToDecision(block *cb.Block) *types.Decision {
 // HandleMessage handles the message from the sender
 func (c *BFTChain) HandleMessage(sender uint64, m *smartbftprotos.Message) {
 	c.Logger.Debugf("Message from %d", sender)
+
+	if !c.validPrePrepareOrNotPrePrepare(sender, m) {
+		return
+	}
+
 	c.consensus.HandleMessage(sender, m)
+}
+
+func (c *BFTChain) validPrePrepareOrNotPrePrepare(sender uint64, m *smartbftprotos.Message) bool {
+	if prp := m.GetPrePrepare(); prp != nil {
+		block, err := ProposalToBlock(types.Proposal{
+			Header:               prp.Proposal.Header,
+			Payload:              prp.Proposal.Payload,
+			Metadata:             prp.Proposal.Metadata,
+			VerificationSequence: int64(prp.Proposal.VerificationSequence),
+		})
+
+		if err != nil {
+			c.Logger.Warnf("Failed parsing pre-prepare from %d: %v", sender, err)
+			return false
+		}
+
+		data, err := UncompressTransactions(block.Data.Data, func(k []byte) ([]byte, bool) {
+			val, exists, err := c.certStore.Lookup(k)
+			if err != nil {
+				c.Logger.Panicf("Failed looking up key %s: %v", hex.EncodeToString(k), err)
+			}
+			return val, exists
+		})
+
+		if err != nil {
+			c.Logger.Warnf("Failed de-compressing pre-prepare from %d: %v", sender, err)
+			return false
+		}
+
+		block.Data.Data = data
+
+		tuple := &ByteBufferTuple{
+			A: protoutil.MarshalOrPanic(block.Data),
+			B: protoutil.MarshalOrPanic(block.Metadata),
+		}
+
+		prp.Proposal.Payload = tuple.ToBytes()
+	}
+
+	return true
 }
 
 // HandleRequest handles the request from the sender
@@ -658,4 +717,49 @@ func (c *chainACL) Evaluate(signatureSet []*protoutil.SignedData) error {
 		return errors.Wrap(errors.WithStack(msgprocessor.ErrPermissionDenied), err.Error())
 	}
 	return nil
+}
+
+type egressWrapper struct {
+	api.Comm
+	lookup func([]byte) ([]byte, bool, error)
+	logger *flogging.FabricLogger
+}
+
+func (e *egressWrapper) SendConsensus(targetID uint64, m *smartbftprotos.Message) {
+	if prp := m.GetPrePrepare(); prp != nil {
+
+		block, err := ProposalToBlock(types.Proposal{
+			Header:   prp.Proposal.Header,
+			Payload:  prp.Proposal.Payload,
+			Metadata: prp.Proposal.Metadata,
+		})
+
+		if err != nil {
+			e.logger.Panicf("Failed converting proposal to block: %v", err)
+			return
+		}
+
+		data, err := CompressTransactions(block.Data.Data, func(k []byte) bool {
+			_, exists, err := e.lookup(k)
+			if err != nil {
+				e.logger.Panicf("Failed looking up %s: %v", hex.EncodeToString(k), err)
+			}
+
+			return exists
+		})
+		if err != nil {
+			e.logger.Panicf("Failed compressing transaction: %v", err)
+		}
+
+		block.Data.Data = data
+
+		tuple := &ByteBufferTuple{
+			A: protoutil.MarshalOrPanic(block.Data),
+			B: protoutil.MarshalOrPanic(block.Metadata),
+		}
+
+		prp.Proposal.Payload = tuple.ToBytes()
+	}
+
+	e.Comm.SendConsensus(targetID, m)
 }

@@ -14,6 +14,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/SmartBFT-Go/consensus/pkg/types"
 	"github.com/SmartBFT-Go/consensus/smartbftprotos"
@@ -505,4 +506,283 @@ func createSmartBftConfig(odrdererConfig channelconfig.Orderer) (*smartbft.Optio
 	configOptions.RequestBatchMaxCount = uint64(batchSize.MaxMessageCount)
 	configOptions.RequestBatchMaxBytes = uint64(batchSize.AbsoluteMaxBytes)
 	return configOptions, nil
+}
+
+func CompressTransactions(rawEnvelopes [][]byte, inIndex func(k []byte) bool) ([][]byte, error) {
+	res := make([][]byte, len(rawEnvelopes))
+	errors := make([]error, len(rawEnvelopes))
+
+	var wg sync.WaitGroup
+	wg.Add(len(rawEnvelopes))
+
+	for i, rawEnvelope := range rawEnvelopes {
+		go func(i int, rawEnvelope []byte) {
+			defer wg.Done()
+
+			env, payload, err, sh, chdr, errFound := unwrapTx(i, rawEnvelope, errors)
+			if errFound {
+				return
+			}
+
+			compressTx(chdr, res, i, rawEnvelope, sh, inIndex, payload, err, errors, env)
+
+		}(i, rawEnvelope)
+	}
+
+	wg.Wait()
+
+	for i, err := range errors {
+		if err != nil {
+			return nil, fmt.Errorf("failed compressing transaction %d: %v", i, err)
+		}
+	}
+
+	return res, nil
+
+}
+
+func compressTx(chdr *cb.ChannelHeader, res [][]byte, i int, rawEnvelope []byte, sh *cb.SignatureHeader, inIndex func(k []byte) bool, payload *cb.Payload, err error, errors []error, env *cb.Envelope) {
+	if cb.HeaderType(chdr.Type) != cb.HeaderType_ENDORSER_TRANSACTION {
+		res[i] = rawEnvelope
+		return
+	}
+
+	dig := sha256.Sum256(sh.Creator)
+	if inIndex(dig[:]) {
+		sh.Creator = dig[:]
+	}
+
+	// Fold the identity back into the transaction
+	payload.Header.SignatureHeader = protoutil.MarshalOrPanic(sh)
+
+	tx, err := protoutil.UnmarshalTransaction(payload.Data)
+	if err != nil {
+		errors[i] = err
+		return
+	}
+
+	ccPayload, err := protoutil.UnmarshalChaincodeActionPayload(tx.Actions[0].Payload)
+	if err != nil {
+		errors[i] = err
+		return
+	}
+
+	if ccPayload.Action == nil {
+		return
+	}
+
+	for _, endorsement := range ccPayload.Action.Endorsements {
+		dig := sha256.Sum256(endorsement.Endorser)
+
+		if inIndex(dig[:]) {
+			endorsement.Endorser = dig[:]
+		}
+
+	}
+
+	// Fold endorsers back into the payload
+	tx.Actions[0].Payload = protoutil.MarshalOrPanic(ccPayload)
+	payload.Data = protoutil.MarshalOrPanic(tx)
+	env.Payload = protoutil.MarshalOrPanic(payload)
+	res[i] = protoutil.MarshalOrPanic(env)
+}
+
+func UncompressTransactions(rawEnvelopes [][]byte, index func(k []byte) ([]byte, bool)) ([][]byte, error) {
+	res := make([][]byte, len(rawEnvelopes))
+	errors := make([]error, len(rawEnvelopes))
+
+	var wg sync.WaitGroup
+	wg.Add(len(rawEnvelopes))
+
+	for i, rawEnvelope := range rawEnvelopes {
+		go func(i int, rawEnvelope []byte) {
+			defer wg.Done()
+
+			env, payload, err, sh, chdr, errFound := unwrapTx(i, rawEnvelope, errors)
+			if errFound {
+				return
+			}
+
+			unCompressTx(i, rawEnvelope, chdr, res, sh, index, errors, payload, err, env)
+
+		}(i, rawEnvelope)
+	}
+
+	wg.Wait()
+
+	for i, err := range errors {
+		if err != nil {
+			return nil, fmt.Errorf("failed uncompressing transaction %i: %v", i, err)
+		}
+	}
+
+	return res, nil
+
+}
+
+func unCompressTx(i int, rawEnvelope []byte, chdr *cb.ChannelHeader, res [][]byte, sh *cb.SignatureHeader, index func(k []byte) ([]byte, bool), errors []error, payload *cb.Payload, err error, env *cb.Envelope) {
+	if cb.HeaderType(chdr.Type) != cb.HeaderType_ENDORSER_TRANSACTION {
+		res[i] = rawEnvelope
+		return
+	}
+
+	if len(sh.Creator) == 32 {
+		actualCreator, found := index(sh.Creator)
+		if !found {
+			errors[i] = fmt.Errorf("failed finding creator identity of %s", hex.EncodeToString(sh.Creator))
+			return
+		}
+		sh.Creator = actualCreator
+
+		// Fold the identity back into the transaction
+		payload.Header.SignatureHeader = protoutil.MarshalOrPanic(sh)
+	}
+
+	tx, err := protoutil.UnmarshalTransaction(payload.Data)
+	if err != nil {
+		errors[i] = err
+		return
+	}
+
+	ccPayload, err := protoutil.UnmarshalChaincodeActionPayload(tx.Actions[0].Payload)
+	if err != nil {
+		errors[i] = err
+		return
+	}
+
+	if ccPayload.Action == nil {
+		errors[i] = fmt.Errorf("action of transaction %d is nil", i)
+		return
+	}
+
+	for _, endorsement := range ccPayload.Action.Endorsements {
+		if len(endorsement.Endorser) == 32 {
+			actualEndorser, found := index(endorsement.Endorser)
+			if !found {
+				errors[i] = fmt.Errorf("failed finding endorser identity of %s", hex.EncodeToString(sh.Creator))
+				return
+			}
+			endorsement.Endorser = actualEndorser
+		}
+	}
+
+	// Fold endorsers back into the payload
+	tx.Actions[0].Payload = protoutil.MarshalOrPanic(ccPayload)
+	payload.Data = protoutil.MarshalOrPanic(tx)
+	env.Payload = protoutil.MarshalOrPanic(payload)
+
+	res[i] = protoutil.MarshalOrPanic(env)
+}
+
+func unwrapTx(i int, rawEnvelope []byte, errors []error) (*cb.Envelope, *cb.Payload, error, *cb.SignatureHeader, *cb.ChannelHeader, bool) {
+	env := &cb.Envelope{}
+	if err := proto.Unmarshal(rawEnvelope, env); err != nil {
+		errors[i] = err
+		return nil, nil, nil, nil, nil, true
+	}
+
+	payload, err := protoutil.UnmarshalPayload(env.Payload)
+	if err != nil {
+		errors[i] = err
+		return nil, nil, nil, nil, nil, true
+	}
+
+	if payload.Header == nil {
+		errors[i] = fmt.Errorf("header is nil")
+		return nil, nil, nil, nil, nil, true
+	}
+
+	sh, err := protoutil.UnmarshalSignatureHeader(payload.Header.SignatureHeader)
+	if err != nil {
+		errors[i] = err
+		return nil, nil, nil, nil, nil, true
+	}
+
+	chdr, err := protoutil.ChannelHeader(env)
+	if err != nil {
+		errors[i] = err
+		return nil, nil, nil, nil, nil, true
+	}
+
+	return env, payload, err, sh, chdr, false
+}
+
+func IndexIdentitiesInTransactions(rawEnvelopes [][]byte, index func(k, v [][]byte)) {
+	var s sync.Map
+	var wg sync.WaitGroup
+	wg.Add(len(rawEnvelopes))
+
+	for _, tx := range rawEnvelopes {
+		go func(tx []byte) {
+			defer wg.Done()
+			indexTx(tx, &s)
+		}(tx)
+	}
+
+	wg.Wait()
+
+	keys := make([][]byte, 0, len(rawEnvelopes))
+	values := make([][]byte, 0, len(rawEnvelopes))
+
+	s.Range(func(k, v any) bool {
+		keys = append(keys, []byte(k.(string)))
+		values = append(values, v.([]byte))
+		return true
+	})
+
+	index(keys, values)
+}
+
+func indexTx(rawEnvelope []byte, s *sync.Map) {
+	env := &cb.Envelope{}
+	if err := proto.Unmarshal(rawEnvelope, env); err != nil {
+		return
+	}
+
+	payload, err := protoutil.UnmarshalPayload(env.Payload)
+	if err != nil {
+		return
+	}
+
+	if payload.Header == nil {
+		return
+	}
+
+	chdr, err := protoutil.ChannelHeader(env)
+	if err != nil {
+		return
+	}
+
+	if cb.HeaderType(chdr.Type) != cb.HeaderType_ENDORSER_TRANSACTION {
+		return
+	}
+
+	sh, err := protoutil.UnmarshalSignatureHeader(payload.Header.SignatureHeader)
+	if err != nil {
+		return
+	}
+
+	digest := sha256.Sum256(sh.Creator)
+
+	s.Store(string(digest[:]), sh.Creator)
+
+	tx, err := protoutil.UnmarshalTransaction(payload.Data)
+	if err != nil {
+		return
+	}
+
+	ccPayload, err := protoutil.UnmarshalChaincodeActionPayload(tx.Actions[0].Payload)
+	if err != nil {
+		return
+	}
+
+	if ccPayload.Action == nil {
+		return
+	}
+
+	for _, endorsement := range ccPayload.Action.Endorsements {
+		digest := sha256.Sum256(endorsement.Endorser)
+
+		s.Store(string(digest[:]), endorsement.Endorser)
+	}
 }
