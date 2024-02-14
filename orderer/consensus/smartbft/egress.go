@@ -49,6 +49,9 @@ func (e *Egress) Nodes() []uint64 {
 
 // SendConsensus sends the BFT message to the cluster
 func (e *Egress) SendConsensus(targetID uint64, m *protos.Message) {
+	if prp := m.GetPrePrepare(); prp != nil {
+		m = compressProposal(m)
+	}
 	err := e.RPC.SendConsensus(targetID, bftMsgToClusterMsg(m, e.Channel))
 	if err != nil {
 		e.Logger.Warnf("Failed sending to %d: %v", targetID, err)

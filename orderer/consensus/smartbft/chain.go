@@ -548,6 +548,9 @@ func (c *BFTChain) blockToDecision(block *cb.Block) *types.Decision {
 
 // HandleMessage handles the message from the sender
 func (c *BFTChain) HandleMessage(sender uint64, m *smartbftprotos.Message) {
+	if prp := m.GetPrePrepare(); prp != nil {
+		m = decompressProposal(m)
+	}
 	c.Logger.Debugf("Message from %d", sender)
 	c.consensus.HandleMessage(sender, m)
 }
