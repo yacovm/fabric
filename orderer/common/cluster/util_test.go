@@ -9,11 +9,13 @@ package cluster_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"math"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -757,25 +759,63 @@ func TestBlockVerifierBuilderNoConfigBlock(t *testing.T) {
 	require.ErrorContains(t, verifier(nil, md), "initialized with an invalid config block: channelconfig Config cannot be nil")
 }
 
-func TestBlockVerifierFunc(t *testing.T) {
-	block := sampleConfigBlock()
-	bvfunc := cluster.BlockVerifierBuilder(&mocks.BCCSP{})
+func generateCertificatesSmartBFT(confAppSmartBFT *genesisconfig.Profile, certDir string, certs ...string) error {
+	for i, c := range confAppSmartBFT.Orderer.ConsenterMapping {
+		c.MSPID = "SampleOrg"
+		cert := filepath.Join(certDir, certs[i])
+		c.Identity = cert
+		c.ServerTLSCert = cert
+		c.ClientTLSCert = cert
+	}
 
-	verifier := bvfunc(block)
+	return nil
+}
+
+func TestBlockVerifierFunc(t *testing.T) {
+	//block := sampleConfigBlock()
+
+	certPath := filepath.Join("testdata", "blockverification", "msp", "signcerts")
+
+	conf := genesisconfig.Load(genesisconfig.SampleAppChannelSmartBftProfile, filepath.Join("testdata", "blockverification"))
+	err := generateCertificatesSmartBFT(conf, certPath, "peer.pem", "orderer.example.com-cert.pem", "peer0.org1.example.com-cert.pem", "peer0.org2.example.com-cert.pem")
+	require.NoError(t, err)
+
+	flogging.ActivateSpec("debug")
+
+	gb := encoder.New(conf).GenesisBlockForChannel("foo")
+
+	bc := &mocks.BCCSP{}
+	bc.VerifyReturns(true, nil)
+	bc.GetHashReturns(sha256.New(), nil)
+	bc.HashStub = func(msg []byte, _ bccsp.HashOpts) ([]byte, error) {
+		dig := sha256.Sum256(msg)
+		return dig[:], nil
+	}
+	bvfunc := cluster.BlockVerifierBuilder(bc)
+
+	verifier := bvfunc(gb)
 
 	header := &common.BlockHeader{}
 	md := &common.BlockMetadata{
 		Metadata: [][]byte{
 			protoutil.MarshalOrPanic(&common.Metadata{Signatures: []*common.MetadataSignature{
 				{
-					Signature:        []byte{},
+					Signature:        []byte{1},
 					IdentifierHeader: protoutil.MarshalOrPanic(&common.IdentifierHeader{Identifier: 1}),
+				},
+				{
+					Signature:        []byte{2},
+					IdentifierHeader: protoutil.MarshalOrPanic(&common.IdentifierHeader{Identifier: 2}),
+				},
+				{
+					Signature:        []byte{3},
+					IdentifierHeader: protoutil.MarshalOrPanic(&common.IdentifierHeader{Identifier: 3}),
 				},
 			}}),
 		},
 	}
 
-	err := verifier(header, md)
+	err = verifier(header, md)
 	require.NoError(t, err)
 }
 
@@ -812,6 +852,9 @@ func sampleConfigBlock() *common.Block {
 									},
 									Groups: map[string]*common.ConfigGroup{
 										"Orderer": {
+											Groups: map[string]*common.ConfigGroup{
+												"SampleOrg": {},
+											},
 											Policies: map[string]*common.ConfigPolicy{
 												"BlockValidation": {
 													Policy: &common.Policy{
@@ -847,7 +890,7 @@ func sampleConfigBlock() *common.Block {
 																Id:       1,
 																Host:     "host1",
 																Port:     8001,
-																MspId:    "msp1",
+																MspId:    "SampleOrg",
 																Identity: []byte("identity1"),
 															},
 														},
